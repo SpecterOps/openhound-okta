@@ -10,6 +10,7 @@ output
 graph
 logs
 .vscode
+docs/official-docs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
