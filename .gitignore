@@ -12,6 +12,9 @@ logs
 .vscode
 docs/official-docs/
 
+# Codex
+.codex
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
