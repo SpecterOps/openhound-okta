@@ -4,6 +4,35 @@ User objects (AKA People) represent individuals who have access to the Okta orga
 
 In `OktaHound`, users are represented as `Okta_User` nodes.
 
+## Sample Property Values
+
+```yaml
+id: 00uw2sodn4ZPJJQyx697
+name: john.doe@contoso.com
+displayName: John Doe
+oktaDomain: contoso.okta.com
+login: john.doe@contoso.com
+email: john.doe@contoso.com
+firstName: John
+lastName: Doe
+title: Senior Identity Engineer
+department: Security Engineering
+city: Seattle
+state: WA
+countryCode: US
+status: ACTIVE
+enabled: true
+hasRoleAssignments: false
+credentialProviderName: OKTA
+credentialProviderType: OKTA
+managerId: joe.smith@contoso.com
+created: 2025-10-03T18:45:57+00:00
+activated: 2025-10-03T19:02:11+00:00
+passwordChanged: 2026-01-12T14:27:03+00:00
+lastLogin: 2026-02-20T09:41:55+00:00
+lastUpdated: 2025-10-29T11:09:47+00:00
+```
+
 ## User Status
 
 User status can have [multiple values](https://developer.okta.com/docs/api/openapi/okta-management/management/tag/User), as illustrated below:

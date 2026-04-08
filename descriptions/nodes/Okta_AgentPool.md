@@ -17,3 +17,14 @@ The following agent pool types are supported by Okta:
 The most common agent pool type is the Active Directory (AD) Agent Pool, which consists of one or more AD Agents that facilitate bi-directional object synchronization between Okta and on-premises Active Directory environments.
 
 ![Okta AD Agent Pools displayed in BloodHound](../Images/bloodhound-ad-agent-pool.png)
+
+## Sample Property Values
+
+```yaml
+id: 0oaxg9rhdd7ncGCXv697_pool
+name: contoso.local
+displayName: contoso.local
+oktaDomain: contoso.okta.com
+operationalStatus: DISRUPTED
+type: AD
+```

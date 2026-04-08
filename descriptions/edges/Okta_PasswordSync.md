@@ -1,10 +1,28 @@
 ## General Information
 
-The traversable `Okta_PasswordSync` edge represents password synchronization between Okta users across organizations in Org2Org setups.
-This indicates that credentials are synchronized from a source Okta user to a target Okta user.
+The traversable `Okta_PasswordSync` edge represents password synchronization between user accounts. This indicates that credentials are synchronized from a source user to a target user.
 
-> ![WARNING]
+In **Active Directory** hybrid setups, this edge is created between `User` (AD) and `Okta_User` when delegated authentication or password push is enabled.
+In **Org2Org** setups, this edge is created between `Okta_User` nodes across organizations when password synchronization is configured.
+
+> [!WARNING]
 > The Okta API does not indicate if the actual password or a randomly generated value is pushed to the other organization.
+
+### Active Directory Hybrid
+
+```mermaid
+graph LR
+    subgraph ad["Active Directory"]
+        adu1("User john\@contoso.com")
+    end
+    subgraph okta["Okta"]
+        u1("Okta_User john\@contoso.com")
+        adu1 -->|Okta_PasswordSync| u1
+        adu1 .->|Okta_UserSync| u1
+    end
+```
+
+### Org2Org
 
 ```mermaid
 graph LR

@@ -6,3 +6,19 @@ In `OktaHound`, Okta Realms are represented as `Okta_Realm` nodes.
 
 > [!WARNING]
 > Okta Realms are currently not supported by `OktaHound` due to licensing restrictions.
+
+## Sample Property Values
+
+```yaml
+id: guor3k19x7pVQ6Abc0g7
+name: Car Co
+displayName: Car Co
+oktaDomain: contoso.okta.com
+type: PARTNER
+isDefault: false
+domains:
+  - atko.com
+  - user.com
+created: 2025-06-01T08:00:00.0000000+00:00
+lastUpdated: 2026-02-20T07:45:12.0000000+00:00
+```

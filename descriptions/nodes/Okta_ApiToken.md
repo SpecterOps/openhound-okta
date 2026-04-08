@@ -7,3 +7,19 @@ These tokens are always associated with a specific user in Okta, and the permiss
 The use of API tokens is generally discouraged in favor of OAuth 2.0 access tokens, as they provide better security and flexibility. However, API tokens are still widely used by Okta customers.
 
 In `OktaHound`, API tokens are represented as `Okta_ApiToken` nodes.
+
+## Sample Property Values
+
+```yaml
+id: 00T36fk75smeJybKx697
+name: Postman
+displayName: Postman
+oktaDomain: contoso.okta.com
+userId: 00uw0o8iizq37KgKP697
+clientName: Okta API
+created: 2025-10-03T10:08:09+00:00
+lastUpdated: 2026-01-31T20:22:42+00:00
+expiresAt: 2026-03-02T20:22:42+00:00
+networkConnection: ANYWHERE
+tokenWindow: 30.00:00:00
+```

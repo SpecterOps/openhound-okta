@@ -6,6 +6,150 @@ With the exception of API Service applications, Okta users and groups can be ass
 
 In `OktaHound`, applications are represented as `Okta_Application` nodes.
 
+## Sample Property Values
+
+### Github Cloud
+
+```yaml
+id: 0oawyp12cjglrkfId697
+name: Github Contoso
+appType: githubcloud
+displayName: Github Contoso
+features: []
+githubOrg: Contoso
+hasRoleAssignments: false
+oktaDomain: contoso.okta.com
+signOnMode: SAML_2_0
+status: ACTIVE
+userNameMapping: ${source.login}
+created: 2025-10-31T06:08:00+00:00
+lastUpdated: 2025-10-31T06:08:01+00:00
+```
+
+### Google Workspace
+
+```yaml
+id: 0oax4r57x0V5NHL2W697
+afwOnly: false
+appType: google
+displayName: Google Workspace
+domain: contoso.com
+features: []
+hasRoleAssignments: false
+name: Google Workspace
+oktaDomain: contoso.okta.com
+signOnMode: SAML_2_0
+status: ACTIVE
+userNameMapping: ${source.login}
+created: 2025-11-05T09:06:48+00:00
+lastUpdated: 2025-11-05T09:07:21+00:00
+```
+
+### Jamf Pro SAML
+
+```yaml
+id: 0oax4r3ud0J2WjlNh697
+appType: jamfsoftwareserver
+displayName: Jamf Pro SAML
+domain: contoso.jamfcloud.com
+features: []
+hasRoleAssignments: false
+name: Jamf Pro SAML
+oktaDomain: contoso.okta.com
+signOnMode: SAML_2_0
+status: ACTIVE
+userNameMapping: ${source.login}
+created: 2025-11-05T09:10:52+00:00
+lastUpdated: 2026-01-19T14:33:39+00:00
+```
+
+### OktaHound
+
+```yaml
+id: 0oaw0pujq5WtBiMYD697
+name: OktaHound
+appType: oidc_client
+clientType: service
+displayName: OktaHound
+features: []
+grantTypes:
+  - client_credentials
+hasRoleAssignments: true
+oauthScopes:
+  - okta.trustedOrigins.read
+  - okta.policies.read
+  - okta.linkedObjects.read
+  - okta.authModes.read
+  - okta.templates.read
+  - okta.apiTokens.read
+  - okta.factors.read
+  - okta.brands.read
+  - okta.authenticators.read
+  - okta.uischemas.read
+  - okta.logs.read
+  - okta.groups.read
+  - okta.identitySources.read
+  - okta.users.read
+  - okta.orgs.read
+  - okta.threatInsights.read
+  - okta.pushProviders.read
+  - okta.apps.read
+  - ssf.read
+  - okta.roles.read
+  - okta.networkZones.read
+  - okta.emailDomains.read
+  - okta.manifests.read
+  - okta.oauthIntegrations.read
+  - okta.domains.read
+  - okta.deviceAssurance.read
+  - okta.reports.read
+  - okta.authorizationServers.read
+  - okta.enduser.read
+  - okta.schemas.read
+  - okta.idps.read
+  - okta.agentPools.read
+  - okta.appGrants.read
+  - okta.inlineHooks.read
+  - okta.certificateAuthorities.read
+  - okta.devices.read
+  - okta.behaviors.read
+  - okta.profileMappings.read
+  - okta.captchas.read
+  - okta.clients.read
+  - okta.features.read
+  - okta.sessions.read
+  - okta.userTypes.read
+oktaDomain: integrator-5415459.okta.com
+signOnMode: OPENID_CONNECT
+status: ACTIVE
+userNameMapping: ${source.login}
+created: 2025-10-02T10:11:20+00:00
+lastUpdated: 2025-10-02T10:26:27+00:00
+```
+
+### Active Directory Integration
+
+```yaml
+id: 0oaxg9rhdd7ncGCXv697
+name: contoso.local
+appType: active_directory
+displayName: contoso.local
+domainSid: S-1-5-21-71365889-924527929-2677699343
+features:
+  - IMPORT_PROFILE_UPDATES
+  - PROFILE_MASTERING
+  - OUTBOUND_DEL_AUTH
+  - IMPORT_USER_SCHEMA
+  - IMPORT_NEW_USERS
+filterGroupsByOU: false
+hasRoleAssignments: false
+namingContext: contoso.local
+oktaDomain: contoso.okta.com
+status: ACTIVE
+created: 2025-11-14T12:50:42+00:00
+lastUpdated: 2026-01-31T15:12:24+00:00
+```
+
 ## User Name Mapping
 
 User name mapping from Okta to SAML 2.0, OpenID Connect (OIDC), and Secure Web Authentication (SWA) applications is configurable in the Okta Admin Console, with the default setting being the Okta username pass-through, i.e., `${source.login}`.
@@ -61,8 +205,8 @@ graph TB
     org -- Okta_Contains --> g1
     u1 -- Okta_MemberOf --> g1
     u2 -- Okta_AppAdmin --> gha
-    g1 -- Okta_AppAssignment --> gha
-    u1 -- Okta_AppAssignment --> jmfa
+    g1 -. Okta_AppAssignment .-> gha
+    u1 -. Okta_AppAssignment .-> jmfa
   end
   subgraph gh["GitHub Enterprise Cloud"]
     direction LR
@@ -75,11 +219,107 @@ graph TB
     jamft("jamf_SSOIntegration contoso.jamfcloud.com-SSO")
     jmfu1("jamf_Account john\@contoso.com")
   end
-  adu1 -- Okta_UserSync --> u1
-  adu2 -- Okta_UserSync --> u2
+  adu1 -. Okta_UserSync .-> u1
+  adu2 -. Okta_UserSync .-> u2
   adg1 -- Okta_MembershipSync --> g1
   gha -- Okta_OutboundOrgSSO --> ghorg
   jmfa -- Okta_OutboundOrgSSO --> jamft
   u1 -- Okta_OutboundSSO --> ghu1
   u1 -- Okta_OutboundSSO --> jmfu1
 ```
+
+### Active Directory Synchronization
+
+When Okta's Active Directory (AD) integration is configured for user and group synchronization,
+the connected AD domain is represented as an `Okta_Application` node in BloodHound.
+This allows you to visualize the AD-backed application alongside other applications in your Okta environment and understand its relationships with users, groups, and roles.
+
+The synchronization is performed by domain-joined servers with the Okta AD Agent installed.
+This agent typically has Domain Admin privileges in the connected AD domain to perform user and group enumeration and synchronization,
+making it a high-value target for attackers.
+
+![Okta AD agent settings](../Images/okta-ad-agent.png)
+
+Authentication can be delegated from Okta to AD in multiple ways:
+
+- [Agentless Desktop SSO](https://help.okta.com/oie/en-us/content/topics/directory/ad-dsso-about-workflow.htm)
+- [Password Synchronization](https://help.okta.com/oie/en-us/content/topics/directory/installing_configuring_active_directory_password_sync_agent.htm)
+- Active Directory Federation Services (ADFS) integration with Okta as a SAML IdP
+
+> [!WARNING]
+> There is no documented API available to determine the authentication delegation method(s) configured for an AD-backed Okta application.
+> OktaHound therefore performs some heuristics that might not be 100% accurate in all cases.
+
+### GitHub Enterprise Cloud Organizations
+
+When integrating Okta with GitHub Enterprise Cloud, each GitHub organization connected to Okta is represented as a separate `Okta_Application` node in BloodHound.
+
+![Properties of the GitHub Application node](../Images/bloodhound-github-properties.png)
+
+### Jamf Pro
+
+When integrating Okta with Jamf Pro using SAML 2.0, each Jamf Pro instance connected to Okta is represented as a separate `Okta_Application` node in BloodHound.
+The differentiator is the `domainFQDN` property:
+
+![Jamf Pro SAML application in BloodHound](../Images/bloodhound-jamf-saml-properties.png)
+
+It is also possible to integrate Jamf Pro with Okta using Secure Web Authentication (SWA), but this option is less secure.
+
+![Jamf Pro SWA settings](../Images/app-jamf-swa.png)
+
+## Google Workspace
+
+Similarly to the Jamf Pro SAML applications, each Google Workspace (formerly G Suite) instance connected to Okta using SAML 2.0 is represented as a separate `Okta_Application` node in BloodHound and is identified by the `domainFQDN` property:
+
+![Google Workspace SAML application in BloodHound](../Images/bloodhound-google-saml-properties.png)
+
+The SAML 2.0 protocol should always be preferred to SWA when integrating Okta with Google Workspace:
+
+![Google Workspace sign-in protocol settings](../Images/app-google-protocol-selector.png)
+
+## Generic SAML 2.0 Applications
+
+The assertion consumer service (ACS) URLs of generic (non-Catalog) Okta SAML 2.0 applications are exposed via the `url` attribute in BloodHound.
+
+![Okta SAML application in BloodHound](../Images/bloodhound-app-saml.png)
+
+## Generic Secure Web Authentication (SWA) Applications
+
+Secure Web Authentication (SWA) is an Okta technology that provides Single Sign-On (SSO) functionality to external web applications that don't support federated protocols. SWA applications store user credentials in Okta and automatically fill them in when users access the application through the Okta dashboard.
+
+The app's login page URL is exposed via the `url` attribute in BloodHound.
+
+![Okta SWA application in BloodHound](../Images/bloodhound-app-swa.png)
+
+## Generic OpenID Connect (OIDC) Applications
+
+Okta supports three types of OIDC applications:
+
+- Web Application
+- Single-Page Application (SPA)
+- Native Application
+
+The default redirect URI of generic (non-Catalog) Okta OIDC single-page applications (SPAs) starts with `http://localhost:8080/`, making it hard to identify the actual application address. The optional Okta-initiated sign-in flow URL is therefore exposed in the `url` attribute in BloodHound instead, if configured.
+
+OIDC applications can be granted OAuth 2.0 scopes to access Okta APIs on behalf of users:
+
+![Okta application OIDC grants](../Images/app-oidc-grants.png)
+
+## SCIM-Enabled Applications
+
+The `features` attribute of `Okta_Application` nodes may contain the following SCIM-related values,
+indicating if SCIM is enabled and which protocol capabilities are supported:
+
+| Feature                      | Description                                                                    |
+|------------------------------|--------------------------------------------------------------------------------|
+| PUSH_NEW_USERS               | Supports pushing new users from Okta to the application                        |
+| PUSH_PASSWORD_UPDATES        | Supports pushing password updates from Okta to the application                 |
+| PUSH_PENDING_USERS           | Supports pushing users from Okta to the application in pending state          |
+| PUSH_PROFILE_UPDATES         | Supports pushing profile updates from Okta to the application                  |
+| PUSH_USER_DEACTIVATION       | Supports pushing user deactivation from Okta to the application                |
+| REACTIVATE_USERS             | Supports reactivating users in the application from Okta                       |
+| IMPORT_NEW_USERS             | Supports importing new users into Okta from the application                    |
+| OPP_SCIM_INCREMENTAL_IMPORTS | Supports incremental imports of users from the application into Okta           |
+| IMPORT_PROFILE_UPDATES       | Updates a linked user's app profile in Okta during manual or scheduled imports |
+| GROUP_PUSH                   | Supports pushing groups and group memberships from Okta to the application     |
+| PROFILE_MASTERING            | Supports profile mastering in Okta, allowing the application to be the source of truth for user profiles |

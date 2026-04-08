@@ -13,3 +13,15 @@ Client secrets are represented as `Okta_ClientSecret` nodes in BloodHound.
 > [!NOTE]
 > For security reasons, the OktaHound collector does not write cleartext client secrets
 > to the OpenGraph JSON, only their hashed identifiers.
+
+## Sample Property Values
+
+```yaml
+id: ocsxqwizfyqsf0aVG697
+name: T1e6fl4jGqvPkgd94NKx5g
+displayName: T1e6fl4jGqvPkgd94NKx5g
+oktaDomain: contoso.okta.com
+status: ACTIVE
+created: 2025-11-24T12:24:08.000Z
+lastUpdated: 2025-11-24T12:24:08.000Z
+```
