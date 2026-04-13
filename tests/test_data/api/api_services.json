@@ -1,0 +1,38 @@
+[
+  {
+    "id": "0oa72lrepvp4WqEET1d9",
+    "type": "my_app_cie",
+    "name": "My App Cloud Identity Engine",
+    "createdAt": "2023-02-21T20:08:24.000Z",
+    "createdBy": "00uu3u0ujW1P6AfZC2d5",
+    "configGuideUrl": "https://{docDomain}/my-app-cie/configuration-guide",
+    "grantedScopes": [
+      "okta.logs.read",
+      "okta.groups.read",
+      "okta.users.read"
+    ],
+    "_links": {
+      "self": {
+        "href": "https://{yourOktaDomain}/integrations/api/v1/api-services/0oa72lrepvp4WqEET1d9",
+        "hints": {
+          "allow": [
+            "GET",
+            "DELETE"
+          ]
+        }
+      },
+      "client": {
+        "href": "https://{yourOktaDomain}/oauth2/v1/clients/0oa72lrepvp4WqEET1d9",
+        "hints": {
+          "allow": [
+            "GET"
+          ]
+        }
+      },
+      "logo": {
+        "name": "small",
+        "href": "https://{logoDomain}/{logoPath}/my_app_cie_small_logo"
+      }
+    }
+  }
+]

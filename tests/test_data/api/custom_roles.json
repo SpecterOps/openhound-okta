@@ -1,0 +1,39 @@
+{
+  "roles": [
+    {
+      "id": "cr0Yq6IJxGIr0ouum0g3",
+      "label": "UserCreator",
+      "description": "Create users",
+      "created": "2021-02-06T16:20:57.000Z",
+      "lastUpdated": "2021-02-06T16:20:57.000Z",
+      "_links": {
+        "permissions": {
+          "href": "https://{yourOktaDomain}/api/v1/iam/roles/cr0Yq6IJxGIr0ouum0g3/permissions"
+        },
+        "self": {
+          "href": "https://{yourOktaDomain}/api/v1/iam/roles/cr0Yq6IJxGIr0ouum0g3"
+        }
+      }
+    },
+    {
+      "id": "cr0Fw7HKcWIroo88m3r1",
+      "label": "GroupMembershipManager",
+      "description": "Manage group membership",
+      "created": "2021-02-06T16:20:57.000Z",
+      "lastUpdated": "2021-02-06T16:20:57.000Z",
+      "_links": {
+        "permissions": {
+          "href": "https://{yourOktaDomain}/api/v1/iam/roles/cr0Fw7HKcWIroo88m3r1/permissions"
+        },
+        "self": {
+          "href": "https://{yourOktaDomain}/api/v1/iam/roles/cr0Fw7HKcWIroo88m3r1"
+        }
+      }
+    }
+  ],
+  "_links": {
+    "next": {
+      "href": "https://{yourOktaDomain}/api/v1/iam/roles?after=cr0Fw7HKcWIroo88m3r1"
+    }
+  }
+}

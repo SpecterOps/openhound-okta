@@ -1,0 +1,33 @@
+[
+  {
+    "disruptedAgents": 0,
+    "inactiveAgents": 1,
+    "operationalStatus": "OPERATIONAL",
+    "id": "poolId1",
+    "name": "region1A.dc",
+    "type": "AD",
+    "agents": {
+      "id": "agentId1",
+      "state": "ACTIVE",
+      "message": "Agent connection is live",
+      "indicator": "green",
+      "name": "WIN-region1A-dc",
+      "version": "3.18.0",
+      "upgradeRequired": false,
+      "active": true,
+      "supportAutoUpdate": true,
+      "errorState": true,
+      "isHidden": false,
+      "isLatestGAedVersion": false,
+      "lastConnection": 1628263766000,
+      "operationalStatus": "OPERATIONAL",
+      "poolId": "poolId1",
+      "updateMessage": "Queued for update."
+    },
+    "_links": {
+      "self": {
+        "href": "/api/v1/agentPools/poolId1"
+      }
+    }
+  }
+]

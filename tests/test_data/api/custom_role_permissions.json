@@ -1,0 +1,65 @@
+{
+  "permissions": [
+    {
+      "label": "okta.users.create",
+      "created": "2021-02-06T16:20:57.000Z",
+      "lastUpdated": "2021-02-06T16:20:57.000Z",
+      "_links": {
+        "role": {
+          "href": "https://{yourOktaDomain}/api/v1/iam/roles/cr0Yq6IJxGIr0ouum0g3"
+        },
+        "self": {
+          "href": "https://{yourOktaDomain}/api/v1/iam/roles/cr0Yq6IJxGIr0ouum0g3/permissions/okta.users.create"
+        }
+      }
+    },
+    {
+      "label": "okta.users.read",
+      "created": "2021-02-06T16:20:57.000Z",
+      "lastUpdated": "2021-02-06T16:20:57.000Z",
+      "conditions": {
+        "include": {
+          "okta:ResourceAttribute/User/Profile": [
+            "city",
+            "state",
+            "zipCode"
+          ]
+        }
+      },
+      "_links": {
+        "role": {
+          "href": "https://{yourOktaDomain}/api/v1/iam/roles/cr0Yq6IJxGIr0ouum0g3"
+        },
+        "self": {
+          "href": "https://{yourOktaDomain}/api/v1/iam/roles/cr0Yq6IJxGIr0ouum0g3/permissions/okta.users.read"
+        }
+      }
+    },
+    {
+      "label": "okta.groups.read",
+      "created": "2021-02-06T16:20:57.000Z",
+      "lastUpdated": "2021-02-06T16:20:57.000Z",
+      "_links": {
+        "role": {
+          "href": "https://{yourOktaDomain}/api/v1/iam/roles/cr0Yq6IJxGIr0ouum0g3"
+        },
+        "self": {
+          "href": "https://{yourOktaDomain}/api/v1/iam/roles/cr0Yq6IJxGIr0ouum0g3/permissions/okta.groups.read"
+        }
+      }
+    },
+    {
+      "label": "okta.users.userprofile.manage",
+      "created": "2021-02-06T16:20:57.000Z",
+      "lastUpdated": "2021-02-06T16:20:57.000Z",
+      "_links": {
+        "role": {
+          "href": "https://{yourOktaDomain}/api/v1/iam/roles/cr0Yq6IJxGIr0ouum0g3"
+        },
+        "self": {
+          "href": "https://{yourOktaDomain}/api/v1/iam/roles/cr0Yq6IJxGIr0ouum0g3/permissions/okta.users.userprofile.manage"
+        }
+      }
+    }
+  ]
+}

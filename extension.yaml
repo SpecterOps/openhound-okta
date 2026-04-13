@@ -1,0 +1,40 @@
+name: okta
+version: 0.0.3
+schema_version: v0.0.3
+description: "OpenHound collector for okta using OpenHound"
+authors:
+  - name: Michael Grafnetter
+    email: mgrafnetter@specterops.io
+  - name: jdreijer
+    email: jdreijer@specterops.io
+
+type: local
+license: MIT
+homepage: https://github.com/specterops/openhound-okta
+references:
+  - name: OpenHound
+    url: https://github.com/specterops/openhound
+
+credentials:
+  - name: base_url
+    description: Okta base URL
+    required: true
+  - name: client_id
+    description: Okta app registration client ID
+    required: false
+  - name: private_key_path
+    description: Path to Okta private key
+    required: false
+  - name: private_key_encoded
+    description: Base64 encoded Okta private key
+    required: false
+  - name: token
+    description: Classic Okta API token
+    required: false
+parameters:
+  - name: size
+    description: An example parameter specifying batch size for fetching data
+    required: false
+    default: 10000
+
+tags: [ "okta", "extension", "opengraph", "bloodhound" ]

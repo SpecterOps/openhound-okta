@@ -1,0 +1,26 @@
+JWK = "Okta_JWK"
+AGENT = "Okta_Agent"
+AGENT_POOL = "Okta_AgentPool"
+INTEGRATION = "Okta_ApiServiceIntegration"
+API_TOKEN = "Okta_ApiToken"
+APPLICATION = "Okta_Application"
+AUTH_SERVER = "Okta_AuthorizationServer"
+ROLE = "Okta_Role"
+CLIENT_SECRET = "Okta_ClientSecret"
+CUSTOM_ROLE = "Okta_CustomRole"
+DEVICE = "Okta_Device"
+GROUP = "Okta_Group"
+IDP = "Okta_IdentityProvider"
+ORG = "Okta_Organization"
+POLICY = "Okta_Policy"
+REALM = "Okta_Realm"
+USER = "Okta_User"
+RESOURCE_SET = "Okta_ResourceSet"
+
+# Still misssing
+ROLE_ASSIGNMENT = "Okta_RoleAssignment"
+
+# Hybrid
+AD_USER = "User"
+AD_GROUP = "Group"
+AD_COMPUTER = "Computer"

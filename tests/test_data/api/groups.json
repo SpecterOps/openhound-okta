@@ -1,0 +1,80 @@
+[
+  {
+    "id": "00g1emaKYZTWRYYRRTSK",
+    "created": "2015-02-06T10:11:28.000Z",
+    "lastUpdated": "2015-10-05T19:16:43.000Z",
+    "lastMembershipUpdated": "2015-11-28T19:15:32.000Z",
+    "objectClass": [
+      "okta:user_group"
+    ],
+    "type": "OKTA_GROUP",
+    "profile": {
+      "name": "West Coast users",
+      "description": "All users West of The Rockies"
+    },
+    "_links": {
+      "logo": [
+        {
+          "name": "medium",
+          "href": "https://{yourOktaDomain}/img/logos/groups/okta-medium.png",
+          "type": "image/png"
+        },
+        {
+          "name": "large",
+          "href": "https://{yourOktaDomain}/img/logos/groups/okta-large.png",
+          "type": "image/png"
+        }
+      ],
+      "users": {
+        "href": "https://{yourOktaDomain}/api/v1/groups/00g1emaKYZTWRYYRRTSK/users"
+      },
+      "apps": {
+        "href": "https://{yourOktaDomain}/api/v1/groups/00g1emaKYZTWRYYRRTSK/apps"
+      }
+    }
+  },
+  {
+    "id": "00garwpuyxHaWOkdV0g4",
+    "created": "2015-08-15T19:15:17.000Z",
+    "lastUpdated": "2015-11-18T04:02:19.000Z",
+    "lastMembershipUpdated": "2015-08-15T19:15:17.000Z",
+    "objectClass": [
+      "okta:windows_security_principal"
+    ],
+    "type": "APP_GROUP",
+    "profile": {
+      "name": "Engineering users",
+      "description": "All users in the engineering department",
+      "groupType": "Security",
+      "samAccountName": "Engineering users",
+      "objectSid": "S-1-5-21-717838489-685202119-709183397-1177",
+      "groupScope": "Global",
+      "dn": "CN=Engineering users,OU=Engineering,DC=corp,DC=example,DC=com",
+      "windowsDomainQualifiedName": "CORP\\Engineering users",
+      "externalId": "OZJdWdONCU6h7WjQKp+LPA=="
+    },
+    "_links": {
+      "logo": [
+        {
+          "name": "medium",
+          "href": "https://{yourOktaDomain}/img/logos/groups/active_directory-medium.png",
+          "type": "image/png"
+        },
+        {
+          "name": "large",
+          "href": "https://{yourOktaDomain}/img/logos/groups/active_directory-large.png",
+          "type": "image/png"
+        }
+      ],
+      "source": {
+        "href": "https://{yourOktaDomain}/api/v1/apps/0oa2v0el0gP90aqjJ0g7"
+      },
+      "users": {
+        "href": "https://{yourOktaDomain}/api/v1/groups/00garwpuyxHaWOkdV0g4/users"
+      },
+      "apps": {
+        "href": "https://{yourOktaDomain}/api/v1/groups/00garwpuyxHaWOkdV0g4/apps"
+      }
+    }
+  }
+]

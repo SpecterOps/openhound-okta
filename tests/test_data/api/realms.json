@@ -1,0 +1,23 @@
+[
+  {
+    "id": "guox9jQ16k9V8IFEL0g3",
+    "created": "2022-04-04T15:56:05.000Z",
+    "lastUpdated": "2022-05-05T18:15:44.000Z",
+    "isDefault": false,
+    "profile": {
+      "name": "Car Co",
+      "realmType": "PARTNER",
+      "domains": [
+        "atko.com",
+        "user.com"
+      ]
+    },
+    "_links": {
+      "self": {
+        "rel": "self",
+        "href": "http://your-subdomain.okta.com/api/v1/realms/guox9jQ16k9V8IFEL0g3",
+        "method": "GET"
+      }
+    }
+  }
+]

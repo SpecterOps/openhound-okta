@@ -1,0 +1,102 @@
+[
+  {
+    "id": "00u1dnq5S0CfjlkpABCD",
+    "externalId": "00u5edt3PNbbjzvIABCD",
+    "created": "2024-01-31T18:25:01.000Z",
+    "lastUpdated": "2024-01-31T18:25:03.000Z",
+    "scope": "USER",
+    "status": "PROVISIONED",
+    "statusChanged": "2024-01-31T18:25:03.000Z",
+    "passwordChanged": null,
+    "syncState": "SYNCHRONIZED",
+    "lastSync": "2024-01-31T18:25:03.000Z",
+    "credentials": {
+      "userName": "saml.test@example.com"
+    },
+    "profile": {
+      "secondEmail": null,
+      "lastName": "Test",
+      "mobilePhone": null,
+      "displayName": "Saml O Test",
+      "email": "saml.test@example.com",
+      "salesforceGroups": [],
+      "role": "Tester",
+      "firstName": "Saml",
+      "streetAddress": null,
+      "profile": "Standard Platform User"
+    },
+    "_links": {
+      "app": {
+        "href": "https://{yourOktaDomain}/api/v1/apps/0oajiqIRNXPPJBNZMGYL"
+      },
+      "user": {
+        "href": "https://{yourOktaDomain}/api/v1/users/00u1dnq5S0CfjlkpABCD"
+      }
+    },
+    "_embedded": {
+      "user": {
+        "id": "00u1dnq5S0CfjlkpABCD",
+        "status": "ACTIVE",
+        "created": "2024-01-09T15:36:04.000Z",
+        "activated": "2024-01-09T15:36:05.000Z",
+        "statusChanged": "2024-01-09T15:36:05.000Z",
+        "lastLogin": null,
+        "lastUpdated": "2024-01-09T15:36:05.000Z",
+        "passwordChanged": "2024-01-09T15:36:05.000Z",
+        "type": {
+          "id": "otyzhh29g7Python90g3"
+        },
+        "profile": {
+          "firstName": "Saml",
+          "lastName": "Test",
+          "mobilePhone": null,
+          "secondEmail": null,
+          "login": "saml.test@example.com",
+          "email": "saml.test@example.com"
+        },
+        "credentials": {
+          "password": {},
+          "provider": {
+            "type": "OKTA",
+            "name": "OKTA"
+          }
+        },
+        "_links": {
+          "suspend": {
+            "href": "https://{yourOktaDomain}/api/v1/users/00u1dnq5S0CfjlkpABCD/lifecycle/suspend",
+            "method": "POST"
+          },
+          "schema": {
+            "href": "https://{yourOktaDomain}/api/v1/meta/schemas/user/oscarho9g7PythoN23z9"
+          },
+          "resetPassword": {
+            "href": "https://{yourOktaDomain}/api/v1/users/00u1dnq5S0CfjlkpABCD/lifecycle/reset_password",
+            "method": "POST"
+          },
+          "expirePassword": {
+            "href": "https://{yourOktaDomain}/api/v1/users/00u1dnq5S0CfjlkpABCD/lifecycle/expire_password",
+            "method": "POST"
+          },
+          "changeRecoveryQuestion": {
+            "href": "https://{yourOktaDomain}/api/v1/users/00u1dnq5S0CfjlkpABCD/credentials/change_recovery_question",
+            "method": "POST"
+          },
+          "self": {
+            "href": "https://{yourOktaDomain}/api/v1/users/00u1dnq5S0CfjlkpABCD"
+          },
+          "type": {
+            "href": "https://{yourOktaDomain}/api/v1/meta/types/user/otyzhh29g7Python90g3"
+          },
+          "changePassword": {
+            "href": "https://rain.okta1.com/api/v1/users/00u1dnq5S0CfjlkpABCD/credentials/change_password",
+            "method": "POST"
+          },
+          "deactivate": {
+            "href": "https://{yourOktaDomain}/api/v1/users/00u1dnq5S0CfjlkpABCD/lifecycle/deactivate",
+            "method": "POST"
+          }
+        }
+      }
+    }
+  }
+]

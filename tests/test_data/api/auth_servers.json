@@ -1,0 +1,95 @@
+[
+  {
+    "id": "{authorizationServerId}",
+    "name": "Sample Authorization Server",
+    "description": "Sample Authorization Server description",
+    "audiences": [
+      "https://api.resource.com"
+    ],
+    "issuer": "https://{yourOktaDomain}/oauth2/{authorizationServerId}",
+    "issuerMode": "ORG_URL",
+    "status": "ACTIVE",
+    "created": "2023-05-17T22:25:57.000Z",
+    "lastUpdated": "2023-05-17T22:25:57.000Z",
+    "credentials": {
+      "signing": {
+        "rotationMode": "AUTO",
+        "lastRotated": "2023-05-17T22:25:57.000Z",
+        "nextRotation": "2023-08-15T22:25:57.000Z",
+        "kid": "WYQxoK4XAwGFn5Zw5AzLxFvqEKLP79BbsKmWeuc5TB4"
+      }
+    },
+    "_links": {
+      "scopes": {
+        "href": "https://{yourOktaDomain}/api/v1/authorizationServers/{authorizationServerId}/scopes",
+        "hints": {
+          "allow": [
+            "GET"
+          ]
+        }
+      },
+      "claims": {
+        "href": "https://{yourOktaDomain}/api/v1/authorizationServers/{authorizationServerId}/claims",
+        "hints": {
+          "allow": [
+            "GET"
+          ]
+        }
+      },
+      "policies": {
+        "href": "https://{yourOktaDomain}/api/v1/authorizationServers/{authorizationServerId}/policies",
+        "hints": {
+          "allow": [
+            "GET"
+          ]
+        }
+      },
+      "self": {
+        "href": "https://{yourOktaDomain}/api/v1/authorizationServers/{authorizationServerId}",
+        "hints": {
+          "allow": [
+            "GET",
+            "DELETE",
+            "PUT"
+          ]
+        }
+      },
+      "metadata": [
+        {
+          "name": "oauth-authorization-server",
+          "href": "https://{yourOktaDomain}/oauth2/{authorizationServerId}/.well-known/oauth-authorization-server",
+          "hints": {
+            "allow": [
+              "GET"
+            ]
+          }
+        },
+        {
+          "name": "openid-configuration",
+          "href": "https://{yourOktaDomain}/oauth2/{authorizationServerId}/.well-known/openid-configuration",
+          "hints": {
+            "allow": [
+              "GET"
+            ]
+          }
+        }
+      ],
+      "rotateKey": {
+        "href": "https://{yourOktaDomain}/api/v1/authorizationServers/{authorizationServerId}/credentials/lifecycle/keyRotate",
+        "hints": {
+          "allow": [
+            "POST"
+          ]
+        }
+      },
+      "deactivate": {
+        "href": "https://{yourOktaDomain}/api/v1/authorizationServers/{authorizationServerId}/lifecycle/deactivate",
+        "hints": {
+          "allow": [
+            "POST"
+          ]
+        }
+      }
+    }
+  }
+]

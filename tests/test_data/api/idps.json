@@ -1,0 +1,614 @@
+[
+  {
+    "id": "0oa62b57p7c8PaGpU0h7",
+    "type": "FACEBOOK",
+    "name": "Facebook",
+    "status": "ACTIVE",
+    "created": "2016-03-24T23:18:27.000Z",
+    "lastUpdated": "2016-03-24T23:18:27.000Z",
+    "protocol": {
+      "type": "OAUTH2",
+      "endpoints": {
+        "authorization": {
+          "url": "https://www.facebook.com/dialog/oauth",
+          "binding": "HTTP-REDIRECT"
+        },
+        "token": {
+          "url": "https://graph.facebook.com/v2.5/oauth/access_token",
+          "binding": "HTTP-POST"
+        }
+      },
+      "scopes": [
+        "public_profile",
+        "email"
+      ],
+      "credentials": {
+        "client": {
+          "client_id": "your-client-id",
+          "client_secret": "your-client-secret"
+        }
+      }
+    },
+    "policy": {
+      "provisioning": {
+        "action": "AUTO",
+        "profileMaster": true,
+        "groups": {
+          "action": "NONE"
+        },
+        "conditions": {
+          "deprovisioned": {
+            "action": "NONE"
+          },
+          "suspended": {
+            "action": "NONE"
+          }
+        }
+      },
+      "accountLink": {
+        "filter": null,
+        "action": "AUTO"
+      },
+      "subject": {
+        "userNameTemplate": {
+          "template": "idpuser.userPrincipalName"
+        },
+        "filter": null,
+        "matchType": "USERNAME"
+      },
+      "mapAMRClaims": false,
+      "trustClaims": false,
+      "maxClockSkew": 0
+    },
+    "_links": {
+      "authorize": {
+        "href": "https://{yourOktaDomain}/oauth2/v1/authorize?idp=0oa62b57p7c8PaGpU0h7&client_id={clientId}&response_type={responseType}&response_mode={responseMode}&scope={scopes}&redirect_uri={redirectUri}&state={state}",
+        "templated": true,
+        "hints": {
+          "allow": [
+            "GET"
+          ]
+        }
+      },
+      "clientRedirectUri": {
+        "href": "https://{yourOktaDomain}/oauth2/v1/authorize/callback",
+        "hints": {
+          "allow": [
+            "POST"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "0oa62bc8wppPw0UGr0h7",
+    "type": "SAML2",
+    "name": "Example SAML IdP",
+    "status": "ACTIVE",
+    "created": "2016-03-24T23:14:54.000Z",
+    "lastUpdated": "2016-03-24T23:14:54.000Z",
+    "protocol": {
+      "type": "SAML2",
+      "endpoints": {
+        "sso": {
+          "url": "https://idp.example.com",
+          "binding": "HTTP-POST",
+          "destination": "https://idp.example.com"
+        },
+        "acs": {
+          "binding": "HTTP-POST",
+          "type": "INSTANCE"
+        }
+      },
+      "algorithms": {
+        "request": {
+          "signature": {
+            "algorithm": "SHA-256",
+            "scope": "REQUEST"
+          }
+        },
+        "response": {
+          "signature": {
+            "algorithm": "SHA-256",
+            "scope": "ANY"
+          }
+        }
+      },
+      "settings": {
+        "nameFormat": "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"
+      },
+      "credentials": {
+        "trust": {
+          "issuer": "https://idp.example.com",
+          "audience": "http://www.okta.com/123",
+          "kid": "your-key-id",
+          "additionalKids": [
+            "additional-key-id"
+          ]
+        }
+      }
+    },
+    "policy": {
+      "provisioning": {
+        "action": "AUTO",
+        "profileMaster": true,
+        "groups": {
+          "action": "NONE"
+        },
+        "conditions": {
+          "deprovisioned": {
+            "action": "NONE"
+          },
+          "suspended": {
+            "action": "NONE"
+          }
+        }
+      },
+      "accountLink": {
+        "filter": null,
+        "action": "AUTO"
+      },
+      "subject": {
+        "userNameTemplate": {
+          "template": "saml.subjectNameId"
+        },
+        "filter": "(\\S+@example\\.com)",
+        "matchType": "USERNAME"
+      },
+      "mapAMRClaims": false,
+      "trustClaims": false,
+      "maxClockSkew": 0
+    },
+    "_links": {
+      "metadata": {
+        "href": "https://{yourOktaDomain}/api/v1/idps/0oa62bc8wppPw0UGr0h7/metadata.xml",
+        "type": "application/xml",
+        "hints": {
+          "allow": [
+            "GET"
+          ]
+        }
+      },
+      "acs": {
+        "href": "https://{yourOktaDomain}/sso/saml2/0oa62bc8wppPw0UGr0h7",
+        "type": "application/xml",
+        "hints": {
+          "allow": [
+            "POST"
+          ]
+        }
+      },
+      "users": {
+        "href": "https://{yourOktaDomain}/api/v1/idps/0oa62bc8wppPw0UGr0h7/users",
+        "hints": {
+          "allow": [
+            "GET"
+          ]
+        }
+      },
+      "deactivate": {
+        "href": "https://{yourOktaDomain}/api/v1/idps/0oa62bc8wppPw0UGr0h7/lifecycle/deactivate",
+        "hints": {
+          "allow": [
+            "POST"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "0oa62bfdiumsUndnZ0h7",
+    "type": "GOOGLE",
+    "name": "Google",
+    "status": "ACTIVE",
+    "created": "2016-03-24T23:21:49.000Z",
+    "lastUpdated": "2016-03-24T23:21:49.000Z",
+    "protocol": {
+      "type": "OIDC",
+      "endpoints": {
+        "authorization": {
+          "url": "https://accounts.google.com/o/oauth2/auth",
+          "binding": "HTTP-REDIRECT"
+        },
+        "token": {
+          "url": "https://www.googleapis.com/oauth2/v3/token",
+          "binding": "HTTP-POST"
+        }
+      },
+      "scopes": [
+        "profile",
+        "email",
+        "openid"
+      ],
+      "credentials": {
+        "client": {
+          "client_id": "your-client-id",
+          "client_secret": "your-client-secret"
+        }
+      }
+    },
+    "policy": {
+      "provisioning": {
+        "action": "AUTO",
+        "profileMaster": true,
+        "groups": {
+          "action": "NONE"
+        },
+        "conditions": {
+          "deprovisioned": {
+            "action": "NONE"
+          },
+          "suspended": {
+            "action": "NONE"
+          }
+        }
+      },
+      "accountLink": {
+        "filter": null,
+        "action": "AUTO"
+      },
+      "subject": {
+        "userNameTemplate": {
+          "template": "idpuser.userPrincipalName"
+        },
+        "filter": null,
+        "matchType": "USERNAME"
+      },
+      "mapAMRClaims": false,
+      "trustClaims": false,
+      "maxClockSkew": 0
+    },
+    "_links": {
+      "authorize": {
+        "href": "https://{yourOktaDomain}/oauth2/v1/authorize?idp=0oa62bfdiumsUndnZ0h7&client_id={clientId}&response_type={responseType}&response_mode={responseMode}&scope={scopes}&redirect_uri={redirectUri}&state={state}",
+        "templated": true,
+        "hints": {
+          "allow": [
+            "GET"
+          ]
+        }
+      },
+      "clientRedirectUri": {
+        "href": "https://{yourOktaDomain}/oauth2/v1/authorize/callback",
+        "hints": {
+          "allow": [
+            "POST"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "0oa62bfdjnK55Z5x80h7",
+    "type": "LINKEDIN",
+    "name": "LinkedIn",
+    "status": "ACTIVE",
+    "created": "2016-03-24T23:23:59.000Z",
+    "lastUpdated": "2016-03-24T23:23:59.000Z",
+    "protocol": {
+      "type": "OAUTH2",
+      "endpoints": {
+        "authorization": {
+          "url": "https://www.linkedin.com/uas/oauth2/authorization",
+          "binding": "HTTP-REDIRECT"
+        },
+        "token": {
+          "url": "https://www.linkedin.com/uas/oauth2/accessToken",
+          "binding": "HTTP-POST"
+        }
+      },
+      "scopes": [
+        "r_basicprofile",
+        "r_emailaddress"
+      ],
+      "credentials": {
+        "client": {
+          "client_id": "your-client-id",
+          "client_secret": "your-client-secret"
+        }
+      }
+    },
+    "policy": {
+      "provisioning": {
+        "action": "AUTO",
+        "profileMaster": true,
+        "groups": {
+          "action": "NONE"
+        },
+        "conditions": {
+          "deprovisioned": {
+            "action": "NONE"
+          },
+          "suspended": {
+            "action": "NONE"
+          }
+        }
+      },
+      "accountLink": {
+        "filter": null,
+        "action": "AUTO"
+      },
+      "subject": {
+        "userNameTemplate": {
+          "template": "idpuser.userPrincipalName"
+        },
+        "filter": null,
+        "matchType": "USERNAME"
+      },
+      "mapAMRClaims": false,
+      "trustClaims": false,
+      "maxClockSkew": 0
+    },
+    "_links": {
+      "authorize": {
+        "href": "https://{yourOktaDomain}/oauth2/v1/authorize?idp=0oa62bfdjnK55Z5x80h7&client_id={clientId}&response_type={responseType}&response_mode={responseMode}&scope={scopes}&redirect_uri={redirectUri}&state={state}",
+        "templated": true,
+        "hints": {
+          "allow": [
+            "GET"
+          ]
+        }
+      },
+      "clientRedirectUri": {
+        "href": "https://{yourOktaDomain}/oauth2/v1/authorize/callback",
+        "hints": {
+          "allow": [
+            "POST"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "0oajmvdFawBih4gey0g3",
+    "type": "MICROSOFT",
+    "name": "Microsoft",
+    "status": "ACTIVE",
+    "created": "2016-03-29T16:47:36.000Z",
+    "lastUpdated": "2016-03-29T16:47:36.000Z",
+    "protocol": {
+      "type": "OIDC",
+      "endpoints": {
+        "authorization": {
+          "url": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+          "binding": "HTTP-REDIRECT"
+        },
+        "token": {
+          "url": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+          "binding": "HTTP-POST"
+        }
+      },
+      "scopes": [
+        "openid",
+        "email",
+        "profile",
+        "https://graph.microsoft.com/User.Read"
+      ],
+      "credentials": {
+        "client": {
+          "client_id": "your-client-id",
+          "client_secret": "your-client-secret"
+        }
+      }
+    },
+    "policy": {
+      "provisioning": {
+        "action": "AUTO",
+        "profileMaster": true,
+        "groups": {
+          "action": "NONE"
+        },
+        "conditions": {
+          "deprovisioned": {
+            "action": "NONE"
+          },
+          "suspended": {
+            "action": "NONE"
+          }
+        }
+      },
+      "accountLink": {
+        "filter": null,
+        "action": "AUTO"
+      },
+      "subject": {
+        "userNameTemplate": {
+          "template": "idpuser.userPrincipalName"
+        },
+        "filter": null,
+        "matchType": "USERNAME"
+      },
+      "mapAMRClaims": false,
+      "trustClaims": false,
+      "maxClockSkew": 0
+    },
+    "_links": {
+      "authorize": {
+        "href": "https://{yourOktaDomain}/oauth2/v1/authorize?idp=0oajmvdFawBih4gey0g3&client_id={clientId}&response_type={responseType}&response_mode={responseMode}&scope={scopes}&redirect_uri={redirectUri}&state={state}",
+        "templated": true,
+        "hints": {
+          "allow": [
+            "GET"
+          ]
+        }
+      },
+      "clientRedirectUri": {
+        "href": "https://{yourOktaDomain}/oauth2/v1/authorize/callback",
+        "hints": {
+          "allow": [
+            "POST"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "0oaulob4BFVa4zQvt0g3",
+    "type": "OIDC",
+    "name": "Example OpenID Connect IdP",
+    "status": "ACTIVE",
+    "created": "2019-02-07T20:07:47.000Z",
+    "lastUpdated": "2019-02-07T20:07:47.000Z",
+    "protocol": {
+      "type": "OIDC",
+      "endpoints": {
+        "authorization": {
+          "url": "https://idp.example.com/authorize",
+          "binding": "HTTP-REDIRECT"
+        },
+        "token": {
+          "url": "https://idp.example.com/token",
+          "binding": "HTTP-POST"
+        },
+        "userInfo": {
+          "url": "https://idp.example.com/userinfo",
+          "binding": "HTTP-REDIRECT"
+        },
+        "jwks": {
+          "url": "https://idp.example.com/keys",
+          "binding": "HTTP-REDIRECT"
+        }
+      },
+      "scopes": [
+        "openid"
+      ],
+      "issuer": {
+        "url": "https://idp.example.com"
+      },
+      "credentials": {
+        "client": {
+          "client_id": "your-client-id",
+          "client_secret": "your-client-secret"
+        }
+      }
+    },
+    "policy": {
+      "provisioning": {
+        "action": "AUTO",
+        "profileMaster": false,
+        "groups": {
+          "action": "NONE"
+        },
+        "conditions": {
+          "deprovisioned": {
+            "action": "NONE"
+          },
+          "suspended": {
+            "action": "NONE"
+          }
+        }
+      },
+      "accountLink": {
+        "filter": null,
+        "action": "AUTO"
+      },
+      "subject": {
+        "userNameTemplate": {
+          "template": "idpuser.email"
+        },
+        "filter": null,
+        "matchType": "USERNAME",
+        "matchAttribute": null
+      },
+      "mapAMRClaims": false,
+      "trustClaims": false,
+      "maxClockSkew": 0
+    },
+    "_links": {
+      "authorize": {
+        "href": "https://{yourOktaDomain}/oauth2/v1/authorize?idp=0oaulob4BFVa4zQvt0g3&client_id={clientId}&response_type={responseType}&response_mode={responseMode}&scope={scopes}&redirect_uri={redirectUri}&state={state}&nonce={nonce}",
+        "templated": true,
+        "hints": {
+          "allow": [
+            "GET"
+          ]
+        }
+      },
+      "clientRedirectUri": {
+        "href": "https://{yourOktaDomain}/oauth2/v1/authorize/callback",
+        "hints": {
+          "allow": [
+            "POST"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "0oa6jxasyhwM2ZHJh0g4",
+    "type": "X509",
+    "name": "Smart Card IDP Name",
+    "status": "ACTIVE",
+    "created": "2020-01-07T00:19:27.000Z",
+    "lastUpdated": "2020-01-07T00:19:27.000Z",
+    "properties": {
+      "additionalAmr": [
+        "sc",
+        "hwk",
+        "pin",
+        "mfa"
+      ]
+    },
+    "protocol": {
+      "type": "MTLS",
+      "endpoints": {
+        "sso": {
+          "url": "https://{yourOktaDomain}.okta.com/login/cert"
+        }
+      },
+      "credentials": {
+        "trust": {
+          "issuer": "CN=Test Smart Card, OU=Test OU, O=Test O, C=US",
+          "audience": null,
+          "kid": "45dec5ff-8cdc-48c0-85fe-a4869f1753dc",
+          "revocation": "CRL",
+          "revocationCacheLifetime": 2880
+        }
+      }
+    },
+    "policy": {
+      "provisioning": {
+        "action": "DISABLED",
+        "profileMaster": false,
+        "groups": null
+      },
+      "subject": {
+        "userNameTemplate": {
+          "template": "idpuser.subjectAltNameEmail"
+        },
+        "filter": null,
+        "matchType": "EMAIL",
+        "matchAttribute": null
+      },
+      "mapAMRClaims": false,
+      "trustClaims": false,
+      "maxClockSkew": 0
+    },
+    "_links": {
+      "deactivate": {
+        "href": "https://{yourOktaDomain}.okta.com/api/v1/idps/0oa6jxasyhwM2ZHJh0g4/lifecycle/deactivate",
+        "hints": {
+          "allow": [
+            "POST"
+          ]
+        }
+      },
+      "users": {
+        "href": "https://{yourOktaDomain}.okta.com/api/v1/idps/0oa6jxasyhwM2ZHJh0g4/users",
+        "hints": {
+          "allow": [
+            "GET"
+          ]
+        }
+      },
+      "keys": {
+        "href": "https://{yourOktaDomain}.okta.com/api/v1/idps/credentials/keys/45dec5ff-8cdc-48c0-85fe-a4869f1753dc",
+        "hints": {
+          "allow": [
+            "GET"
+          ]
+        }
+      }
+    }
+  }
+]

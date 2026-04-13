@@ -1,0 +1,42 @@
+{
+    "id": "00oxdq3784Z1Haa7p697",
+    "subdomain": "integrator-1234545",
+    "companyName": "example-integrator-1234545",
+    "status": "ACTIVE",
+    "expiresAt": null,
+    "created": "2025-11-12T15:07:07.000Z",
+    "lastUpdated": "2025-11-12T15:07:10.000Z",
+    "website": "https://example.org",
+    "phoneNumber": null,
+    "endUserSupportHelpURL": null,
+    "supportPhoneNumber": null,
+    "address1": null,
+    "address2": null,
+    "city": null,
+    "state": null,
+    "country": null,
+    "postalCode": null,
+    "_links": {
+        "preferences": {
+            "href": "https://integrator-1234545.okta.com/api/v1/org/preferences"
+        },
+        "uploadLogo": {
+            "href": "https://integrator-1234545.okta.com/api/v1/org/logo",
+            "hints": {
+                "allow": [
+                    "POST"
+                ]
+            }
+        },
+        "oktaCommunication": {
+            "href": "https://integrator-1234545.okta.com/api/v1/org/privacy/oktaCommunication"
+        },
+        "logo": null,
+        "oktaSupport": {
+            "href": "https://integrator-1234545.okta.com/api/v1/org/privacy/oktaSupport"
+        },
+        "contacts": {
+            "href": "https://integrator-1234545.okta.com/api/v1/org/contacts"
+        }
+    }
+}

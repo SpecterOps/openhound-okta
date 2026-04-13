@@ -1,0 +1,63 @@
+[
+  {
+    "name": "My API Token",
+    "userId": "00uabcdefg1234567890",
+    "tokenWindow": "P30D",
+    "network": {
+      "connection": "ANYWHERE"
+    },
+    "id": "00Tabcdefg1234567890",
+    "clientName": "Okta API",
+    "expiresAt": "2021-12-11T20:38:10.000Z",
+    "created": "2021-11-09T20:38:10.000Z",
+    "lastUpdated": "2021-11-11T20:38:10.000Z",
+    "_links": {
+      "self": {
+        "href": "https://{yourOktaDomain}/api/v1/api-tokens/00Tabcdefg1234567890",
+        "hints": {
+          "allow": [
+            "GET",
+            "DELETE"
+          ]
+        }
+      },
+      "user": {
+        "href": "https://{yourOktaDomain}/api/v1/users/00uabcdefg1234567890",
+        "hints": {
+          "allow": [
+            "GET"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "Another API Token",
+    "userId": "00uabcdefg1234567890",
+    "tokenWindow": "PT5M",
+    "id": "00T1234567890abcdefg",
+    "clientName": "Okta API",
+    "expiresAt": "2021-11-11T20:43:10.000Z",
+    "created": "2021-11-09T20:38:10.000Z",
+    "lastUpdated": "2021-11-11T20:38:10.000Z",
+    "_links": {
+      "self": {
+        "href": "https://{yourOktaDomain}/api/v1/api-tokens/00T1234567890abcdefg",
+        "hints": {
+          "allow": [
+            "GET",
+            "DELETE"
+          ]
+        }
+      },
+      "user": {
+        "href": "https://{yourOktaDomain}/api/v1/users/00uabcdefg1234567890",
+        "hints": {
+          "allow": [
+            "GET"
+          ]
+        }
+      }
+    }
+  }
+]

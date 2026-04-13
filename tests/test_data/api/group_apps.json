@@ -1,0 +1,57 @@
+[
+  {
+    "id": "0oafwvZDWJKVLDCUWUAC",
+    "name": "template_basic_auth",
+    "label": "Sample Basic Auth App",
+    "status": "ACTIVE",
+    "lastUpdated": "2013-09-30T00:56:52.000Z",
+    "created": "2013-09-30T00:56:52.000Z",
+    "accessibility": {
+      "selfService": false,
+      "errorRedirectUrl": null
+    },
+    "visibility": {
+      "autoSubmitToolbar": false,
+      "hide": {
+        "iOS": false,
+        "web": false
+      },
+      "appLinks": {
+        "login": true
+      }
+    },
+    "features": [],
+    "signOnMode": "BASIC_AUTH",
+    "credentials": {
+      "scheme": "EDIT_USERNAME_AND_PASSWORD",
+      "userNameTemplate": {
+        "template": "${source.login}",
+        "type": "BUILT_IN"
+      }
+    },
+    "settings": {
+      "app": {
+        "url": "https://example.com/login.html",
+        "authURL": "https://example.com/auth.html"
+      }
+    },
+    "_links": {
+      "appLinks": [
+        {
+          "href": "https://{yourOktaDomain}/home/template_basic_auth/0oafwvZDWJKVLDCUWUAC/1438",
+          "name": "login",
+          "type": "text/html"
+        }
+      ],
+      "users": {
+        "href": "https://{yourOktaDomain}/api/v1/apps/0oafwvZDWJKVLDCUWUAC/users"
+      },
+      "deactivate": {
+        "href": "https://{yourOktaDomain}/api/v1/apps/0oafwvZDWJKVLDCUWUAC/lifecycle/deactivate"
+      },
+      "groups": {
+        "href": "https://{yourOktaDomain}/api/v1/apps/0oafwvZDWJKVLDCUWUAC/groups"
+      }
+    }
+  }
+]

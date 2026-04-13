@@ -1,0 +1,18 @@
+[
+  {
+    "id": "WORKFLOWS_IAM_POLICY",
+    "label": "Workflows Resource Set",
+    "description": "A resource set managed by Workflows Administrator",
+    "_links": {
+      "bindings": {
+        "href": "https://integrator-5800148.okta.com/api/v1/iam/resource-sets/WORKFLOWS_IAM_POLICY/bindings"
+      },
+      "self": {
+        "href": "https://integrator-5800148.okta.com/api/v1/iam/resource-sets/WORKFLOWS_IAM_POLICY"
+      },
+      "resources": {
+        "href": "https://integrator-5800148.okta.com/api/v1/iam/resource-sets/WORKFLOWS_IAM_POLICY/resources"
+      }
+    }
+  }
+]

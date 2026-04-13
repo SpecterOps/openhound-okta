@@ -1,0 +1,35 @@
+[
+  {
+    "id": "00u118oQYT4TBTemp0g4",
+    "status": "ACTIVE",
+    "created": "2022-04-04T15:56:05.000Z",
+    "activated": null,
+    "statusChanged": null,
+    "lastLogin": "2022-05-04T19:50:52.000Z",
+    "lastUpdated": "2022-05-05T18:15:44.000Z",
+    "passwordChanged": "2022-04-04T16:00:22.000Z",
+    "type": {
+      "id": "oty1162QAr8hJjTaq0g4"
+    },
+    "profile": {
+      "firstName": "Alice",
+      "lastName": "Smith",
+      "mobilePhone": null,
+      "secondEmail": null,
+      "login": "alice.smith@example.com",
+      "email": "alice.smith@example.com"
+    },
+    "credentials": {
+      "password": {},
+      "provider": {
+        "type": "OKTA",
+        "name": "OKTA"
+      }
+    },
+    "_links": {
+      "self": {
+        "href": "http://your-subdomain.okta.com/api/v1/users/00u118oQYT4TBGuay0g4"
+      }
+    }
+  }
+]
