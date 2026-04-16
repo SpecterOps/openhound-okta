@@ -12,17 +12,16 @@ graph LR
     o -- Okta_Contains --> app1
     o -- Okta_Contains --> app2
   end
-  subgraph "GitHound"
+  subgraph "GitHub"
     direction TB
     ghorg("GH_Organization Contoso")
     app1 -- Okta_OutboundOrgSSO --> ghorg
   end
-  subgraph "JamfHound"
+  subgraph "Jamf"
     direction TB
     jamf("jamf_SSOIntegration contoso.jamfcloud.com-SSO")
     app2 -- Okta_OutboundOrgSSO --> jamf
   end
 ```
 
-The respective BloodHound collectors, e.g., `GitHound` for GitHub organizations and `JamfHound` for Jamf Pro tenants,
-must be used to gather the external node information.
+The respective BloodHound collectors, e.g., OpenHound Github for GitHub organizations and OpenHound Jamf for Jamf Pro tenants, must be used to gather the external node information.
