@@ -24,7 +24,7 @@ The following roles can either be scoped to specific resources or assigned organ
 > [!NOTE]
 > Although the Workflows Administrator role is a built-in role, the Okta API treats it as a custom role that is scoped to the built-in `Workflows Resource Set`.
 
-In `OktaHound`, built-in roles are represented as `Okta_Role` nodes.
+Okta built-in roles are represented as Okta_Role nodes.
 
 ## Sample Property Values
 
@@ -70,7 +70,7 @@ When working with roles using the Okta API, the built-in roles are referenced by
 | REPORT_ADMIN                | Report Administrator                |
 | READ_ONLY_ADMIN             | Read-Only Administrator             |
 
-To make the role identifiers unique, the `OktaHound` collector adds the organization domain name as a suffix to each role's ID, e.g., `SUPER_ADMIN@contoso.okta.com`.
+To make the role identifiers unique, the OpenHound collector adds the organization domain name as a suffix to each role's ID, e.g., `SUPER_ADMIN@contoso.okta.com`.
 
 ## Built-In Role Permissions
 

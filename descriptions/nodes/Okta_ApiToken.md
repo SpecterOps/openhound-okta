@@ -6,7 +6,7 @@ These tokens are always associated with a specific user in Okta, and the permiss
 
 The use of API tokens is generally discouraged in favor of OAuth 2.0 access tokens, as they provide better security and flexibility. However, API tokens are still widely used by Okta customers.
 
-In `OktaHound`, API tokens are represented as `Okta_ApiToken` nodes.
+Okta API tokens are represented as Okta_ApiToken nodes in BloodHound.
 
 ## Sample Property Values
 

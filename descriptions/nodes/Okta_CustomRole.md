@@ -6,7 +6,7 @@ Custom roles can be created with specific [permissions](https://developer.okta.c
 - okta.users.manage
 - okta.users.create
 
-Custom roles are represented as `Okta_CustomRole` and `Okta_RoleAssignment` nodes in `OktaHound`, similar to built-in roles.
+Custom roles are represented as Okta_CustomRole and Okta_RoleAssignment nodes, similar to built-in roles.
 
 ## Sample Property Values
 
@@ -36,5 +36,5 @@ The following Okta permissions are particularly interesting from an offensive se
 - okta.apps.manage
 - okta.apps.clientCredentials.read
 
-> [!WARNING]
+> [!NOTE]
 > The research on abusable Okta permissions is still ongoing.

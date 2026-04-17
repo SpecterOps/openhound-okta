@@ -11,7 +11,7 @@ API service integrations in Okta represent OAuth 2.0 service (daemon) applicatio
 | Support authentication using private keys:   | ✅                  | ❌                       |
 | Admins can read cleartext client secrets:    | ✅                  | ❌                       |
 
-In `OktaHound`, API service integrations are represented as `Okta_ApiServiceIntegration` nodes.
+Okta API service integrations are represented as Okta_ApiServiceIntegration nodes.
 
 ## Sample Property Values
 

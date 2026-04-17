@@ -1,9 +1,9 @@
 ## General Information
 
-The non-traversable `Okta_PolicyMapping` edges represent the association between a policy and the resources to which it is applied.
+The non-traversable Okta_PolicyMapping edges represent the association between a policy and the resources to which it is applied.
 
-> [!WARNING]
-> Only application targets are currently supported by `OktaHound`.
+> [!NOTE]
+> Only application targets are supported in the current version of the Okta BloodHound extension.
 
 ```mermaid
 graph LR

@@ -1,6 +1,6 @@
 ## General Information
 
-The `Okta_UserPull` edges represent user import relationships from external applications to Okta.
+The Okta_UserPull edges represent user import relationships from external applications to Okta.
 
 ```mermaid
 graph LR

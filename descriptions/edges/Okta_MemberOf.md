@@ -1,6 +1,6 @@
 ## General Information
 
-The traversable `Okta_MemberOf` edges represent the membership relationships between users and groups in Okta:
+The traversable Okta_MemberOf edges represent the membership relationships between users and groups in Okta:
 
 ```mermaid
 graph LR

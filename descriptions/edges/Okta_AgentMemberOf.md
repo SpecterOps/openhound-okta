@@ -1,6 +1,6 @@
 ## General Information
 
-`Okta_AgentMemberOf` edges represent membership of an `Okta_Agent` in an `Okta_AgentPool`.
+Okta_AgentMemberOf edges represent membership of an Okta_Agent in an Okta_AgentPool.
 
 Active Directory Agent Pools and their agents can be visualized in BloodHound as follows:
 
@@ -16,6 +16,5 @@ graph LR
     a3 -- Okta_AgentMemberOf --> ap2
 ```
 
-> [!WARNING]
-> Traversable edges between the `Okta_AgentPool` and AD `Domain` nodes are not created in the current version of `OktaHound`.
-> This functionality is planned for a future release.
+> [!NOTE]
+> Traversable edges between Okta_AgentPool and AD Domain nodes are not modeled in the current version of the Okta BloodHound extension. Support for this is planned for a future release.

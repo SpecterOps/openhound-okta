@@ -4,7 +4,7 @@ Applications in Okta represent the various software applications and services th
 
 With the exception of API Service applications, Okta users and groups can be assigned to applications. Users can also be synchronized TO and FROM applications in Okta, typically using the SCIM protocol. For example, when integrating with GitHub Enterprise Cloud, Okta can be configured to automatically create user accounts in GitHub when users are assigned to the GitHub application in Okta.
 
-In `OktaHound`, applications are represented as `Okta_Application` nodes.
+Okta applications are represented as Okta_Application nodes.
 
 ## Sample Property Values
 
@@ -63,14 +63,14 @@ created: 2025-11-05T09:10:52+00:00
 lastUpdated: 2026-01-19T14:33:39+00:00
 ```
 
-### OktaHound
+### OpenHound Okta Collector
 
 ```yaml
 id: 0oaw0pujq5WtBiMYD697
-name: OktaHound
+name: OpenHound Okta Collector
 appType: oidc_client
 clientType: service
-displayName: OktaHound
+displayName: OpenHound Okta Collector
 features: []
 grantTypes:
   - client_credentials
@@ -176,7 +176,7 @@ This application type is the most interesting one from the security perspective,
 
 ## Hybrid Edges
 
-For supported systems like Active Directory, GitHub Enterprise Cloud, or Jamf Pro, OktaHound can create hybrid edges in BloodHound to represent the relationships between these external systems and Okta.
+For supported systems like Active Directory, GitHub Enterprise Cloud, or Jamf Pro, OpenHound can create hybrid edges in BloodHound to represent the relationships between these external systems and Okta.
 
 ```mermaid
 graph TB
@@ -229,7 +229,7 @@ graph TB
 
 ### Active Directory Synchronization
 
-When Okta's Active Directory (AD) integration is configured for user and group synchronization, the connected AD domain is represented as an `Okta_Application` node in BloodHound. This allows you to visualize the AD-backed application alongside other applications in your Okta environment and understand its relationships with users, groups, and roles.
+When Okta's Active Directory (AD) integration is configured for user and group synchronization, the connected AD domain is represented as an Okta_Application node in BloodHound. This allows you to visualize the AD-backed application alongside other applications in your Okta environment and understand its relationships with users, groups, and roles.
 
 The synchronization is performed by domain-joined servers with the Okta AD Agent installed. This agent typically has Domain Admin privileges in the connected AD domain to perform user and group enumeration and synchronization, making it a high-value target for attackers.
 
@@ -241,19 +241,18 @@ Authentication can be delegated from Okta to AD in multiple ways:
 - [Password Synchronization](https://help.okta.com/oie/en-us/content/topics/directory/installing_configuring_active_directory_password_sync_agent.htm)
 - Active Directory Federation Services (ADFS) integration with Okta as a SAML IdP
 
-> [!WARNING]
-> There is no documented API available to determine the authentication delegation method(s) configured for an AD-backed Okta application.
-> OktaHound therefore performs some heuristics that might not be 100% accurate in all cases.
+> [!NOTE]
+> There is no documented API available to determine the authentication delegation method(s) configured for an AD-backed Okta application. The collector therefore performs some heuristics that might not be 100% accurate in all cases.
 
 ### GitHub Enterprise Cloud Organizations
 
-When integrating Okta with GitHub Enterprise Cloud, each GitHub organization connected to Okta is represented as a separate `Okta_Application` node in BloodHound.
+When integrating Okta with GitHub Enterprise Cloud, each GitHub organization connected to Okta is represented as a separate Okta_Application node in BloodHound.
 
 ![Properties of the GitHub Application node](../Images/bloodhound-github-properties.png)
 
 ### Jamf Pro
 
-When integrating Okta with Jamf Pro using SAML 2.0, each Jamf Pro instance connected to Okta is represented as a separate `Okta_Application` node in BloodHound. The differentiator is the `domainFQDN` property:
+When integrating Okta with Jamf Pro using SAML 2.0, each Jamf Pro instance connected to Okta is represented as a separate Okta_Application node in BloodHound. The differentiator is the `domainFQDN` property:
 
 ![Jamf Pro SAML application in BloodHound](../Images/bloodhound-jamf-saml-properties.png)
 
@@ -263,7 +262,7 @@ It is also possible to integrate Jamf Pro with Okta using Secure Web Authenticat
 
 ## Google Workspace
 
-Similarly to the Jamf Pro SAML applications, each Google Workspace (formerly G Suite) instance connected to Okta using SAML 2.0 is represented as a separate `Okta_Application` node in BloodHound and is identified by the `domainFQDN` property:
+Similarly to the Jamf Pro SAML applications, each Google Workspace (formerly G Suite) instance connected to Okta using SAML 2.0 is represented as a separate Okta_Application node in BloodHound and is identified by the `domainFQDN` property:
 
 ![Google Workspace SAML application in BloodHound](../Images/bloodhound-google-saml-properties.png)
 
@@ -301,7 +300,7 @@ OIDC applications can be granted OAuth 2.0 scopes to access Okta APIs on behalf 
 
 ## SCIM-Enabled Applications
 
-The `features` attribute of `Okta_Application` nodes may contain the following SCIM-related values, indicating if SCIM is enabled and which protocol capabilities are supported:
+The `features` attribute of Okta_Application nodes may contain the following SCIM-related values, indicating if SCIM is enabled and which protocol capabilities are supported:
 
 | Feature                      | Description                                                                    |
 |------------------------------|--------------------------------------------------------------------------------|

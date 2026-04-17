@@ -8,11 +8,10 @@ An application can have up to two client secrets configured, to allow for secret
 
 ![Okta client secret rotation](../Images/app-client-secret-rotation.png)
 
-Client secrets are represented as `Okta_ClientSecret` nodes in BloodHound.
+Client secrets are represented as Okta_ClientSecret nodes in BloodHound.
 
 > [!NOTE]
-> For security reasons, the OktaHound collector does not write cleartext client secrets
-> to the OpenGraph JSON, only their hashed identifiers.
+> For security reasons, the OpenHound and OktaHound collectors do not collect client secrets, only their hashed identifiers.
 
 ## Sample Property Values
 

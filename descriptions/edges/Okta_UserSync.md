@@ -1,6 +1,6 @@
 ## General Information
 
-The non-traversable hybrid `Okta_UserSync` edges represent bidirectional user synchronization relationships between Okta and external directories or applications. These edges indicate that user accounts are linked and synchronized between systems.
+The non-traversable hybrid Okta_UserSync edges represent bidirectional user synchronization relationships between Okta and external directories or applications. These edges indicate that user accounts are linked and synchronized between systems.
 
 ```mermaid
 graph LR

@@ -22,12 +22,11 @@ Resource sets are collections of entities that can be used to scope custom role 
 - [ ] ~~Identity and Access Management Resources~~ (Gaps in the Okta API)
 
 > [!NOTE]
-> Only the marked resource types are currently supported by `OktaHound` as resource set members.
-> Some resource types, such as Workflows, are not accessible via the Okta API at all.
+> Only the marked resource types are currently supported as resource set members. Some resource types, such as Workflows, are not accessible via the Okta API at all.
 
 ![Okta Resource Set displayed in BloodHound](../Images/bloodhound-resource-set.png)
 
-In `OktaHound`, resource sets are represented as `Okta_ResourceSet` nodes.
+Okta resource sets are represented as Okta_ResourceSet nodes.
 
 ## Sample Property Values
 
