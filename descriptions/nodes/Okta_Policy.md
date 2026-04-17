@@ -34,5 +34,4 @@ The following [policy types](https://developer.okta.com/docs/api/openapi/okta-ma
 | POST_AUTH_SESSION | [Identity Threat Protection policies](https://help.okta.com/oie/en-us/content/topics/itp/overview.htm) |
 | ENTITY_RISK | [Entity risk policies](https://help.okta.com/oie/en-us/content/topics/itp/entity-risk-policy.htm) |
 
-The `OktaHound` collector specifically reads the `IDP_DISCOVERY` policies to check
-if the [Agentless Desktop SSO](https://help.okta.com/en-us/content/topics/directory/configuring_agentless_sso.htm) feature is enabled in the organization through at least one such policy.
+The `OktaHound` collector specifically reads the `IDP_DISCOVERY` policies to check if the [Agentless Desktop SSO](https://help.okta.com/en-us/content/topics/directory/configuring_agentless_sso.htm) feature is enabled in the organization through at least one such policy.

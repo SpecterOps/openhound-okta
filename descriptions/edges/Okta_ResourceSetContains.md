@@ -18,5 +18,4 @@ graph LR
     rs1 -- Okta_ResourceSetContains --> u2
 ```
 
-Note that users can also be members of resource sets indirectly through group memberships.
-The intermediate group will not appear in the graph, but the user membership will be resolved by `OktaHound`.
+Note that users can also be members of resource sets indirectly through group memberships. The intermediate group will not appear in the graph, but the user membership will be resolved by `OktaHound`.

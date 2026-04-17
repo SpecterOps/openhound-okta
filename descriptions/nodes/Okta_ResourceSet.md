@@ -1,7 +1,6 @@
 ## Overview
 
-Resource sets are collections of entities that can be used to scope custom role assignments in Okta.
-A resource set can contain the following object types:
+Resource sets are collections of entities that can be used to scope custom role assignments in Okta. A resource set can contain the following object types:
 
 - [x] [Users](Okta_User.md)
 - [x] [Groups](Okta_Group.md)

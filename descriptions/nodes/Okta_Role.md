@@ -74,7 +74,4 @@ To make the role identifiers unique, the `OktaHound` collector adds the organiza
 
 ## Built-In Role Permissions
 
-Unlike custom roles, built-in roles have fixed permissions that cannot be changed.
-However, the exact OAuth 2.0 scopes granted to each built-in role are not publicly documented by Okta and cannot even be retrieved via the API.
-We therefore did the mapping by ourselves based on the role descriptions in the Okta documentation.
-Hence, the resulting permissions ingested to BloodHound are best-effort approximations and may not be 100% accurate.
+Unlike custom roles, built-in roles have fixed permissions that cannot be changed. However, the exact OAuth 2.0 scopes granted to each built-in role are not publicly documented by Okta and cannot even be retrieved via the API. We therefore did the mapping by ourselves based on the role descriptions in the Okta documentation. Hence, the resulting permissions ingested to BloodHound are best-effort approximations and may not be 100% accurate.

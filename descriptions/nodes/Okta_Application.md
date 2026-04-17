@@ -176,8 +176,7 @@ This application type is the most interesting one from the security perspective,
 
 ## Hybrid Edges
 
-For supported systems like Active Directory, GitHub Enterprise Cloud, or Jamf Pro,
-OktaHound can create hybrid edges in BloodHound to represent the relationships between these external systems and Okta.
+For supported systems like Active Directory, GitHub Enterprise Cloud, or Jamf Pro, OktaHound can create hybrid edges in BloodHound to represent the relationships between these external systems and Okta.
 
 ```mermaid
 graph TB
@@ -230,13 +229,9 @@ graph TB
 
 ### Active Directory Synchronization
 
-When Okta's Active Directory (AD) integration is configured for user and group synchronization,
-the connected AD domain is represented as an `Okta_Application` node in BloodHound.
-This allows you to visualize the AD-backed application alongside other applications in your Okta environment and understand its relationships with users, groups, and roles.
+When Okta's Active Directory (AD) integration is configured for user and group synchronization, the connected AD domain is represented as an `Okta_Application` node in BloodHound. This allows you to visualize the AD-backed application alongside other applications in your Okta environment and understand its relationships with users, groups, and roles.
 
-The synchronization is performed by domain-joined servers with the Okta AD Agent installed.
-This agent typically has Domain Admin privileges in the connected AD domain to perform user and group enumeration and synchronization,
-making it a high-value target for attackers.
+The synchronization is performed by domain-joined servers with the Okta AD Agent installed. This agent typically has Domain Admin privileges in the connected AD domain to perform user and group enumeration and synchronization, making it a high-value target for attackers.
 
 ![Okta AD agent settings](../Images/okta-ad-agent.png)
 
@@ -258,8 +253,7 @@ When integrating Okta with GitHub Enterprise Cloud, each GitHub organization con
 
 ### Jamf Pro
 
-When integrating Okta with Jamf Pro using SAML 2.0, each Jamf Pro instance connected to Okta is represented as a separate `Okta_Application` node in BloodHound.
-The differentiator is the `domainFQDN` property:
+When integrating Okta with Jamf Pro using SAML 2.0, each Jamf Pro instance connected to Okta is represented as a separate `Okta_Application` node in BloodHound. The differentiator is the `domainFQDN` property:
 
 ![Jamf Pro SAML application in BloodHound](../Images/bloodhound-jamf-saml-properties.png)
 
@@ -307,8 +301,7 @@ OIDC applications can be granted OAuth 2.0 scopes to access Okta APIs on behalf 
 
 ## SCIM-Enabled Applications
 
-The `features` attribute of `Okta_Application` nodes may contain the following SCIM-related values,
-indicating if SCIM is enabled and which protocol capabilities are supported:
+The `features` attribute of `Okta_Application` nodes may contain the following SCIM-related values, indicating if SCIM is enabled and which protocol capabilities are supported:
 
 | Feature                      | Description                                                                    |
 |------------------------------|--------------------------------------------------------------------------------|
