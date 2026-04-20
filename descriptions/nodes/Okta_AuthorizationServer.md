@@ -6,19 +6,3 @@ Okta authorization servers are represented as Okta_AuthorizationServer nodes.
 
 > [!NOTE]
 > The relationships between authorization servers and applications are currently not evaluated in BloodHound.
-
-## Sample Property Values
-
-```yaml
-id: ausz6ipkn4u0hDzyf697
-name: app creation
-displayName: app creation
-oktaDomain: contoso.okta.com
-status: INACTIVE
-issuer: https://contoso.okta.com/oauth2/ausz6ipkn4u0hDzyf697
-issuerMode: DYNAMIC
-audiences:
-  - test
-created: 2026-01-14T15:41:28+00:00
-lastUpdated: 2026-01-14T16:09:30+00:00
-```

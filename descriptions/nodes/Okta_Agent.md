@@ -5,19 +5,3 @@ The Okta_Agent node represents an Okta Agent, which is a component used in Okta'
 One or more agents are grouped into Agent Pools, represented by the [Okta_AgentPool](Okta_AgentPool.md) nodes, to provide redundancy and load balancing.
 
 ![Active Directory Agent in BloodHound](../Images/bloodhound-ad-agent.png)
-
-## Sample Property Values
-
-```yaml
-id: a53xfufl4rqWcHhQo697
-name: LON-SRV01
-displayName: LON-SRV01
-poolId: 0oaxg9rhdd7ncGCXv697
-oktaDomain: contoso.okta.com
-poolName: contoso.local
-operationalStatus: DISRUPTED
-updateStatus: Cancelled
-type: AD
-version: 3.22.0
-lastConnection: 2026-01-15T02:29:40+00:00
-```

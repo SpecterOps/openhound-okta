@@ -27,15 +27,3 @@ Resource sets are collections of entities that can be used to scope custom role 
 ![Okta Resource Set displayed in BloodHound](../Images/bloodhound-resource-set.png)
 
 Okta resource sets are represented as Okta_ResourceSet nodes.
-
-## Sample Property Values
-
-```yaml
-id: WORKFLOWS_IAM_POLICY@contoso.okta.com
-name: Workflows Resource Set
-displayName: Workflows Resource Set
-oktaDomain: contoso.okta.com
-description: A resource set managed by Workflows Administrator
-created: 2025-10-22T13:29:26+00:00
-lastUpdated: 2025-10-22T13:29:26+00:00
-```

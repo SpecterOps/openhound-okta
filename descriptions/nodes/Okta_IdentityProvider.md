@@ -8,20 +8,3 @@ Okta identity providers are represented as Okta_IdentityProvider nodes.
 
 > [!NOTE]
 > The inbound identity provider routing rules and JIT (Just-In-Time) provisioning settings are currently not evaluated.
-
-## Sample Property Values
-
-```yaml
-id: 0oazpi53t1cRNcPL4697
-name: Microsoft Entra ID
-displayName: Microsoft Entra ID
-oktaDomain: contoso.okta.com
-created: 2026-01-31T15:21:37+00:00
-issuerMode: DYNAMIC
-type: MICROSOFT
-enabled: false
-autoUserProvisioning: true
-governedGroupIds: []
-protocolType: OIDC
-url: https://login.microsoftonline.com/common/oauth2/v2.0/authorize
-```

@@ -26,31 +26,6 @@ The following roles can either be scoped to specific resources or assigned organ
 
 Okta built-in roles are represented as Okta_Role nodes.
 
-## Sample Property Values
-
-```yaml
-id: APP_ADMIN@contoso.okta.com
-name: Application Administrator
-displayName: Application Administrator
-oktaDomain: contoso.okta.com
-permissions:
-    - okta.apps.manage
-    - okta.apps.read
-    - okta.apps.assignment.manage
-    - okta.apps.clientCredentials.read
-    - okta.users.appAssignment.manage
-    - okta.groups.appAssignment.manage
-    - okta.policies.manage
-    - okta.policies.read
-    - okta.users.read
-    - okta.groups.read
-    - okta.users.userprofile.manage
-    - okta.users.userprofile.read
-    - okta.profilesources.import.run
-    - okta.agents.register
-    - okta.realms.read
-```
-
 ## Built-In Role Identifiers
 
 When working with roles using the Okta API, the built-in roles are referenced by the following identifiers:

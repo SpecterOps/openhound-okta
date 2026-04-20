@@ -4,20 +4,6 @@ Policies in Okta define the rules and conditions that govern authentication, aut
 
 Okta policies are represented as Okta_Policy nodes.
 
-## Sample Property Values
-
-```yaml
-id: rstw0o8il8ktUxo3t697
-name: Okta Account Management Policy
-displayName: Okta Account Management Policy
-oktaDomain: contoso.okta.com
-description: This policy defines how users must authenticate for authenticator enrollment, password reset, or unlock account. Password policy rules control whether to enforce this policy for password reset and unlock account.
-type: ACCESS_POLICY
-priority: 1
-system: false
-created: 2025-10-02T09:21:37+00:00
-```
-
 ## Policy Types
 
 The following [policy types](https://developer.okta.com/docs/api/openapi/okta-management/management/tag/Policy/) are supported by Okta:
