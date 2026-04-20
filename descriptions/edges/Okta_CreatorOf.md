@@ -1,6 +1,6 @@
 ## General Information
 
-The non-traversable `Okta_CreatorOf` edges represent the creator relationships between API Service Integration instances and users in Okta:
+The non-traversable Okta_CreatorOf edges represent the creator relationships between API Service Integration instances and users in Okta:
 
 ```mermaid
 graph LR

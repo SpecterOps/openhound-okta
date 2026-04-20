@@ -1,6 +1,6 @@
 ## General Information
 
-The traversable `Okta_ReadPasswordUpdates` edges represent applications that can read password updates over SCIM.
+The traversable Okta_ReadPasswordUpdates edges represent applications that can read password updates over SCIM.
 
 ```mermaid
 graph LR

@@ -1,6 +1,6 @@
 ## General Information
 
-The traversable `Okta_GroupPull` edges represent the group synchronization relationships from applications to Okta:
+The traversable Okta_GroupPull edges represent the group synchronization relationships from applications to Okta:
 
 ```mermaid
 graph LR

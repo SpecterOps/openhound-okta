@@ -1,6 +1,6 @@
 ## General Information
 
-The traversable `Okta_ResourceSetContains` edges represent the membership relationships between resource sets and their member entities in Okta:
+The traversable Okta_ResourceSetContains edges represent the membership relationships between resource sets and their member entities in Okta:
 
 ```mermaid
 graph LR
@@ -11,12 +11,11 @@ graph LR
     a1("Okta_Application GitHub")
     d1("Okta_Device John's MacBook")
     rs1 -- Okta_ResourceSetContains --> u1
-    rs1 -. Okta_ResourceSetContains .-> g1
+    rs1 -- Okta_ResourceSetContains --> g1
     rs1 -- Okta_ResourceSetContains --> a1
     rs1 -- Okta_ResourceSetContains --> d1
     u2 -- Okta_MemberOf --> g1
     rs1 -- Okta_ResourceSetContains --> u2
 ```
 
-Note that users can also be members of resource sets indirectly through group memberships.
-The intermediate group will not appear in the graph, but the user membership will be resolved by `OktaHound`.
+Note that users can also be members of resource sets indirectly through group memberships. The intermediate group will not appear in the graph, but the user membership will be resolved by the collector.

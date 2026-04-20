@@ -1,6 +1,6 @@
 ## General Information
 
-The traversable `Okta_RealmContains` edges represent containment relationships between realms and the users assigned to those realms.
+The traversable Okta_RealmContains edges represent containment relationships between realms and the users assigned to those realms.
 
 ```mermaid
 graph LR
@@ -14,5 +14,5 @@ graph LR
 	r2 -- Okta_RealmContains --> u3
 ```
 
-> [!WARNING]
-> Okta Realms are currently not supported by `OktaHound` due to licensing restrictions.
+> [!NOTE]
+> Okta Realms are currently not supported by BloodHound due to licensing restrictions.

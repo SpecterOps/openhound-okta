@@ -1,7 +1,6 @@
 ## General Information
 
-The traversable `Okta_MobileAdmin` edges represent Mobile Administrator role assignments.
-Mobile Administrators can manage mobile device settings and configurations within their assigned scope.
+The traversable Okta_MobileAdmin edges represent Mobile Administrator role assignments. Mobile Administrators can manage mobile device settings and configurations within their assigned scope.
 
 ```mermaid
 graph LR

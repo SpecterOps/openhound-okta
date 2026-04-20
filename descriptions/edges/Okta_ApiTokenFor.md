@@ -1,6 +1,6 @@
 ## General Information
 
-The traversable `Okta_ApiTokenFor` edges represent the API token assignments for users in Okta, represented by the [Okta_User](../Nodes/Okta_User.md) nodes:
+The traversable Okta_ApiTokenFor edges represent the API token assignments for users in Okta, represented by the Okta_User nodes:
 
 ```mermaid
 graph LR

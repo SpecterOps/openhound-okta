@@ -1,9 +1,6 @@
 ## General Information
 
-The traversable `Okta_ResetPassword` edges represent custom role permissions that allow a principal (user, group, or application)
-to reset passwords or temporary credentials for scoped Okta users.
-These edges are created when a custom role includes
-password management permissions such as `okta.users.credentials.resetPassword`, `okta.users.credentials.manage`, `okta.users.credentials.manageTemporaryAccessCode`, or `okta.users.manage`.
+The traversable Okta_ResetPassword edges represent custom role permissions that allow a principal (user, group, or application) to reset passwords or temporary credentials for scoped Okta users. These edges are created when a custom role includes password management permissions such as `okta.users.credentials.resetPassword`, `okta.users.credentials.manage`, `okta.users.credentials.manageTemporaryAccessCode`, or `okta.users.manage`.
 
 ```mermaid
 graph LR
@@ -14,4 +11,23 @@ graph LR
     g1 -- Okta_ResetPassword --> u2
     g1 -- Okta_ResetFactors --> u2
     app1 -- Okta_ResetPassword --> u1
+```
+
+The edge is calculated based on custom role scoping.
+
+```mermaid
+graph TD
+    u1("Okta_User john\@contoso.com")
+    u2("Okta_User alice\@contoso.com")
+    g1("Okta_Group Help Desk")
+    rs("Okta_ResourceSet Frontline Workers")
+    a("Okta_RoleAssignment Authentication Admins")
+    r("Okta_CustomRole Authentication Admins")
+    g1 -. Okta_HasRole .-> r
+    a -. Okta_ScopedTo .-> rs
+    g1 -. Okta_HasRoleAssignment .-> a
+    rs -- Okta_ResourceSetContains --> u2
+    u1 -- Okta_MemberOf --> g1
+    g1 -- Okta_ResetPassword --> u2
+    g1 -- Okta_ResetFactors --> u2
 ```

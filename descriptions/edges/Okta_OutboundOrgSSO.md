@@ -1,10 +1,10 @@
 ## General Information
 
-The traversable `Okta_OutboundOrgSSO` edges represent the Single Sign-On (SSO) relationships between Okta applications and supported external organizations or tenants, such as GitHub Enterprise or Jamf Pro, using SAML 2.0 or OIDC protocols.
+The traversable Okta_OutboundOrgSSO edges represent the Single Sign-On (SSO) relationships between Okta applications and supported external organizations or tenants, such as GitHub Enterprise or Jamf Pro, using SAML 2.0 or OIDC protocols.
 
 ```mermaid
 graph LR
-  subgraph okta["OktaHound"]
+  subgraph okta["OpenHound Okta"]
     direction TB
     o("Okta_Organization contoso.okta.com")
     app1("Okta_Application GitHub Enterprise Cloud")
@@ -12,17 +12,16 @@ graph LR
     o -- Okta_Contains --> app1
     o -- Okta_Contains --> app2
   end
-  subgraph "GitHound"
+  subgraph "GitHub"
     direction TB
     ghorg("GH_Organization Contoso")
     app1 -- Okta_OutboundOrgSSO --> ghorg
   end
-  subgraph "JamfHound"
+  subgraph "Jamf"
     direction TB
     jamf("jamf_SSOIntegration contoso.jamfcloud.com-SSO")
     app2 -- Okta_OutboundOrgSSO --> jamf
   end
 ```
 
-The respective BloodHound collectors, e.g., `GitHound` for GitHub organizations and `JamfHound` for Jamf Pro tenants,
-must be used to gather the external node information.
+The respective BloodHound collectors, e.g., OpenHound Github for GitHub organizations and OpenHound Jamf for Jamf Pro tenants, must be used to gather the external node information.

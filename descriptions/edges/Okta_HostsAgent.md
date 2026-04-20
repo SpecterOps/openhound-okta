@@ -1,6 +1,6 @@
 ## General Information
 
-Hybrid `Okta_HostsAgent` edges connect an AD `Computer` node to the `Okta_Agent` running on that host.
+Hybrid Okta_HostsAgent edges connect an AD Computer node to the Okta_Agent running on that host.
 
 ```mermaid
 graph LR

@@ -1,10 +1,10 @@
 ## General Information
 
-The traversable `Okta_KeyOf` edges represent the relationships between applications ([Okta_Application](../Nodes/Okta_Application.md)) and their JWKs:
+The traversable Okta_KeyOf edges represent the relationships between applications Okta_Application and their JWKs:
 
 ```mermaid
 graph LR
-    app1("Okta_Application OktaHound Collector")
+    app1("Okta_Application OpenHound Okta Collector")
     app2("Okta_Application Security Scanner")
     key1("Okta_JWK ABC123")
     key2("Okta_JWK DEF456")
@@ -14,5 +14,4 @@ graph LR
     key3 -- Okta_KeyOf --> app2
 ```
 
-Possession of the private key corresponding to a JWK allows an attacker to authenticate as the application.
-The `Okta_KeyOf` edge can be used in BloodHound to understand which applications use JWK-based authentication and trace potential attack paths involving compromised private keys.
+Possession of the private key corresponding to a JWK allows an attacker to authenticate as the application. The Okta_KeyOf edge can be used in BloodHound to understand which applications use JWK-based authentication and trace potential attack paths involving compromised private keys.

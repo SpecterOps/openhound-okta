@@ -4,7 +4,7 @@ Identity Providers (IdPs) in Okta represent external authentication sources that
 
 When users authenticate through an external identity provider, Okta can optionally create or link user accounts, enabling federated authentication across multiple systems.
 
-In `OktaHound`, identity providers are represented as `Okta_IdentityProvider` nodes.
+Okta identity providers are represented as Okta_IdentityProvider nodes.
 
-> [!WARNING]
-> The inbound identity provider routing rules and JIT (Just-In-Time) provisioning settings are currently not evaluated by `OktaHound`.
+> [!NOTE]
+> The inbound identity provider routing rules and JIT (Just-In-Time) provisioning settings are currently not evaluated.

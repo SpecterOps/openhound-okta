@@ -1,6 +1,6 @@
 ## General Information
 
-The traversable `Okta_Contains` edges represent the containment relationships between the organization and other entities in Okta. The organization node will have `Okta_Contains` edges to all other nodes in the graph, with some exceptions.
+The traversable Okta_Contains edges represent the containment relationships between the organization and other entities in Okta. The organization node will have Okta_Contains edges to all other nodes in the graph, with some exceptions.
 
 ```mermaid
 graph LR

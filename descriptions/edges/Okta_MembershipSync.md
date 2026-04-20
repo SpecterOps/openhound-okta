@@ -1,6 +1,6 @@
 ## General Information
 
-The traversable hybrid `Okta_MembershipSync` edges represent the synchronization relationships between groups in external directories and their corresponding groups in Okta:
+The traversable hybrid Okta_MembershipSync edges represent the synchronization relationships between groups in external directories and their corresponding groups in Okta:
 
 ```mermaid
 graph TB

@@ -1,6 +1,6 @@
 ## General Information
 
-The non-traversable `Okta_HasRole` edges represent the role assignments for users in Okta:
+The non-traversable Okta_HasRole edges represent the role assignments for users in Okta:
 
 ```mermaid
 graph LR
@@ -14,5 +14,5 @@ graph LR
     g1 -. Okta_HasRole .-> r1
     g1 -. Okta_HasRole .-> r2
     a1 -. Okta_HasRole .-> r2
-    u2 -. Okta_MemberOf .-> g1
+    u2 -- Okta_MemberOf --> g1
 ```

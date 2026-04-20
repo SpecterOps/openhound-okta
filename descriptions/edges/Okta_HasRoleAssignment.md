@@ -1,7 +1,6 @@
 ## General Information
 
-The `Okta_HasRoleAssignment` edges connect users, groups, and applications to their respective `Okta_RoleAssignment` nodes.
-The `Okta_ScopedTo` edges connect the `Okta_RoleAssignment` nodes to the resources they are scoped to, such as the organization or specific groups or applications.
+The Okta_HasRoleAssignment edges connect users, groups, and applications to their respective Okta_RoleAssignment nodes. The Okta_ScopedTo edges connect the Okta_RoleAssignment nodes to the resources they are scoped to, such as the organization or specific groups or applications.
 
 ```mermaid
 graph TB
@@ -21,7 +20,7 @@ graph TB
     g1 -. Okta_HasRole .-> r1
     g1 -- Okta_HelpDeskAdmin --> u3
     u3 -- Okta_MemberOf --> g2
-    ra1 -- Okta_ScopedTo --> g2
+    ra1 -. Okta_ScopedTo .-> g2
     u2 -. Okta_HasRoleAssignment .-> ra2
     ra2 -. Okta_ScopedTo .-> org
     u2 -- Okta_SuperAdmin --> org

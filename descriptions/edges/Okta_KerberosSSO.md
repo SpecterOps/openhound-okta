@@ -1,6 +1,6 @@
 ## General Information
 
-Hybrid traversable `Okta_KerberosSSO` edges represent [agentless desktop SSO](https://help.okta.com/en-us/content/topics/directory/ad-dsso-about-workflow.htm) trust from an on-prem AD `User` account to an AD-backed `Okta_Application`.
+Hybrid traversable Okta_KerberosSSO edges represent [agentless desktop SSO](https://help.okta.com/en-us/content/topics/directory/ad-dsso-about-workflow.htm) trust from an on-prem AD User account to an AD-backed Okta_Application.
 
 ```mermaid
 graph LR
