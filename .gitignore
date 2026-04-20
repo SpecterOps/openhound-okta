@@ -10,6 +10,7 @@ output
 graph
 logs
 .vscode
+docs/official-docs/
 
 # Codex
 .codex
