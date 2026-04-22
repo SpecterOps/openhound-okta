@@ -3,12 +3,13 @@ from datetime import datetime
 
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
 from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from pydantic import BaseModel
 from pydantic import ConfigDict, Field
 
 from openhound_okta.graph import OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
-from pydantic import BaseModel
+from openhound_okta.models.read_client_secret import read_client_secret_edges
 
 
 @dataclass
@@ -182,6 +183,13 @@ class Embedded(BaseModel):
             end=nk.APPLICATION,
             kind=ek.APP_ADMIN,
             description="Application has app admin role",
+            traversable=True,
+        ),
+        EdgeDef(
+            start=nk.USER,
+            end=nk.CLIENT_SECRET,
+            kind=ek.READ_CLIENT_SECRET,
+            description="User can read application client secrets",
             traversable=True,
         ),
         # Group Membership Role
@@ -506,7 +514,6 @@ class UserRoleAssignment(BaseAsset):
 
     @property
     def _add_member_edges(self):
-        # TODO: The custom role check does not work yet
         if self.type == "CUSTOM" and self.role:
             has_group_members_permission = self._lookup.has_role_permission(
                 self.role, "okta.groups.members.manage"
@@ -558,10 +565,10 @@ class UserRoleAssignment(BaseAsset):
     @property
     def _scoped_to_app_edges(self):
         if (
-            self.embedded
-            and self.embedded.targets
-            and self.embedded.targets.catalog
-            and self.embedded.targets.catalog.apps
+                self.embedded
+                and self.embedded.targets
+                and self.embedded.targets.catalog
+                and self.embedded.targets.catalog.apps
         ):
             for app in self.embedded.targets.catalog.apps:
                 if app.id:
@@ -615,37 +622,17 @@ class UserRoleAssignment(BaseAsset):
     @property
     def _app_admin_edges(self):
         """
-        APP_ADMIN permission edges: (:Assignee)-[:Okta_AppAdmin]->(:Application|:ApiServiceIntegration)
-        If role has specific app targets, emit edges only to those apps.
-        If no targets, emit to all apps in the organization.
-        Apps/ApiServiceIntegrations with role assignments cannot be managed by APP_ADMIN.
+        APP_ADMIN permission edges: (:Assignee)-[:Okta_AppAdmin]->(:Application)
+        Emit edges to all apps in the organization.
         """
         if self.type == "APP_ADMIN":
-            # Get targets from embedded data, or all apps if no targets
-            if (
-                self.embedded
-                and self.embedded.targets
-                and self.embedded.targets.catalog
-                and self.embedded.targets.catalog.apps
-            ):
-                # Emit only to scoped targets
-                for app in self.embedded.targets.catalog.apps:
-                    if app.id:
-                        yield Edge(
-                            kind=ek.APP_ADMIN,
-                            start=EdgePath(value=self.source_id, match_by="id"),
-                            end=EdgePath(value=app.id, match_by="id"),
-                            properties=EdgeProperties(traversable=True),
-                        )
-            else:
-                # No targets specified, emit to all apps and API service integrations
-                for (app_id,) in self._lookup.all_applications():
-                    yield Edge(
-                        kind=ek.APP_ADMIN,
-                        start=EdgePath(value=self.source_id, match_by="id"),
-                        end=EdgePath(value=app_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
-                    )
+            for (app_id,) in self._lookup.all_applications():
+                yield Edge(
+                    kind=ek.APP_ADMIN,
+                    start=EdgePath(value=self.source_id, match_by="id"),
+                    end=EdgePath(value=app_id, match_by="id"),
+                    properties=EdgeProperties(traversable=True),
+                )
 
     @property
     def _helpdesk_admin_edges(self):
@@ -697,19 +684,19 @@ class UserRoleAssignment(BaseAsset):
         """
         if self.type == "ORG_ADMIN":
             has_targets = (
-                self.embedded
-                and self.embedded.targets
-                and (
-                    (
-                        self.embedded.targets.groups
-                        and len(self.embedded.targets.groups) > 0
+                    self.embedded
+                    and self.embedded.targets
+                    and (
+                            (
+                                    self.embedded.targets.groups
+                                    and len(self.embedded.targets.groups) > 0
+                            )
+                            or (
+                                    self.embedded.targets.catalog
+                                    and self.embedded.targets.catalog.apps
+                                    and len(self.embedded.targets.catalog.apps) > 0
+                            )
                     )
-                    or (
-                        self.embedded.targets.catalog
-                        and self.embedded.targets.catalog.apps
-                        and len(self.embedded.targets.catalog.apps) > 0
-                    )
-                )
             )
 
             if has_targets:
@@ -834,3 +821,4 @@ class UserRoleAssignment(BaseAsset):
         yield from self._scoped_to_app_edges
         yield from self._scoped_to_group_edges
         yield from self._scoped_to_org_edge
+        yield from read_client_secret_edges(self)
