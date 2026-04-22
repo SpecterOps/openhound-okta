@@ -2,7 +2,7 @@ from datetime import datetime
 
 from openhound.core.asset import BaseAsset, EdgeDef
 from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
@@ -75,6 +75,7 @@ class Resource(BaseAsset):
     id: str
     orn: str
     created: datetime | None = None
+    links: dict | None = Field(default=None, alias="_links")
 
     # Additional
     resource_set_id: str
