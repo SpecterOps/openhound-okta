@@ -294,7 +294,6 @@ def application_jwks(application: Application, ctx: SourceContext):
     # TODO: This is a dedicated API endpoint to get the JWKs, not sure if the embedded keys have a max/limit
     # for page in ctx.pool.paginate(f"/api/v1/apps/{application.id}/credentials/jwks"):
     #     yield page
-    # for key in application.jwk:
 
     oauth_client = application.settings.oauth_client
     if oauth_client and oauth_client.jwks:
@@ -314,7 +313,7 @@ def application_jwks(application: Application, ctx: SourceContext):
 def application_group_push_mappings(application: Application, ctx: SourceContext):
     if "GROUP_PUSH" in application.features:
         for page in ctx.pool.paginate(
-            f"/api/v1/apps/{application.id}/group-push/mappings"
+                f"/api/v1/apps/{application.id}/group-push/mappings"
         ):
             for item in page:
                 yield {"app_id": application.id, "app_name": application.name, **item}
@@ -326,11 +325,11 @@ def application_group_push_mappings(application: Application, ctx: SourceContext
 def application_secrets(application: Application, ctx: SourceContext):
     oauth_client = application.credentials.oauth_client
     if (
-        oauth_client
-        and oauth_client.token_endpoint_auth_method == "client_secret_basic"
+            oauth_client
+            and oauth_client.token_endpoint_auth_method == "client_secret_basic"
     ):
         for page in ctx.pool.paginate(
-            f"/api/v1/apps/{application.id}/credentials/secrets"
+                f"/api/v1/apps/{application.id}/credentials/secrets"
         ):
             for item in page:
                 yield {"app_id": application.id, "app_name": application.name, **item}
@@ -372,7 +371,7 @@ def client_applications(ctx: SourceContext):
 def client_role_assignments(client: ClientApplication, ctx: SourceContext):
     if client.application_type == "service":
         for page in ctx.pool.paginate(
-            f"/oauth2/v1/clients/{client.client_id}/roles?expand=targets/catalog/apps&expand=targets/groups"
+                f"/oauth2/v1/clients/{client.client_id}/roles?expand=targets/catalog/apps&expand=targets/groups"
         ):
             for item in page:
                 yield {"from_resource": "client", "source_id": client.client_id, **item}
@@ -414,7 +413,7 @@ def user_role_assignments(ctx: SourceContext):
 def group_role_assignments(group: Group, ctx: SourceContext):
     if group.embedded.stats.has_admin_privilege:
         for page in ctx.pool.paginate(
-            f"/api/v1/groups/{group.id}/roles?expand=targets/catalog/apps&expand=targets/groups"
+                f"/api/v1/groups/{group.id}/roles?expand=targets/catalog/apps&expand=targets/groups"
         ):
             for role in page:
                 yield {"from_resource": "group", "source_id": group.id, **role}
@@ -602,7 +601,7 @@ def resource_sets(ctx: SourceContext):
 @app.transformer(name="resources", columns=Resource, parallelized=True)
 def resources(resource_set: ResourceSet, ctx: SourceContext):
     for page in ctx.pool.paginate(
-        f"api/v1/iam/resource-sets/{resource_set.id}/resources"
+            f"api/v1/iam/resource-sets/{resource_set.id}/resources"
     ):
         for item in page:
             yield {"resource_set_id": resource_set.id, **item}
@@ -633,9 +632,9 @@ def api_services(ctx: SourceContext):
 
 @app.source(name="okta", max_table_nesting=0)
 def source(
-    credentials: Union[
-        OktaAppCredentials, OktaEncodedAppCredentials, OktaTokenCredentials
-    ] = dlt.secrets.value,
+        credentials: Union[
+            OktaAppCredentials, OktaEncodedAppCredentials, OktaTokenCredentials
+        ] = dlt.secrets.value,
 ) -> tuple:
     """DLT source, defines Okta collection resources and transformers.
 
