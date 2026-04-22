@@ -189,14 +189,17 @@ class User(BaseAsset):
 
     @property
     def _manager_of_edges(self):
-        if self.profile and self.profile.manager_id:
+        if (
+                self.profile
+                and self.profile.manager_id
+        ):
             manager_id = self._lookup.manager_id(self.profile.manager_id)
             if manager_id:
                 yield Edge(
                     kind=ek.MANAGER_OF,
                     start=EdgePath(value=manager_id, match_by="id"),
                     end=EdgePath(value=self.id, match_by="id"),
-                    properties=EdgeProperties(traversable=False),
+                    properties=EdgeProperties(traversable=True),
                 )
 
     @property
