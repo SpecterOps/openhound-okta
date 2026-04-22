@@ -52,6 +52,7 @@ class ApplicationSecrets(BaseAsset):
     model_config = ConfigDict(populate_by_name=True)
 
     id: str
+    secret_hash: str
     last_updated: datetime | None = Field(default=None, alias="lastUpdated")
     created: datetime | None = None
     status: str
