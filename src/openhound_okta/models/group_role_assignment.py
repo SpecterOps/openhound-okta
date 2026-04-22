@@ -3,13 +3,13 @@ from datetime import datetime
 
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
 from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from pydantic import BaseModel
 from pydantic import ConfigDict, Field
 
 from openhound_okta.graph import OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
-
-from pydantic import BaseModel
+from openhound_okta.models.read_client_secret import read_client_secret_edges
 
 
 @dataclass
@@ -105,6 +105,13 @@ class Embedded(BaseModel):
             end=nk.APPLICATION,
             kind=ek.APP_ADMIN,
             description="Group has app admin role",
+            traversable=True,
+        ),
+        EdgeDef(
+            start=nk.GROUP,
+            end=nk.CLIENT_SECRET,
+            kind=ek.READ_CLIENT_SECRET,
+            description="Group can read application client secrets",
             traversable=True,
         ),
         EdgeDef(
@@ -488,3 +495,4 @@ class GroupRoleAssignment(BaseAsset):
         yield from self._manage_app_edges
         yield from self._scoped_to_group_edges
         yield from self._scoped_to_org_edge
+        yield from read_client_secret_edges(self)
