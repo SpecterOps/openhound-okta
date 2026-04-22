@@ -21,7 +21,15 @@ class OktaLookup(LookupManager):
             f"""SELECT label FROM {self.schema}.custom_role_permissions WHERE role_id = ? AND label = ?""",
             [role_id, permission],
         )
-        return res is not None
+        return res
+
+    @lru_cache
+    def application_exists(self, app_id: str) -> bool:
+        res = self._find_single_object(
+            f"""SELECT id FROM {self.schema}.applications WHERE id = ?""",
+            [app_id],
+        )
+        return res
 
     @lru_cache
     def all_groups(self):
@@ -42,6 +50,34 @@ class OktaLookup(LookupManager):
     def all_applications(self):
         res = self._find_all_objects(f"""SELECT id FROM {self.schema}.applications""")
         return res
+
+    @lru_cache
+    def application_ids_by_name(self, app_name: str):
+        res = self._find_all_objects(
+            f"""SELECT id FROM {self.schema}.applications WHERE name = ?""",
+            [app_name],
+        )
+        return res
+
+    @lru_cache
+    def application_secret_ids(self, app_id: str):
+        res = self._find_all_objects(
+            f"""SELECT id FROM {self.schema}.application_secrets WHERE app_id = ?""",
+            [app_id],
+        )
+        return res
+
+    @lru_cache
+    def resource_set_application_ids(self, resource_set_id: str):
+        rows = self._find_all_objects(
+            f"""SELECT orn FROM {self.schema}.resources WHERE resource_set_id = ? AND contains(orn, ':apps')""",
+            [resource_set_id],
+        )
+        application_ids: set[str] = set()
+        # TODO: Implement a resource on the test tenant
+        # when the test tenant contains a valid edge based on a
+        # custom role, add the conditions to return app ids here.
+        return application_ids
 
     @lru_cache
     def all_policies(self):
@@ -70,14 +106,7 @@ class OktaLookup(LookupManager):
     @lru_cache
     def manager_id(self, manager_login: str):
         res = self._find_single_object(
-            f"""SELECT id, json_value(profile, 'login') AS login FROM {self.schema}.users WHERE login = ?""",
+            f"""SELECT id FROM {self.schema}.users WHERE json_extract_string(profile, '$.login') = ?""",
             [manager_login],
         )
         return res
-
-    # @lru_cache
-    # def group_member_ids(self, group_id: str):
-    #     res = self._find_all_objects(
-    #         f"""SELECT id FROM {self.schema}.group_memberships WHERE group_id = ?""",
-    #         [group_id]
-    #     return res
