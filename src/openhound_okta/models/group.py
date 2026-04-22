@@ -129,8 +129,8 @@ class Group(BaseAsset):
     @property
     def _membership_sync_inbound_ad_edge(self):
         if (
-            "okta:windows_security_principal" in self.object_class
-            and self.profile.object_sid
+                "okta:windows_security_principal" in self.object_class
+                and self.profile.object_sid
         ):
             yield Edge(
                 kind=ek.MEMBERSHIP_SYNC,
@@ -140,11 +140,10 @@ class Group(BaseAsset):
             )
 
     @property
-    def _membership_sync_inbound_app_edge(self):
-        # TODO: Validate logic if this is just base on source id, there is no existing edge in the test tenant
-        if self.type == "APP_GROUP" and "okta:user_group" in self.object_class:
+    def _group_pull_edge(self):
+        if self.source and self.source.id and self._lookup.application_exists(self.source.id):
             yield Edge(
-                kind=ek.MEMBERSHIP_SYNC,
+                kind=ek.GROUP_PULL,
                 start=EdgePath(value=self.source.id, match_by="id"),
                 end=EdgePath(value=self.id, match_by="id"),
                 properties=EdgeProperties(traversable=True),
@@ -163,4 +162,4 @@ class Group(BaseAsset):
     def edges(self):
         yield from self._contains_edges
         yield from self._membership_sync_inbound_ad_edge
-        yield from self._membership_sync_inbound_app_edge
+        yield from self._group_pull_edge
