@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from dataclasses import field
 from datetime import datetime
 
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
@@ -8,8 +9,6 @@ from pydantic import ConfigDict, Field
 from openhound_okta.graph import OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
-
-from dataclasses import field
 
 
 @dataclass
@@ -53,7 +52,6 @@ class ApplicationSecrets(BaseAsset):
     model_config = ConfigDict(populate_by_name=True)
 
     id: str
-    secret_hash: str
     last_updated: datetime | None = Field(default=None, alias="lastUpdated")
     created: datetime | None = None
     status: str
