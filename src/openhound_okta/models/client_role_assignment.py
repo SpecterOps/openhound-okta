@@ -3,12 +3,13 @@ from datetime import datetime
 
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
 from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from pydantic import BaseModel
 from pydantic import ConfigDict, Field
 
 from openhound_okta.graph import OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
-from pydantic import BaseModel
+from openhound_okta.models.read_client_secret import read_client_secret_edges
 
 
 @dataclass
@@ -90,6 +91,13 @@ class Embedded(BaseModel):
             end=nk.APPLICATION,
             kind=ek.APP_ADMIN,
             description="Application has app admin role",
+            traversable=True,
+        ),
+        EdgeDef(
+            start=nk.APPLICATION,
+            end=nk.CLIENT_SECRET,
+            kind=ek.READ_CLIENT_SECRET,
+            description="Application can read application client secrets",
             traversable=True,
         ),
         EdgeDef(
@@ -273,19 +281,6 @@ class ClientRoleAssignment(BaseAsset):
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=group_id, match_by="id"),
                     )
-        # elif self.type == "SUPER_ADMIN" or (
-        #     BUILT_IN_PERMISSIONS.get(self.type)
-        #     and (
-        #         "okta.groups.members.manage" in BUILT_IN_PERMISSIONS[self.type]
-        #         or "okta.groups.manage" in BUILT_IN_PERMISSIONS[self.type]
-        #     )
-        # ):
-        #     for (group_id,) in self._lookup.all_groups():
-        #         yield Edge(
-        #             kind=ek.ADD_MEMBER,
-        #             start=EdgePath(value=self.source_id, match_by="id"),
-        #             end=EdgePath(value=group_id, match_by="id"),
-        #         )
 
     @property
     def _scoped_to_org_edge(self):
@@ -488,3 +483,4 @@ class ClientRoleAssignment(BaseAsset):
         yield from self._manage_app_edges
         yield from self._scoped_to_group_edges
         yield from self._scoped_to_org_edge
+        yield from read_client_secret_edges(self)
