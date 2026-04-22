@@ -626,13 +626,31 @@ class UserRoleAssignment(BaseAsset):
         Emit edges to all apps in the organization.
         """
         if self.type == "APP_ADMIN":
-            for (app_id,) in self._lookup.all_applications():
-                yield Edge(
-                    kind=ek.APP_ADMIN,
-                    start=EdgePath(value=self.source_id, match_by="id"),
-                    end=EdgePath(value=app_id, match_by="id"),
-                    properties=EdgeProperties(traversable=True),
-                )
+            # Get targets from embedded data, or all apps if no targets
+            if (
+                    self.embedded
+                    and self.embedded.targets
+                    and self.embedded.targets.catalog
+                    and self.embedded.targets.catalog.apps
+            ):
+                # Emit only to scoped targets
+                for app in self.embedded.targets.catalog.apps:
+                    if app.id:
+                        yield Edge(
+                            kind=ek.APP_ADMIN,
+                            start=EdgePath(value=self.source_id, match_by="id"),
+                            end=EdgePath(value=app.id, match_by="id"),
+                            properties=EdgeProperties(traversable=True),
+                        )
+            else:
+                # No targets specified, emit to all apps and API service integrations
+                for (app_id,) in self._lookup.all_applications():
+                    yield Edge(
+                        kind=ek.APP_ADMIN,
+                        start=EdgePath(value=self.source_id, match_by="id"),
+                        end=EdgePath(value=app_id, match_by="id"),
+                        properties=EdgeProperties(traversable=True),
+                    )
 
     @property
     def _helpdesk_admin_edges(self):
