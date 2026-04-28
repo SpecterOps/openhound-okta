@@ -95,10 +95,13 @@ class Agent(BaseAsset):
 
     @property
     def _hosts_agent_edge(self):
-        # TODO: It seems that the agent name in Okta has TEST- prepended. Check the conditional logic
         if self.agent_type == "AD":
+            # The agent name has a prefix that needs to be stripped before matching is possible
+            agent_name_split = self.name.split("-")
+            agent_name = '-'.join(agent_name_split[1:])
+            agent_match = f"{agent_name.upper()}-{self.agent_pool_name.upper()}"
             match_with = PropertyMatch(
-                key="domain", value=f"{self.name}.{self.agent_pool_name}"
+                key="name", value=agent_match
             )
             yield Edge(
                 start=ConditionalEdgePath(
