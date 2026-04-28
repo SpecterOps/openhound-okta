@@ -291,10 +291,6 @@ def applications(ctx: SourceContext):
 
 @app.transformer(name="application_jwks", columns=ApplicationJWKS, parallelized=True)
 def application_jwks(application: Application, ctx: SourceContext):
-    # TODO: This is a dedicated API endpoint to get the JWKs, not sure if the embedded keys have a max/limit
-    # for page in ctx.pool.paginate(f"/api/v1/apps/{application.id}/credentials/jwks"):
-    #     yield page
-
     oauth_client = application.settings.oauth_client
     if oauth_client and oauth_client.jwks:
         for key in oauth_client.jwks.keys:
