@@ -266,6 +266,7 @@ class GroupRoleAssignment(BaseAsset):
 
     @property
     def _add_member_edges(self):
+        # TODO: Either all groups or resource-selected groups
         if self.type == "CUSTOM" and self.role:
             has_group_members_permission = self._lookup.has_role_permission(
                 self.role, "okta.groups.members.manage"
@@ -280,19 +281,6 @@ class GroupRoleAssignment(BaseAsset):
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=group_id, match_by="id"),
                     )
-        # elif self.type == "SUPER_ADMIN" or (
-        #     BUILT_IN_PERMISSIONS.get(self.type)
-        #     and (
-        #         "okta.groups.members.manage" in BUILT_IN_PERMISSIONS[self.type]
-        #         or "okta.groups.manage" in BUILT_IN_PERMISSIONS[self.type]
-        #     )
-        # ):
-        #     for (group_id,) in self._lookup.all_groups():
-        #         yield Edge(
-        #             kind=ek.ADD_MEMBER,
-        #             start=EdgePath(value=self.source_id, match_by="id"),
-        #             end=EdgePath(value=group_id, match_by="id"),
-        #         )
 
     @property
     def _manage_app_edges(self):
@@ -376,14 +364,26 @@ class GroupRoleAssignment(BaseAsset):
 
     @property
     def _helpdesk_admin_edges(self):
+        # TODO: This can be scoped to users and/or groups
         if self.type == "HELP_DESK_ADMIN":
-            for (user_id,) in self._lookup.all_users():
-                yield Edge(
-                    kind=ek.HELPDESK_ADMIN,
-                    start=EdgePath(value=self.source_id, match_by="id"),
-                    end=EdgePath(value=user_id, match_by="id"),
-                    properties=EdgeProperties(traversable=True),
-                )
+            # Emit only to scoped target groups
+            if self.embedded and self.embedded.targets and self.embedded.targets.groups:
+                for group in self.embedded.targets.groups:
+                    yield Edge(
+                        kind=ek.HELPDESK_ADMIN,
+                        start=EdgePath(value=self.source_id, match_by="id"),
+                        end=EdgePath(value=group.id, match_by="id"),
+                        properties=EdgeProperties(traversable=True),
+                    )
+            else:
+                # No targets specified, emit to all users
+                for (user_id,) in self._lookup.all_users():
+                    yield Edge(
+                        kind=ek.HELPDESK_ADMIN,
+                        start=EdgePath(value=self.source_id, match_by="id"),
+                        end=EdgePath(value=user_id, match_by="id"),
+                        properties=EdgeProperties(traversable=True),
+                    )
 
     @property
     def _mobile_admin_edges(self):
@@ -418,6 +418,7 @@ class GroupRoleAssignment(BaseAsset):
     @property
     def _org_admin_edges(self):
         if self.type == "ORG_ADMIN":
+            # TODO: Add edge to a group
             for (device_id,) in self._lookup.all_devices():
                 yield Edge(
                     kind=ek.ORG_ADMIN,
