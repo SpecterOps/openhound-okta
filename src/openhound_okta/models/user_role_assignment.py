@@ -529,21 +529,6 @@ class UserRoleAssignment(BaseAsset):
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=group_id, match_by="id"),
                     )
-        # else:
-        #     if self.type == "SUPER_ADMIN" or (
-        #         BUILT_IN_PERMISSIONS.get(self.type)
-        #         and (
-        #             "okta.groups.members.manage" in BUILT_IN_PERMISSIONS[self.type]
-        #             or ["okta.groups.manage"] in BUILT_IN_PERMISSIONS[self.type]
-        #         )
-        #     ):
-        #         all_groups = self._lookup.all_groups()
-        #         for (group_id,) in all_groups:
-        #             yield Edge(
-        #                 kind=ek.ADD_MEMBER,
-        #                 start=EdgePath(value=self.source_id, match_by="id"),
-        #                 end=EdgePath(value=group_id, match_by="id"),
-        #             )
 
     @property
     def _scoped_to_org_edge(self):
@@ -662,12 +647,13 @@ class UserRoleAssignment(BaseAsset):
         """
         if self.type == "HELP_DESK_ADMIN":
             if self.embedded and self.embedded.targets and self.embedded.targets.groups:
-                # Emit to users in scoped target groups
-                # TODO: Resolve group members from embedded target group IDs
                 for group in self.embedded.targets.groups:
-                    # For now, emit edge to the group itself as a placeholder
-                    # Full implementation would need to resolve all users in the group
-                    pass
+                    yield Edge(
+                        kind=ek.HELPDESK_ADMIN,
+                        start=EdgePath(value=self.source_id, match_by="id"),
+                        end=EdgePath(value=group.id, match_by="id"),
+                        properties=EdgeProperties(traversable=True),
+                    )
             else:
                 # No targets specified, emit to all users
                 all_users = self._lookup.all_users()
