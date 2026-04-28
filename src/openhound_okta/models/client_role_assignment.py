@@ -454,6 +454,14 @@ class ClientRoleAssignment(BaseAsset):
                     properties=EdgeProperties(traversable=True),
                 )
 
+            for (group_id,) in self._lookup.all_groups():
+                yield Edge(
+                    kind=ek.ORG_ADMIN,
+                    start=EdgePath(value=self.source_id, match_by="id"),
+                    end=EdgePath(value=group_id, match_by="id"),
+                    properties=EdgeProperties(traversable=True),
+                )
+
     @property
     def _super_admin_edge(self):
         if self.type == "SUPER_ADMIN":

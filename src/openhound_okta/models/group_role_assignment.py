@@ -418,7 +418,6 @@ class GroupRoleAssignment(BaseAsset):
     @property
     def _org_admin_edges(self):
         if self.type == "ORG_ADMIN":
-            # TODO: Add edge to a group
             for (device_id,) in self._lookup.all_devices():
                 yield Edge(
                     kind=ek.ORG_ADMIN,
@@ -438,6 +437,13 @@ class GroupRoleAssignment(BaseAsset):
                     kind=ek.ORG_ADMIN,
                     start=EdgePath(value=self.source_id, match_by="id"),
                     end=EdgePath(value=app_id, match_by="id"),
+                    properties=EdgeProperties(traversable=True)
+                )
+            for (group_id,) in self._lookup.all_groups():
+                yield Edge(
+                    kind=ek.ORG_ADMIN,
+                    start=EdgePath(value=self.source_id, match_by="id"),
+                    end=EdgePath(value=group_id, match_by="id"),
                     properties=EdgeProperties(traversable=True),
                 )
 
