@@ -57,7 +57,6 @@ class Realm(BaseAsset):
 
     @property
     def as_node(self):
-        print(self._extras)
         return OktaNode(
             kinds=[nk.REALM],
             properties=RealmProperties(
