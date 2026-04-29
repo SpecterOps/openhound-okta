@@ -1,10 +1,12 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import ClassVar
+from urllib.parse import urlparse
 
+from dlt.common import json
 from dlt.common.libs.pydantic import DltConfig
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
-from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties, ConditionalEdgePath, PropertyMatch
 from pydantic import BaseModel, ConfigDict, Field
 
 from openhound_okta.graph import OktaNode, OktaNodeProperties
@@ -115,6 +117,7 @@ class Group(BaseAsset):
             kinds=[nk.GROUP],
             properties=GroupProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 id=self.id,
                 name=profile_name or self.id,
                 displayname=profile_name or self.id,
@@ -141,7 +144,7 @@ class Group(BaseAsset):
 
     @property
     def _group_pull_edge(self):
-        if self.source and self.source.id and self._lookup.application_exists(self.source.id):
+        if self.source and self.source.id and self._lookup.application_by_id(self.source.id):
             yield Edge(
                 kind=ek.GROUP_PULL,
                 start=EdgePath(value=self.source.id, match_by="id"),
@@ -160,18 +163,26 @@ class Group(BaseAsset):
 
     @property
     def _membership_sync_inbound_app_edge(self):
-        # TODO: Validate logic if this is just based on source id, there is no existing edge in the test tenant
         if self.type == "APP_GROUP" and "okta:user_group" in self.object_class:
-            yield Edge(
-                kind=ek.MEMBERSHIP_SYNC,
-                start=EdgePath(value=self.source.id, match_by="id"),
-                end=EdgePath(value=self.id, match_by="id"),
-                properties=EdgeProperties(traversable=True),
-            )
+            app_settings = self._lookup.application_settings(self.source.id)
+            if app_settings:
+                app_settings_obj = json.loads(app_settings)
+                source_domain = urlparse(app_settings_obj["app"]["baseUrl"]).netloc
+                match_with = PropertyMatch(
+                    key="tenant_domain", value=source_domain
+                )
+                yield Edge(
+                    kind=ek.MEMBERSHIP_SYNC,
+                    start=ConditionalEdgePath(
+                        kind=nk.GROUP, property_matchers=[match_with]
+                    ),
+                    end=EdgePath(value=self.id, match_by="id"),
+                    properties=EdgeProperties(traversable=True),
+                )
 
     @property
     def edges(self):
-        # Double check: _membership_sync_inbound_app_edge
+        yield from self._membership_sync_inbound_app_edge
         yield from self._contains_edges
         yield from self._membership_sync_inbound_ad_edge
         yield from self._group_pull_edge
