@@ -8,8 +8,6 @@ from openhound.core.models.entries_dataclass import (
     Edge,
     EdgePath,
     EdgeProperties,
-    ConditionalEdgePath,
-    PropertyMatch,
 )
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -186,6 +184,7 @@ class Application(BaseAsset):
 
     @property
     def edges(self):
+        # Disabled until BHE supports array-based matching
+        # yield from self._kerberos_sso_edge
         yield from self._contains_edge
         yield from self._outbound_jamf_sso_edge
-        yield from self._kerberos_sso_edge
