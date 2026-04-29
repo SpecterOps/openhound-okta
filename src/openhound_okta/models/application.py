@@ -8,8 +8,6 @@ from openhound.core.models.entries_dataclass import (
     Edge,
     EdgePath,
     EdgeProperties,
-    ConditionalEdgePath,
-    PropertyMatch,
 )
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -121,6 +119,7 @@ class Application(BaseAsset):
             kinds=[nk.APPLICATION],
             properties=ApplicationProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 id=self.id,
                 name=self.name,
                 displayname=self.label or self.name,
@@ -136,7 +135,8 @@ class Application(BaseAsset):
 
     @property
     def _outbound_jamf_sso_edge(self):
-        # TODO: Should this be conditional on sign_on_mode == SAML_2_0?
+        # SAML == SAML_2_0
+        # SWA == SECURE_PASSWORD_STORE, BROWSER_PLUGIN or AUTO_LOGIN
         if self.name == "jamfsoftwareserver":
             jamf_domain = self.settings.app.get("domain")
             if jamf_domain:
@@ -149,37 +149,30 @@ class Application(BaseAsset):
                 )
 
     # @property
-    # def _outbound_jamf_swa_edge(self):
-    #     # TODO: Should this be conditional on sign_on_mode SECURE_PASSWORD_STORE, BROWSER_PLUGIN or AUTO_LOGIN?
-    #     if self.name == "jamfsoftwareserver":
-    #         jamf_domain = self.settings.app.get("domain")
-    #         if jamf_domain:
-    #             jamf_domain = jamf_domain.replace('"', "")
-    #             yield Edge(
-    #                 kind=ek.OUTBOUND_ORG_SSO,
-    #                 start=EdgePath(value=self.id, match_by="id"),
-    #                 end=EdgePath(value=f"{jamf_domain}-SSO", match_by="id"),
-    #                 properties=EdgeProperties(traversable=True),
-    #             )
-
-    # @property
     # def _outbount_github_sso_edge(self):
-    # TODO: Github matching based on domain only may cause conflicts, should we actually do this before conditional matching?
+    # TODO: Wait for the Github Enterprise (v.s. org) implementation is finalized
     #     if self.name == "githubcloud":
+    #         yield Edge(
+    #             kind=ek.OUTBOUND_ORG_SSO,
+    #             start=EdgePath(value=self.id, match_by="id"),
+    #             ....
+    #             properties=EdgeProperties(traversable=True),
+    #         )
     #
 
-    @property
-    def _kerberos_sso_edge(self):
-        # TODO: Check logic
-        if self.name == "active_directory":
-            domain = self.label.split(".")[-2]
-            end_spn = f"HTTP/{domain}.kerberos.okta.com"
-            condition = PropertyMatch(key="serviceprincipalnames", value=end_spn)
-            yield Edge(
-                kind=ek.KERBEROS_SSO,
-                start=ConditionalEdgePath(kind="User", property_matchers=[condition]),
-                end=EdgePath(value=self.id, match_by="id"),
-            )
+    # @property
+    # def _kerberos_sso_edge(self):
+    #     # TODO: matching against arrays needs to be supported by the BH API before this will
+    #     # match with nodes
+    #     if self.name == "active_directory":
+    #         domain = self.label.split(".")[-2]
+    #         end_spn = f"HTTP/{domain}.kerberos.okta.com"
+    #         condition = PropertyMatch(key="serviceprincipalnames", value=end_spn)
+    #         yield Edge(
+    #             kind=ek.KERBEROS_SSO,
+    #             start=ConditionalEdgePath(kind="User", property_matchers=[condition]),
+    #             end=EdgePath(value=self.id, match_by="id"),
+    #         )
 
     @property
     def _contains_edge(self):
@@ -192,6 +185,7 @@ class Application(BaseAsset):
 
     @property
     def edges(self):
+        # Disabled until BHE supports array-based matching
+        # yield from self._kerberos_sso_edge
         yield from self._contains_edge
         yield from self._outbound_jamf_sso_edge
-        yield from self._kerberos_sso_edge

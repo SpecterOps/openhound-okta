@@ -57,6 +57,7 @@ class CustomRole(BaseAsset):
             kinds=[nk.CUSTOM_ROLE],
             properties=CustomRoleProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 id=self.id,
                 name=self.label,
                 displayname=self.label,

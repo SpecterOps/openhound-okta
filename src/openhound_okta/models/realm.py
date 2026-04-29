@@ -61,6 +61,7 @@ class Realm(BaseAsset):
             kinds=[nk.REALM],
             properties=RealmProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 id=self.id,
                 name=self.profile.name,
                 displayname=self.profile.name,

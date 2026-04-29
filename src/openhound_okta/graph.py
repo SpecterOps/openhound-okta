@@ -11,6 +11,7 @@ from openhound.core.models.entries_dataclass import (
 @dataclass
 class OktaNodeProperties(BaseProperties):
     tenant: str
+    tenant_domain: str
     id: str
 
 

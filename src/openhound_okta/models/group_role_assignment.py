@@ -3,13 +3,14 @@ from datetime import datetime
 
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
 from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from pydantic import BaseModel
 from pydantic import ConfigDict, Field
 
 from openhound_okta.graph import OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
-
-from pydantic import BaseModel
+from openhound_okta.models.helpers.add_member import add_member_edges
+from openhound_okta.models.helpers.read_client_secret import read_client_secret_edges
 
 
 @dataclass
@@ -43,6 +44,17 @@ class Catalog(BaseModel):
 class Target(BaseModel):
     catalog: Catalog | None = None
     groups: list[Group] | None = None
+
+
+class HREF(BaseModel):
+    href: str
+
+
+class Links(BaseModel):
+    source: HREF | None = None
+    users: HREF | None = None
+    apps: HREF | None = None
+    groups: HREF | None = None
 
 
 class Embedded(BaseModel):
@@ -105,6 +117,13 @@ class Embedded(BaseModel):
             end=nk.APPLICATION,
             kind=ek.APP_ADMIN,
             description="Group has app admin role",
+            traversable=True,
+        ),
+        EdgeDef(
+            start=nk.GROUP,
+            end=nk.CLIENT_SECRET,
+            kind=ek.READ_CLIENT_SECRET,
+            description="Group can read application client secrets",
             traversable=True,
         ),
         EdgeDef(
@@ -212,6 +231,7 @@ class GroupRoleAssignment(BaseAsset):
     type: str
     role: str | None = None
     embedded: Embedded | None = Field(alias="_embedded", default=None)
+    links: Links | None = Field(alias="_links", default=None)
 
     @property
     def as_node(self):
@@ -219,6 +239,7 @@ class GroupRoleAssignment(BaseAsset):
             kinds=[nk.ROLE_ASSIGNMENT],
             properties=GroupRoleAssignmentProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 id=self.id,
                 name=self.label,
                 displayname=self.label,
@@ -256,36 +277,6 @@ class GroupRoleAssignment(BaseAsset):
                 end=EdgePath(value=self.role, match_by="id"),
                 properties=EdgeProperties(traversable=False),
             )
-
-    @property
-    def _add_member_edges(self):
-        if self.type == "CUSTOM" and self.role:
-            has_group_members_permission = self._lookup.has_role_permission(
-                self.role, "okta.groups.members.manage"
-            )
-            has_group_manage_permissions = self._lookup.has_role_permission(
-                self.role, "okta.groups.manage"
-            )
-            if has_group_manage_permissions or has_group_members_permission:
-                for (group_id,) in self._lookup.all_groups():
-                    yield Edge(
-                        kind=ek.ADD_MEMBER,
-                        start=EdgePath(value=self.source_id, match_by="id"),
-                        end=EdgePath(value=group_id, match_by="id"),
-                    )
-        # elif self.type == "SUPER_ADMIN" or (
-        #     BUILT_IN_PERMISSIONS.get(self.type)
-        #     and (
-        #         "okta.groups.members.manage" in BUILT_IN_PERMISSIONS[self.type]
-        #         or "okta.groups.manage" in BUILT_IN_PERMISSIONS[self.type]
-        #     )
-        # ):
-        #     for (group_id,) in self._lookup.all_groups():
-        #         yield Edge(
-        #             kind=ek.ADD_MEMBER,
-        #             start=EdgePath(value=self.source_id, match_by="id"),
-        #             end=EdgePath(value=group_id, match_by="id"),
-        #         )
 
     @property
     def _manage_app_edges(self):
@@ -370,13 +361,23 @@ class GroupRoleAssignment(BaseAsset):
     @property
     def _helpdesk_admin_edges(self):
         if self.type == "HELP_DESK_ADMIN":
-            for (user_id,) in self._lookup.all_users():
-                yield Edge(
-                    kind=ek.HELPDESK_ADMIN,
-                    start=EdgePath(value=self.source_id, match_by="id"),
-                    end=EdgePath(value=user_id, match_by="id"),
-                    properties=EdgeProperties(traversable=True),
-                )
+            if self.embedded and self.embedded.targets and self.embedded.targets.groups:
+                for group in self.embedded.targets.groups:
+                    yield Edge(
+                        kind=ek.HELPDESK_ADMIN,
+                        start=EdgePath(value=self.source_id, match_by="id"),
+                        end=EdgePath(value=group.id, match_by="id"),
+                        properties=EdgeProperties(traversable=True),
+                    )
+            else:
+                # No targets specified, emit to all users
+                for (user_id,) in self._lookup.all_users():
+                    yield Edge(
+                        kind=ek.HELPDESK_ADMIN,
+                        start=EdgePath(value=self.source_id, match_by="id"),
+                        end=EdgePath(value=user_id, match_by="id"),
+                        properties=EdgeProperties(traversable=True),
+                    )
 
     @property
     def _mobile_admin_edges(self):
@@ -430,6 +431,13 @@ class GroupRoleAssignment(BaseAsset):
                     kind=ek.ORG_ADMIN,
                     start=EdgePath(value=self.source_id, match_by="id"),
                     end=EdgePath(value=app_id, match_by="id"),
+                    properties=EdgeProperties(traversable=True)
+                )
+            for (group_id,) in self._lookup.all_groups():
+                yield Edge(
+                    kind=ek.ORG_ADMIN,
+                    start=EdgePath(value=self.source_id, match_by="id"),
+                    end=EdgePath(value=group_id, match_by="id"),
                     properties=EdgeProperties(traversable=True),
                 )
 
@@ -475,7 +483,6 @@ class GroupRoleAssignment(BaseAsset):
     def edges(self):
         yield from self._has_role_assignment_edges
         yield from self._has_role_edges
-        yield from self._add_member_edges
         yield from self._app_admin_edges
         yield from self._group_membership_admin_edges
         yield from self._helpdesk_admin_edges
@@ -488,3 +495,5 @@ class GroupRoleAssignment(BaseAsset):
         yield from self._manage_app_edges
         yield from self._scoped_to_group_edges
         yield from self._scoped_to_org_edge
+        yield from read_client_secret_edges(self)
+        yield from add_member_edges(self)
