@@ -168,13 +168,20 @@ class Group(BaseAsset):
             if app_settings:
                 app_settings_obj = json.loads(app_settings)
                 source_domain = urlparse(app_settings_obj["app"]["baseUrl"]).netloc
-                match_with = PropertyMatch(
-                    key="tenant_domain", value=source_domain
-                )
                 yield Edge(
                     kind=ek.MEMBERSHIP_SYNC,
                     start=ConditionalEdgePath(
-                        kind=nk.GROUP, property_matchers=[match_with]
+                        kind=nk.GROUP, property_matchers=[
+                            PropertyMatch(
+                                key="tenant_domain", value=source_domain
+                            ),
+                            PropertyMatch(
+                                key="type", value="OKTA_GROUP"
+                            ),
+                            PropertyMatch(
+                                key="name", value=self.profile.name.upper()
+                            )
+                        ]
                     ),
                     end=EdgePath(value=self.id, match_by="id"),
                     properties=EdgeProperties(traversable=True),
