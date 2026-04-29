@@ -131,6 +131,7 @@ class User(BaseAsset):
             kinds=[nk.USER],
             properties=UserProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 id=self.id,
                 name=self.profile.login,
                 displayname=self.profile.login

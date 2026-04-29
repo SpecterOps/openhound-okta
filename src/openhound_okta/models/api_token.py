@@ -58,6 +58,7 @@ class ApiToken(BaseAsset):
             kinds=[nk.API_TOKEN],
             properties=ApiTokenProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 id=self.id,
                 name=self.name,
                 displayname=self.name,

@@ -64,6 +64,7 @@ class ApiService(BaseAsset):
             kinds=[nk.INTEGRATION],
             properties=ApiServiceProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 id=self.id,
                 name=self.name,
                 displayname=self.name,

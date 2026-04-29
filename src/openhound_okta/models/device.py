@@ -106,6 +106,7 @@ class Device(BaseAsset):
             kinds=[nk.DEVICE],
             properties=DeviceProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 id=self.id,
                 name=self.profile.display_name,
                 displayname=self.profile.display_name,

@@ -119,6 +119,7 @@ class Application(BaseAsset):
             kinds=[nk.APPLICATION],
             properties=ApplicationProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 id=self.id,
                 name=self.name,
                 displayname=self.label or self.name,

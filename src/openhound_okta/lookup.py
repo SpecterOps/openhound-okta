@@ -24,9 +24,17 @@ class OktaLookup(LookupManager):
         return res
 
     @lru_cache
-    def application_exists(self, app_id: str) -> bool:
+    def application_by_id(self, app_id: str) -> bool:
         res = self._find_single_object(
             f"""SELECT id FROM {self.schema}.applications WHERE id = ?""",
+            [app_id],
+        )
+        return res
+
+    @lru_cache
+    def application_settings(self, app_id: str) -> bool:
+        res = self._find_single_object(
+            f"""SELECT settings FROM {self.schema}.applications WHERE id = ?""",
             [app_id],
         )
         return res

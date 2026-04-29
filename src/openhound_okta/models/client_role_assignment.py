@@ -227,6 +227,7 @@ class ClientRoleAssignment(BaseAsset):
             kinds=[nk.ROLE_ASSIGNMENT],
             properties=ClientRoleAssignmentProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 id=self.id,
                 name=self.label,
                 displayname=self.label,

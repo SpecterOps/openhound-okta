@@ -226,6 +226,7 @@ class GroupRoleAssignment(BaseAsset):
             kinds=[nk.ROLE_ASSIGNMENT],
             properties=GroupRoleAssignmentProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 id=self.id,
                 name=self.label,
                 displayname=self.label,
@@ -364,9 +365,7 @@ class GroupRoleAssignment(BaseAsset):
 
     @property
     def _helpdesk_admin_edges(self):
-        # TODO: This can be scoped to users and/or groups
         if self.type == "HELP_DESK_ADMIN":
-            # Emit only to scoped target groups
             if self.embedded and self.embedded.targets and self.embedded.targets.groups:
                 for group in self.embedded.targets.groups:
                     yield Edge(

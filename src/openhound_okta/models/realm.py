@@ -57,10 +57,12 @@ class Realm(BaseAsset):
 
     @property
     def as_node(self):
+        print(self._extras)
         return OktaNode(
             kinds=[nk.REALM],
             properties=RealmProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 id=self.id,
                 name=self.profile.name,
                 displayname=self.profile.name,

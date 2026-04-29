@@ -67,6 +67,7 @@ class ApplicationSecrets(BaseAsset):
             kinds=[nk.CLIENT_SECRET],
             properties=SecretProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 name=self.secret_hash,
                 displayname=self.secret_hash,
                 id=self.id,
