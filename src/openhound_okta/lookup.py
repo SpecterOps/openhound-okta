@@ -45,6 +45,11 @@ class OktaLookup(LookupManager):
         return res
 
     @lru_cache
+    def non_admin_groups(self):
+        res = self._find_all_objects(f"""SELECT id FROM {self.schema}.non_admin_groups""")
+        return res
+
+    @lru_cache
     def all_users(self):
         res = self._find_all_objects(f"""SELECT id FROM {self.schema}.users""")
         return res
@@ -77,15 +82,38 @@ class OktaLookup(LookupManager):
 
     @lru_cache
     def resource_set_application_ids(self, resource_set_id: str):
-        rows = self._find_all_objects(
-            f"""SELECT orn FROM {self.schema}.resources WHERE resource_set_id = ? AND contains(orn, ':apps')""",
-            [resource_set_id],
+        return self._resource_set_resource_ids(
+            resource_set_id, "apps", self.all_applications()
         )
-        application_ids: set[str] = set()
-        # TODO: Implement a resource on the test tenant
-        # when the test tenant contains a valid edge based on a
-        # custom role, add the conditions to return app ids here.
-        return application_ids
+
+    @lru_cache
+    def resource_set_group_ids(self, resource_set_id: str):
+        return self._resource_set_resource_ids(
+            resource_set_id, "groups", self.all_groups()
+        )
+
+    @lru_cache
+    def resource_set_non_admin_group_ids(self, resource_set_id: str):
+        resource_set_groups = set(self.resource_set_group_ids(resource_set_id))
+        non_admin_groups = {group_id for (group_id,) in self.non_admin_groups()}
+        return tuple(sorted(resource_set_groups & non_admin_groups))
+
+    def _resource_set_resource_ids(
+        self, resource_set_id: str, resource_type: str, all_resource_rows
+    ):
+        rows = self._find_all_objects(
+            f"""SELECT orn FROM {self.schema}.resources WHERE resource_set_id = ? AND contains(orn, ?)""",
+            [resource_set_id, f":{resource_type}"],
+        )
+
+        resource_ids: set[str] = set()
+        for (orn,) in rows:
+            split_orn = orn.split(":")
+            if len(split_orn) == 5 and split_orn[-1] == resource_type:
+                resource_ids.update(resource_id for (resource_id,) in all_resource_rows)
+            elif len(split_orn) == 6 and split_orn[-2] == resource_type:
+                resource_ids.add(split_orn[-1])
+        return tuple(sorted(resource_ids))
 
     @lru_cache
     def all_policies(self):

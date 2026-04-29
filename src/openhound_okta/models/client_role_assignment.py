@@ -9,7 +9,8 @@ from pydantic import ConfigDict, Field
 from openhound_okta.graph import OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
-from openhound_okta.models.read_client_secret import read_client_secret_edges
+from openhound_okta.models.helpers.add_member import add_member_edges
+from openhound_okta.models.helpers.read_client_secret import read_client_secret_edges
 
 
 @dataclass
@@ -43,6 +44,17 @@ class Catalog(BaseModel):
 class Target(BaseModel):
     catalog: Catalog | None = None
     groups: list[Group] | None = None
+
+
+class HREF(BaseModel):
+    href: str
+
+
+class Links(BaseModel):
+    source: HREF | None = None
+    users: HREF | None = None
+    apps: HREF | None = None
+    groups: HREF | None = None
 
 
 class Embedded(BaseModel):
@@ -220,6 +232,7 @@ class ClientRoleAssignment(BaseAsset):
     role: str | None = None
 
     embedded: Embedded | None = Field(alias="_embedded", default=None)
+    links: Links | None = Field(alias="_links", default=None)
 
     @property
     def as_node(self):
@@ -265,23 +278,6 @@ class ClientRoleAssignment(BaseAsset):
                 end=EdgePath(value=self.role, match_by="id"),
                 properties=EdgeProperties(traversable=False),
             )
-
-    @property
-    def _add_member_edges(self):
-        if self.type == "CUSTOM" and self.role:
-            has_group_members_permission = self._lookup.has_role_permission(
-                self.role, "okta.groups.members.manage"
-            )
-            has_group_manage_permissions = self._lookup.has_role_permission(
-                self.role, "okta.groups.manage"
-            )
-            if has_group_manage_permissions or has_group_members_permission:
-                for (group_id,) in self._lookup.all_groups():
-                    yield Edge(
-                        kind=ek.ADD_MEMBER,
-                        start=EdgePath(value=self.source_id, match_by="id"),
-                        end=EdgePath(value=group_id, match_by="id"),
-                    )
 
     @property
     def _scoped_to_org_edge(self):
@@ -496,7 +492,6 @@ class ClientRoleAssignment(BaseAsset):
     def edges(self):
         yield from self._has_role_assignment_edges
         yield from self._has_role_edges
-        yield from self._add_member_edges
         yield from self._app_admin_edges
         yield from self._group_membership_admin_edges
         yield from self._helpdesk_admin_edges
@@ -510,3 +505,4 @@ class ClientRoleAssignment(BaseAsset):
         yield from self._scoped_to_group_edges
         yield from self._scoped_to_org_edge
         yield from read_client_secret_edges(self)
+        yield from add_member_edges(self)
