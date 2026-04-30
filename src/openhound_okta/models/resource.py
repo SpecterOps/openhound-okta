@@ -72,7 +72,7 @@ from openhound_okta.main import app
 class Resource(BaseAsset):
     model_config = ConfigDict(populate_by_name=True)
 
-    id: str
+    id: str | None = None
     orn: str
     created: datetime | None = None
     links: dict | None = Field(default=None, alias="_links")
