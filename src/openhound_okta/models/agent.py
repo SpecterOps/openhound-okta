@@ -100,7 +100,7 @@ class Agent(BaseAsset):
             # The agent name has a prefix that needs to be stripped before matching is possible
             agent_name_split = self.name.split("-")
             agent_name = '-'.join(agent_name_split[1:])
-            agent_match = f"{agent_name.upper()}-{self.agent_pool_name.upper()}"
+            agent_match = f"{agent_name.upper()}.{self.agent_pool_name.upper()}"
             match_with = PropertyMatch(
                 key="name", value=agent_match
             )
