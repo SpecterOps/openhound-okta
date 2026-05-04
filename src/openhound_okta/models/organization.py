@@ -49,6 +49,7 @@ class Organization(BaseAsset):
             kinds=[nk.ORG],
             properties=OrganizationProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 id=self.id,
                 name=self.company_name or self.subdomain,
                 displayname=self.company_name or self.subdomain,

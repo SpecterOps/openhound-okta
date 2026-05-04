@@ -29,35 +29,11 @@ class OktaAuth:
     def private_key(self) -> dict:
         """Load the private key from the specified path."""
 
-        # TODO: Generate a key if the path does not exist. Move this to a CLI-only option
-        # if not self.private_key_path.exists():
-        #     logger.warning(
-        #         f"Private key not found. Generating a new private key at {self.private_key_path}."
-        #     )
-        #     self.generate_private_key()
-        #     public_key = self.public_key(self.private_key_path.read_text()).strip()
-        #     rprint(
-        #         "[bold red]Public key generated.[/bold red] Please upload the following public key to Okta:"
-        #     )
-        #     print(public_key)
-        #     sys.exit(1)
-
         logger.info(f"Loaded private key from {self.private_key_path}")
         return json.loads(self.private_key_path.read_text())
 
-    # def public_key(self, private_key_content: str) -> str:
-    #     """Returns public key based on private key path
-    #
-    #     Returns:
-    #         str: The public key in PEM format.
-    #     """
-    #     private_key_import = RSAKey.import_key(private_key_content)
-    #     public_key_jwk = private_key_import.as_dict(private=False)
-    #     public_key_jwk["kid"] = private_key_import.thumbprint()
-    #     return json.dumps(public_key_jwk)
-
     def jwt(
-        self, private_key: dict, client_id: str, audience: str, exp_delta: int = 60
+            self, private_key: dict, client_id: str, audience: str, exp_delta: int = 60
     ) -> str:
         """Returns a JWT token for Okta authentication
 

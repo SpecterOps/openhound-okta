@@ -74,6 +74,7 @@ class ApplicationJWKS(BaseAsset):
             kinds=[nk.JWK],
             properties=JWKProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 name=self.display_name,
                 displayname=self.display_name,
                 id=self.id,

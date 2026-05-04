@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from dataclasses import field
 from datetime import datetime
 
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
@@ -8,8 +9,6 @@ from pydantic import ConfigDict, Field
 from openhound_okta.graph import OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
-
-from dataclasses import field
 
 
 @dataclass
@@ -68,6 +67,7 @@ class ApplicationSecrets(BaseAsset):
             kinds=[nk.CLIENT_SECRET],
             properties=SecretProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 name=self.secret_hash,
                 displayname=self.secret_hash,
                 id=self.id,

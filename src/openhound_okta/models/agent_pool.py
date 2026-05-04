@@ -83,6 +83,7 @@ class AgentPool(BaseAsset):
             kinds=[nk.AGENT_POOL],
             properties=AgentPoolProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 id=self.id,
                 name=self.name,
                 displayname=self.name,

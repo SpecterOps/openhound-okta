@@ -1,11 +1,12 @@
+import dlt
 from dlt.extract.source import DltSource
 from openhound.core.app import OpenHound
 from openhound.core.collect import CollectContext
 from openhound.core.convert import ConvertContext
 from openhound.core.preproc import PreProcContext
 
-from openhound_okta.transforms import transforms
 from openhound_okta.lookup import OktaLookup
+from openhound_okta.transforms import transforms
 
 app = OpenHound("okta", source_kind="Okta", help="OpenGraph collector for Okta")
 
@@ -23,15 +24,16 @@ def collect(ctx: CollectContext) -> DltSource:
 
 
 @app.convert(lookup=OktaLookup)
-def convert(ctx: ConvertContext) -> tuple[DltSource, dict]:
+def convert(ctx: ConvertContext):
     """Register a Typer CLI command that converts previously collected Okta resources into OpenGraph nodes and edges.
 
     Args:
         ctx (ConvertContext): Returns DLT pipeline context.
     """
     from openhound_okta.source import source as okta_source
-
-    return okta_source(), {"tenant": "somethingsomething"}
+    from urllib.parse import urlparse
+    tenant_url = dlt.secrets.get("sources.source.okta.credentials.base_url")
+    return okta_source(), {"tenant": urlparse(tenant_url).netloc}
 
 
 @app.preproc(transformer=transforms)
@@ -41,14 +43,14 @@ def preprocess(ctx: PreProcContext):
         "users": "users",
         "groups": "groups",
         "applications": "applications",
+        "application_secrets": "application_secrets",
         "devices": "devices",
         "authorization_servers": "authorization_servers",
         "identity_providers": "identity_providers",
         "policies": "policies",
+        "resources": "resources",
         "user_role_assignments": "user_role_assignments",
         "group_role_assignments": "group_role_assignments",
         "client_role_assignments": "client_role_assignments",
         "custom_role_permissions": "custom_role_permissions",
-        # "application_secrets": "application_secrets",
-        # "custom_role_permissions": "custom_role_permissions",
     }

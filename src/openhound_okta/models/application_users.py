@@ -7,6 +7,16 @@ from pydantic import BaseModel, ConfigDict, Field
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 
+# To ignore system apps optionally
+SYSTEM_APPS = [
+    "okta_oin_submission_tester_app",  # Okta OIN Submission Tester
+    "okta_access_requests_resource_catalog",  # Okta Identity Governance
+    "okta_enduser",  # Okta Dashboard
+    "okta_browser_plugin",  # Okta Browser Plugin
+    "active_directory",  # Active Directory, for which there are sync edges
+    "ldap_interface"  # LDAP Interface, similar to AD
+]
+
 
 class Provider(BaseModel):
     name: str
@@ -81,7 +91,6 @@ class Profile(BaseModel):
             traversable=False,
             description="User is synced from an Active Directory user",
         ),
-        # TODO: Creat new edge kind for AD sync
         EdgeDef(
             kind=ek.PASSWORD_SYNC,
             start=nk.AD_USER,
@@ -140,6 +149,8 @@ class ApplicationUser(BaseAsset):
 
     @property
     def _app_assignment_edge(self):
+        # Note: Check if we want to filter default assignments (factual to the environment)
+        # or filter out default assignments (to clean up the graph)
         if self.scope == "USER":
             yield Edge(
                 kind=ek.APP_ASSIGNMENT,
@@ -150,7 +161,6 @@ class ApplicationUser(BaseAsset):
 
     @property
     def _user_push_poll_edges(self):
-        # TODO: Verify this logic
         if self.sync_state == "SYNCHRONIZED":
             if self.scope == "USER":
                 yield Edge(
@@ -169,11 +179,8 @@ class ApplicationUser(BaseAsset):
 
     @property
     def _password_sync_edge(self):
-        if self.sync_state == "SYNCHRONIZED" and self.app_name == "active_directory":
-            if self.scope == "USER" and self.profile.object_sid:
-                # app_domain = self.app_settings.get("domain")
-                # ad_domain = app_domain if app_domain else self.app_label
-                # TODO: Determine the matching between okta user and AD user
+        if self.sync_state == "SYNCHRONIZED" and self.app_name == "active_directory" and self.profile.object_sid:
+            if self.scope == "USER":
                 yield Edge(
                     kind=ek.USER_SYNC,
                     start=EdgePath(value=self.profile.object_sid, match_by="id"),
@@ -181,7 +188,6 @@ class ApplicationUser(BaseAsset):
                     properties=EdgeProperties(traversable=False),
                 )
 
-                # TODO: Ditto, verify matching between okta user and AD user
                 if "OUTBOUND_DEL_AUTH" in self.app_features:
                     yield Edge(
                         kind=ek.PASSWORD_SYNC,
@@ -190,16 +196,12 @@ class ApplicationUser(BaseAsset):
                         properties=EdgeProperties(traversable=True),
                     )
             else:
-                # Outboundsync, ie. OktaUser--Okta_UserSync->AD????
-                # TODO: Determine the matching between okta user and AD user
-                # is this really based on a group/non-user?
                 yield Edge(
                     kind=ek.USER_SYNC,
                     start=EdgePath(value=self.id, match_by="id"),
                     end=EdgePath(value=self.profile.object_sid, match_by="id"),
                     properties=EdgeProperties(traversable=False),
                 )
-                # TODO: Ditto, verify matching between okta user and AD user
                 if "PUSH_PASSWORD_UPDATES" in self.app_features:
                     yield Edge(
                         kind=ek.PASSWORD_SYNC,
@@ -210,7 +212,6 @@ class ApplicationUser(BaseAsset):
 
     @property
     def _okta_org2org_edges(self):
-        # TODO: Verify and check SCIM
         if self.app_name == "okta_org2org":
             if self.scope == "USER":
                 yield Edge(

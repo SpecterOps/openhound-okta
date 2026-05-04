@@ -63,6 +63,7 @@ class AuthServer(BaseAsset):
             kinds=[nk.AUTH_SERVER],
             properties=AuthServerProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 id=self.id,
                 name=self.name,
                 displayname=self.name,

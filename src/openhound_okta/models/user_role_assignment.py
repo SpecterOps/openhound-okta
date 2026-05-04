@@ -1,14 +1,15 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
+from openhound.core.asset import EdgeDef, NodeDef
 from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from pydantic import BaseModel
 from pydantic import ConfigDict, Field
 
 from openhound_okta.graph import OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
-from pydantic import BaseModel
+from openhound_okta.models.role_assignment import RoleAssignment
 
 
 @dataclass
@@ -42,6 +43,17 @@ class Catalog(BaseModel):
 class Target(BaseModel):
     catalog: Catalog | None = None
     groups: list[Group] | None = None
+
+
+class HREF(BaseModel):
+    href: str
+
+
+class Links(BaseModel):
+    source: HREF | None = None
+    users: HREF | None = None
+    apps: HREF | None = None
+    groups: HREF | None = None
 
 
 class Embedded(BaseModel):
@@ -182,6 +194,13 @@ class Embedded(BaseModel):
             end=nk.APPLICATION,
             kind=ek.APP_ADMIN,
             description="Application has app admin role",
+            traversable=True,
+        ),
+        EdgeDef(
+            start=nk.USER,
+            end=nk.CLIENT_SECRET,
+            kind=ek.READ_CLIENT_SECRET,
+            description="User can read application client secrets",
             traversable=True,
         ),
         # Group Membership Role
@@ -376,31 +395,11 @@ class Embedded(BaseModel):
         ),
     ],
 )
-class UserRoleAssignment(BaseAsset):
+class UserRoleAssignment(RoleAssignment):
     model_config = ConfigDict(populate_by_name=True)
 
-    # Base response via when listing assignments
-    id: str
-
-    # Additional
-    from_resource: str
-    source_id: str
-
-    # Details when fetching user/group
-    assignment_type: str = Field(alias="assignmentType")
-    resource_set: str | None = Field(alias="resource-set", default=None)
-    status: str
-    created: datetime | None
-    name: str | None = None
-    label: str
-    status: str
-    last_updated: datetime | None = Field(alias="lastUpdated", default=None)
-    created: datetime | None
-    features: list[str] = Field(default_factory=list)
-    type: str
-    role: str | None = None
-
     embedded: Embedded | None = Field(alias="_embedded", default=None)
+    links: Links | None = Field(alias="_links", default=None)
 
     @property
     def as_node(self):
@@ -408,6 +407,7 @@ class UserRoleAssignment(BaseAsset):
             kinds=[nk.ROLE_ASSIGNMENT],
             properties=UserRoleAssignmentProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 id=self.id,
                 name=self.label,
                 displayname=self.label,
@@ -421,147 +421,12 @@ class UserRoleAssignment(BaseAsset):
         )
 
     @property
-    def _has_role_assignment_edges(self):
-        yield Edge(
-            kind=ek.HAS_ROLE_ASSIGNMENT,
-            start=EdgePath(value=self.source_id, match_by="id"),
-            end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=False),
-        )
-
-    @property
-    def _has_role_edges(self):
-        if self.type != "CUSTOM":
-            yield Edge(
-                kind=ek.HAS_ROLE,
-                start=EdgePath(value=self.source_id, match_by="id"),
-                end=EdgePath(value=self.type, match_by="id"),
-                properties=EdgeProperties(traversable=False),
-            )
-        else:
-            yield Edge(
-                kind=ek.HAS_ROLE,
-                start=EdgePath(value=self.source_id, match_by="id"),
-                end=EdgePath(value=self.role, match_by="id"),
-                properties=EdgeProperties(traversable=False),
-            )
-
-    @property
-    def _manage_app_edges(self):
-        if self.type == "CUSTOM" and self.role:
-            has_permissions = self._lookup.has_role_permission(
-                self.role, "okta.groups.manage"
-            )
-            if has_permissions:
-                for (app_id,) in self._lookup.all_applications():
-                    yield Edge(
-                        kind=ek.MANAGE_APP,
-                        start=EdgePath(value=self.source_id, match_by="id"),
-                        end=EdgePath(value=app_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
-                    )
-
-    @property
-    def _reset_factors_edges(self):
-        if self.type == "CUSTOM" and self.role:
-            required_permissions = [
-                "okta.users.credentials.resetFactors",
-                "okta.users.credentials.manage",
-            ]
-            has_permission = any(
-                self._lookup.has_role_permission(self.role, permission)
-                for permission in required_permissions
-            )
-            if has_permission:
-                for (user_id,) in self._lookup.all_users():
-                    yield Edge(
-                        kind=ek.RESET_FACTORS,
-                        start=EdgePath(value=self.source_id, match_by="id"),
-                        end=EdgePath(value=user_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
-                    )
-
-    @property
-    def _reset_password_edges(self):
-        if self.type == "CUSTOM" and self.role:
-            required_permissions = [
-                "okta.users.credentials.resetPassword",
-                "okta.users.credentials.manage",
-                "okta.users.credentials.manageTemporaryAccessCode",
-                "okta.users.manage",
-            ]
-            has_permission = any(
-                self._lookup.has_role_permission(self.role, permission)
-                for permission in required_permissions
-            )
-
-            if has_permission:
-                for (user_id,) in self._lookup.all_users():
-                    yield Edge(
-                        kind=ek.RESET_PASSWORD,
-                        start=EdgePath(value=self.source_id, match_by="id"),
-                        end=EdgePath(value=user_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
-                    )
-
-    @property
-    def _add_member_edges(self):
-        # TODO: The custom role check does not work yet
-        if self.type == "CUSTOM" and self.role:
-            has_group_members_permission = self._lookup.has_role_permission(
-                self.role, "okta.groups.members.manage"
-            )
-            has_group_manage_permissions = self._lookup.has_role_permission(
-                self.role, "okta.groups.manage"
-            )
-            if has_group_manage_permissions or has_group_members_permission:
-                all_groups = self._lookup.all_groups()
-                for (group_id,) in all_groups:
-                    yield Edge(
-                        kind=ek.ADD_MEMBER,
-                        start=EdgePath(value=self.source_id, match_by="id"),
-                        end=EdgePath(value=group_id, match_by="id"),
-                    )
-        # else:
-        #     if self.type == "SUPER_ADMIN" or (
-        #         BUILT_IN_PERMISSIONS.get(self.type)
-        #         and (
-        #             "okta.groups.members.manage" in BUILT_IN_PERMISSIONS[self.type]
-        #             or ["okta.groups.manage"] in BUILT_IN_PERMISSIONS[self.type]
-        #         )
-        #     ):
-        #         all_groups = self._lookup.all_groups()
-        #         for (group_id,) in all_groups:
-        #             yield Edge(
-        #                 kind=ek.ADD_MEMBER,
-        #                 start=EdgePath(value=self.source_id, match_by="id"),
-        #                 end=EdgePath(value=group_id, match_by="id"),
-        #             )
-
-    @property
-    def _scoped_to_org_edge(self):
-        org_wide_roles = [
-            "SUPER_ADMIN",
-            "ORG_ADMIN",
-            "MOBILE_ADMIN",
-            "READ_ONLY_ADMIN",
-            "REPORT_ADMIN",
-        ]
-        if self.type != "CUSTOM" and self.type in org_wide_roles:
-            yield Edge(
-                kind=ek.SCOPED_TO,
-                start=EdgePath(value=self.id, match_by="id"),
-                end=EdgePath(value=self._lookup.org_id(), match_by="id"),
-                properties=EdgeProperties(traversable=False),
-            )
-
-    @property
     def _scoped_to_app_edges(self):
         if (
-            self.embedded
-            and self.embedded.targets
-            and self.embedded.targets.catalog
-            and self.embedded.targets.catalog.apps
+                self.embedded
+                and self.embedded.targets
+                and self.embedded.targets.catalog
+                and self.embedded.targets.catalog.apps
         ):
             for app in self.embedded.targets.catalog.apps:
                 if app.id:
@@ -571,17 +436,6 @@ class UserRoleAssignment(BaseAsset):
                         end=EdgePath(value=app.id, match_by="id"),
                         properties=EdgeProperties(traversable=False),
                     )
-
-    @property
-    def _scoped_to_group_edges(self):
-        if self.embedded and self.embedded.targets and self.embedded.targets.groups:
-            for group in self.embedded.targets.groups:
-                yield Edge(
-                    kind=ek.SCOPED_TO,
-                    start=EdgePath(value=self.id, match_by="id"),
-                    end=EdgePath(value=group.id, match_by="id"),
-                    properties=EdgeProperties(traversable=False),
-                )
 
     @property
     def _group_membership_admin_edges(self):
@@ -615,18 +469,16 @@ class UserRoleAssignment(BaseAsset):
     @property
     def _app_admin_edges(self):
         """
-        APP_ADMIN permission edges: (:Assignee)-[:Okta_AppAdmin]->(:Application|:ApiServiceIntegration)
-        If role has specific app targets, emit edges only to those apps.
-        If no targets, emit to all apps in the organization.
-        Apps/ApiServiceIntegrations with role assignments cannot be managed by APP_ADMIN.
+        APP_ADMIN permission edges: (:Assignee)-[:Okta_AppAdmin]->(:Application)
+        Emit edges to all apps in the organization.
         """
         if self.type == "APP_ADMIN":
             # Get targets from embedded data, or all apps if no targets
             if (
-                self.embedded
-                and self.embedded.targets
-                and self.embedded.targets.catalog
-                and self.embedded.targets.catalog.apps
+                    self.embedded
+                    and self.embedded.targets
+                    and self.embedded.targets.catalog
+                    and self.embedded.targets.catalog.apps
             ):
                 # Emit only to scoped targets
                 for app in self.embedded.targets.catalog.apps:
@@ -657,12 +509,13 @@ class UserRoleAssignment(BaseAsset):
         """
         if self.type == "HELP_DESK_ADMIN":
             if self.embedded and self.embedded.targets and self.embedded.targets.groups:
-                # Emit to users in scoped target groups
-                # TODO: Resolve group members from embedded target group IDs
                 for group in self.embedded.targets.groups:
-                    # For now, emit edge to the group itself as a placeholder
-                    # Full implementation would need to resolve all users in the group
-                    pass
+                    yield Edge(
+                        kind=ek.HELPDESK_ADMIN,
+                        start=EdgePath(value=self.source_id, match_by="id"),
+                        end=EdgePath(value=group.id, match_by="id"),
+                        properties=EdgeProperties(traversable=True),
+                    )
             else:
                 # No targets specified, emit to all users
                 all_users = self._lookup.all_users()
@@ -675,18 +528,6 @@ class UserRoleAssignment(BaseAsset):
                     )
 
     @property
-    def _mobile_admin_edges(self):
-        if self.type == "MOBILE_ADMIN":
-            all_devices = self._lookup.all_devices()
-            for (device_id,) in all_devices:
-                yield Edge(
-                    kind=ek.MOBILE_ADMIN,
-                    start=EdgePath(value=self.source_id, match_by="id"),
-                    end=EdgePath(value=device_id, match_by="id"),
-                    properties=EdgeProperties(traversable=True),
-                )
-
-    @property
     def _org_admin_edges(self):
         """
         ORG_ADMIN permission edges: (:Assignee)-[:Okta_OrgAdmin]->(:User|:Group|:Device|:Application)
@@ -697,19 +538,19 @@ class UserRoleAssignment(BaseAsset):
         """
         if self.type == "ORG_ADMIN":
             has_targets = (
-                self.embedded
-                and self.embedded.targets
-                and (
-                    (
-                        self.embedded.targets.groups
-                        and len(self.embedded.targets.groups) > 0
+                    self.embedded
+                    and self.embedded.targets
+                    and (
+                            (
+                                    self.embedded.targets.groups
+                                    and len(self.embedded.targets.groups) > 0
+                            )
+                            or (
+                                    self.embedded.targets.catalog
+                                    and self.embedded.targets.catalog.apps
+                                    and len(self.embedded.targets.catalog.apps) > 0
+                            )
                     )
-                    or (
-                        self.embedded.targets.catalog
-                        and self.embedded.targets.catalog.apps
-                        and len(self.embedded.targets.catalog.apps) > 0
-                    )
-                )
             )
 
             if has_targets:
@@ -771,16 +612,6 @@ class UserRoleAssignment(BaseAsset):
                     )
 
     @property
-    def _super_admin_edge(self):
-        if self.type == "SUPER_ADMIN":
-            yield Edge(
-                kind=ek.SUPER_ADMIN,
-                start=EdgePath(value=self.source_id, match_by="id"),
-                end=EdgePath(value=self._lookup.org_id(), match_by="id"),
-                properties=EdgeProperties(traversable=True),
-            )
-
-    @property
     def _user_admin_edges(self):
         """
         USER_ADMIN (Group Administrator) permission edges: (:Assignee)-[:Okta_GroupAdmin]->(:User|:Group)
@@ -820,7 +651,6 @@ class UserRoleAssignment(BaseAsset):
     def edges(self):
         yield from self._has_role_assignment_edges
         yield from self._has_role_edges
-        yield from self._add_member_edges
         yield from self._app_admin_edges
         yield from self._group_membership_admin_edges
         yield from self._helpdesk_admin_edges
@@ -834,3 +664,5 @@ class UserRoleAssignment(BaseAsset):
         yield from self._scoped_to_app_edges
         yield from self._scoped_to_group_edges
         yield from self._scoped_to_org_edge
+        yield from self.read_client_secret_edges
+        yield from self.add_member_edges

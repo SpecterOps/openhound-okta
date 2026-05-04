@@ -65,6 +65,7 @@ class ResourceSet(BaseAsset):
                 description=self.description,
                 last_updated=self.last_updated,
                 environmentid=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
             ),
         )
 

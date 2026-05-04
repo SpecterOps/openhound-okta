@@ -66,6 +66,7 @@ class BuiltInRole(BaseAsset):
             kinds=[nk.ROLE],
             properties=BuiltInRoleProperties(
                 tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
                 id=self.type,
                 name=self.type,
                 displayname=self.type,
