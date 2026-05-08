@@ -16,7 +16,7 @@ from openhound_okta.main import app
             end=nk.GROUP,
             kind=ek.GROUP_PUSH,
             description="Application pushes group mapping",
-            traversable=ek.traversable(ek.GROUP_PUSH),
+            traversable=False,
         ),
     ],
 )
@@ -45,5 +45,5 @@ class ApplicationGroupMapping(BaseAsset):
             kind=ek.GROUP_PUSH,
             start=EdgePath(value=self.app_id, match_by="id"),
             end=EdgePath(value=self.target_group_id, match_by="id"),
-            properties=EdgeProperties(traversable=ek.traversable(ek.GROUP_PUSH)),
+            properties=EdgeProperties(traversable=False),
         )

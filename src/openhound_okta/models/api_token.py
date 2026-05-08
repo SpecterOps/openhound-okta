@@ -35,7 +35,7 @@ class ApiTokenProperties(OktaNodeProperties):
             end=nk.USER,
             kind=ek.API_TOKEN_FOR,
             description="API token is owned by a user",
-            traversable=ek.traversable(ek.API_TOKEN_FOR),
+            traversable=True,
         )
     ],
 )
@@ -77,5 +77,5 @@ class ApiToken(BaseAsset):
             kind=ek.API_TOKEN_FOR,
             start=EdgePath(value=self.id, match_by="id"),
             end=EdgePath(value=self.user_id, match_by="id"),
-            properties=EdgeProperties(traversable=ek.traversable(ek.API_TOKEN_FOR)),
+            properties=EdgeProperties(traversable=True),
         )

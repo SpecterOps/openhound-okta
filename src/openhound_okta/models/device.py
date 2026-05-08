@@ -74,14 +74,14 @@ class Embedded(BaseModel):
             end=nk.DEVICE,
             kind=ek.CONTAINS,
             description="Organization contains device",
-            traversable=ek.traversable(ek.CONTAINS),
+            traversable=True,
         ),
         EdgeDef(
             start=nk.DEVICE,
             end=nk.USER,
             kind=ek.DEVICE_OF,
             description="Device belongs to user",
-            traversable=ek.traversable(ek.DEVICE_OF),
+            traversable=False,
         ),
     ],
 )
@@ -133,7 +133,7 @@ class Device(BaseAsset):
                     kind=ek.DEVICE_OF,
                     start=EdgePath(value=self.id, match_by="id"),
                     end=EdgePath(value=user.user.id, match_by="id"),
-                    properties=EdgeProperties(traversable=ek.traversable(ek.DEVICE_OF)),
+                    properties=EdgeProperties(traversable=False),
                 )
 
     @property
@@ -142,7 +142,7 @@ class Device(BaseAsset):
             kind=ek.CONTAINS,
             start=EdgePath(value=self._lookup.org_id(), match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=ek.traversable(ek.CONTAINS)),
+            properties=EdgeProperties(traversable=True),
         )
 
     @property

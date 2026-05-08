@@ -38,7 +38,7 @@ class AuthServerProperties(OktaNodeProperties):
             end=nk.AUTH_SERVER,
             kind=ek.CONTAINS,
             description="Organization contains authorization server",
-            traversable=ek.traversable(ek.CONTAINS),
+            traversable=True,
         )
     ],
 )
@@ -84,5 +84,5 @@ class AuthServer(BaseAsset):
             kind=ek.CONTAINS,
             start=EdgePath(value=self._lookup.org_id(), match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=ek.traversable(ek.CONTAINS)),
+            properties=EdgeProperties(traversable=True),
         )

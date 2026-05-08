@@ -23,7 +23,7 @@ class Link(BaseModel):
             end=nk.APPLICATION,
             kind=ek.POLICY_MAPPING,
             description="Okta policy maps to application",
-            traversable=ek.traversable(ek.POLICY_MAPPING),
+            traversable=False,
         ),
     ],
 )
@@ -51,5 +51,5 @@ class PolicyMapping(BaseAsset):
                 kind=ek.POLICY_MAPPING,
                 start=EdgePath(value=self.policy_id, match_by="id"),
                 end=EdgePath(value=self.app_id, match_by="id"),
-                properties=EdgeProperties(traversable=ek.traversable(ek.POLICY_MAPPING)),
+                properties=EdgeProperties(traversable=False),
             )

@@ -66,28 +66,28 @@ class Source(BaseModel):
             end=nk.GROUP,
             kind=ek.CONTAINS,
             description="Organization contains group",
-            traversable=ek.traversable(ek.CONTAINS),
+            traversable=True,
         ),
         EdgeDef(
             start=nk.APPLICATION,
             end=nk.GROUP,
             kind=ek.GROUP_PULL,
             description="Application pulls group from external source",
-            traversable=ek.traversable(ek.GROUP_PULL),
+            traversable=True,
         ),
         EdgeDef(
             start=nk.GROUP,
             end=nk.GROUP,
             kind=ek.MEMBERSHIP_SYNC,
             description="Org2org membership sync",
-            traversable=ek.traversable(ek.MEMBERSHIP_SYNC),
+            traversable=True,
         ),
         EdgeDef(
             start=nk.AD_GROUP,
             end=nk.GROUP,
             kind=ek.MEMBERSHIP_SYNC,
             description="AD membership sync",
-            traversable=ek.traversable(ek.MEMBERSHIP_SYNC),
+            traversable=True,
         ),
     ],
 )
@@ -136,7 +136,7 @@ class Group(BaseAsset):
                 kind=ek.MEMBERSHIP_SYNC,
                 start=EdgePath(value=self.profile.object_sid, match_by="id"),
                 end=EdgePath(value=self.id, match_by="id"),
-                properties=EdgeProperties(traversable=ek.traversable(ek.MEMBERSHIP_SYNC)),
+                properties=EdgeProperties(traversable=True),
             )
 
     @property
@@ -146,7 +146,7 @@ class Group(BaseAsset):
                 kind=ek.GROUP_PULL,
                 start=EdgePath(value=self.source.id, match_by="id"),
                 end=EdgePath(value=self.id, match_by="id"),
-                properties=EdgeProperties(traversable=ek.traversable(ek.GROUP_PULL)),
+                properties=EdgeProperties(traversable=True),
             )
 
     @property
@@ -155,7 +155,7 @@ class Group(BaseAsset):
             kind=ek.CONTAINS,
             start=EdgePath(value=self._lookup.org_id(), match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=ek.traversable(ek.CONTAINS)),
+            properties=EdgeProperties(traversable=True),
         )
 
     @property
@@ -181,7 +181,7 @@ class Group(BaseAsset):
                         ]
                     ),
                     end=EdgePath(value=self.id, match_by="id"),
-                    properties=EdgeProperties(traversable=ek.traversable(ek.MEMBERSHIP_SYNC)),
+                    properties=EdgeProperties(traversable=True),
                 )
 
     @property

@@ -57,5 +57,5 @@ class GroupAssignedApp(BaseAsset):
             kind=ek.APP_ASSIGNMENT,
             start=EdgePath(value=self.group_id, match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=ek.traversable(ek.APP_ASSIGNMENT)),
+            properties=EdgeProperties(traversable=False),
         )

@@ -45,7 +45,7 @@ class JWKProperties(OktaNodeProperties):
             end=nk.APPLICATION,
             kind=ek.KEY_OF,
             description="JSON Web Key belongs to application",
-            traversable=ek.traversable(ek.KEY_OF),
+            traversable=True,
         )
     ],
 )
@@ -91,5 +91,5 @@ class ApplicationJWKS(BaseAsset):
             kind=ek.KEY_OF,
             start=EdgePath(value=self.id, match_by="id"),
             end=EdgePath(value=self.app_id, match_by="id"),
-            properties=EdgeProperties(traversable=ek.traversable(ek.KEY_OF)),
+            properties=EdgeProperties(traversable=True),
         )

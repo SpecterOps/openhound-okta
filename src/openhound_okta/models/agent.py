@@ -40,14 +40,14 @@ class AgentProperties(OktaNodeProperties):
             end=nk.AGENT_POOL,
             kind=ek.AGENT_MEMBER_OF,
             description="Agent belongs to agent pool",
-            traversable=ek.traversable(ek.AGENT_MEMBER_OF),
+            traversable=True,
         ),
         EdgeDef(
             start=nk.AD_USER,
             end=nk.AGENT,
             kind=ek.HOSTS_AGENT,
             description="Computer hosts okta agent",
-            traversable=ek.traversable(ek.HOSTS_AGENT),
+            traversable=True,
         ),
     ],
 )
@@ -110,7 +110,7 @@ class Agent(BaseAsset):
                 ),
                 end=EdgePath(value=self.id, match_by="id"),
                 kind=ek.HOSTS_AGENT,
-                properties=EdgeProperties(traversable=ek.traversable(ek.HOSTS_AGENT)),
+                properties=EdgeProperties(traversable=True),
             )
 
     @property
@@ -119,7 +119,7 @@ class Agent(BaseAsset):
             kind=ek.AGENT_MEMBER_OF,
             start=EdgePath(value=self.id, match_by="id"),
             end=EdgePath(value=self.pool_id, match_by="id"),
-            properties=EdgeProperties(traversable=ek.traversable(ek.AGENT_MEMBER_OF)),
+            properties=EdgeProperties(traversable=True),
         )
 
     @property

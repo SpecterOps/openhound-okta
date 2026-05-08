@@ -90,7 +90,7 @@ class Credentials(BaseModel):
             end=nk.APPLICATION,
             kind=ek.CONTAINS,
             description="Organization contains application",
-            traversable=ek.traversable(ek.CONTAINS),
+            traversable=True,
         ),
     ],
 )
@@ -142,7 +142,7 @@ class Application(BaseAsset):
                     kind=ek.OUTBOUND_ORG_SSO,
                     start=EdgePath(value=self.id, match_by="id"),
                     end=EdgePath(value=f"{jamf_domain}-SSO", match_by="id"),
-                    properties=EdgeProperties(traversable=ek.traversable(ek.OUTBOUND_ORG_SSO)),
+                    properties=EdgeProperties(traversable=True),
                 )
 
     # @property
@@ -153,7 +153,7 @@ class Application(BaseAsset):
     #             kind=ek.OUTBOUND_ORG_SSO,
     #             start=EdgePath(value=self.id, match_by="id"),
     #             ....
-    #             properties=EdgeProperties(traversable=ek.traversable(ek.OUTBOUND_ORG_SSO)),
+    #             properties=EdgeProperties(traversable=True),
     #         )
     #
 
@@ -169,7 +169,7 @@ class Application(BaseAsset):
     #             kind=ek.KERBEROS_SSO,
     #             start=ConditionalEdgePath(kind="User", property_matchers=[condition]),
     #             end=EdgePath(value=self.id, match_by="id"),
-    #             properties=EdgeProperties(traversable=ek.traversable(ek.KERBEROS_SSO)),
+    #             properties=EdgeProperties(traversable=True),
     #         )
 
     @property
@@ -178,7 +178,7 @@ class Application(BaseAsset):
             kind=ek.CONTAINS,
             start=EdgePath(value=self._lookup.org_id(), match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=ek.traversable(ek.CONTAINS)),
+            properties=EdgeProperties(traversable=True),
         )
 
     @property

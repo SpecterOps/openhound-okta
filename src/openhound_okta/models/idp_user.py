@@ -23,14 +23,14 @@ class Profile(BaseModel):
             end=nk.USER,
             kind=ek.IDENTITY_PROVIDER_FOR,
             description="Identity provider manages user",
-            traversable=ek.traversable(ek.IDENTITY_PROVIDER_FOR),
+            traversable=True,
         ),
         EdgeDef(
             start=nk.ORG,
             end=nk.USER,
             kind=ek.INBOUND_SSO,
             description="User identity via SSO",
-            traversable=ek.traversable(ek.INBOUND_SSO),
+            traversable=True,
         ),
     ],
 )
@@ -60,7 +60,7 @@ class IDPUser(BaseAsset):
                 kind=ek.INBOUND_SSO,
                 start=EdgePath(value=self.external_id, match_by="id"),
                 end=EdgePath(value=self.id, match_by="id"),
-                properties=EdgeProperties(traversable=ek.traversable(ek.INBOUND_SSO)),
+                properties=EdgeProperties(traversable=True),
             )
 
     @property
@@ -69,7 +69,7 @@ class IDPUser(BaseAsset):
             kind=ek.IDENTITY_PROVIDER_FOR,
             start=EdgePath(value=self.idp_id, match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=ek.traversable(ek.IDENTITY_PROVIDER_FOR)),
+            properties=EdgeProperties(traversable=True),
         )
 
     @property

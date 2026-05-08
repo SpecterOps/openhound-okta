@@ -33,14 +33,14 @@ class ApiServiceProperties(OktaNodeProperties):
             end=nk.INTEGRATION,
             kind=ek.CONTAINS,
             description="Organization contains API service integration",
-            traversable=ek.traversable(ek.CONTAINS),
+            traversable=True,
         ),
         EdgeDef(
             start=nk.USER,
             end=nk.INTEGRATION,
             kind=ek.CREATOR_OF,
             description="User created the API service integration",
-            traversable=ek.traversable(ek.CREATOR_OF),
+            traversable=False,
         ),
     ],
 )
@@ -78,7 +78,7 @@ class ApiService(BaseAsset):
             kind=ek.CONTAINS,
             start=EdgePath(value=self._lookup.org_id(), match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=ek.traversable(ek.CONTAINS)),
+            properties=EdgeProperties(traversable=True),
         )
 
     @property
@@ -88,7 +88,7 @@ class ApiService(BaseAsset):
                 kind=ek.CREATOR_OF,
                 start=EdgePath(value=self.created_by, match_by="id"),
                 end=EdgePath(value=self.id, match_by="id"),
-                properties=EdgeProperties(traversable=ek.traversable(ek.CREATOR_OF)),
+                properties=EdgeProperties(traversable=False),
             )
 
     @property

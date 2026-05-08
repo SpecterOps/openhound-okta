@@ -1,8 +1,3 @@
-from functools import cache
-import json
-from pathlib import Path
-from typing import Any
-
 ADD_MEMBER = "Okta_AddMember"
 AGENT_MEMBER_OF = "Okta_AgentMemberOf"
 AGENT_POOL_FOR = "Okta_AgentPoolFor"
@@ -50,28 +45,3 @@ USER_PULL = "Okta_UserPull"
 USER_PUSH = "Okta_UserPush"
 USER_SYNC = "Okta_UserSync"
 PASSWORD_SYNC = "Okta_PasswordSync"
-
-_REPO_SCHEMA_PATH = Path(__file__).resolve().parents[3] / "extension" / "schema.json"
-_PACKAGE_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schema.json"
-
-
-def _schema_path() -> Path:
-    for path in (_REPO_SCHEMA_PATH, _PACKAGE_SCHEMA_PATH):
-        if path.is_file():
-            return path
-    raise FileNotFoundError(f"Could not find schema.json at {_REPO_SCHEMA_PATH} or {_PACKAGE_SCHEMA_PATH}")
-
-
-@cache
-def _relationship_traversability() -> dict[str, bool]:
-    with _schema_path().open(encoding="utf-8") as schema_file:
-        schema: dict[str, Any] = json.load(schema_file)
-
-    return {relationship["name"]: bool(relationship["is_traversable"]) for relationship in schema["relationship_kinds"]}
-
-
-def traversable(kind: str) -> bool:
-    try:
-        return _relationship_traversability()[kind]
-    except KeyError as error:
-        raise KeyError(f"{kind} is not defined in {_schema_path()} relationship_kinds") from error

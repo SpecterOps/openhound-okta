@@ -84,21 +84,21 @@ class Profile(BaseModel):
             end=nk.USER,
             kind=ek.CONTAINS,
             description="Organization contains user",
-            traversable=ek.traversable(ek.CONTAINS),
+            traversable=True,
         ),
         EdgeDef(
             start=nk.REALM,
             end=nk.USER,
             kind=ek.REALM_CONTAINS,
             description="Realm contains user",
-            traversable=ek.traversable(ek.REALM_CONTAINS),
+            traversable=True,
         ),
         EdgeDef(
             start=nk.USER,
             end=nk.USER,
             kind=ek.MANAGER_OF,
             description="User is a manager of another user",
-            traversable=ek.traversable(ek.MANAGER_OF),
+            traversable=False,
         ),
     ],
 )
@@ -172,7 +172,7 @@ class User(BaseAsset):
             kind=ek.CONTAINS,
             start=EdgePath(value=self._lookup.org_id(), match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=ek.traversable(ek.CONTAINS)),
+            properties=EdgeProperties(traversable=True),
         )
 
     @property
@@ -182,7 +182,7 @@ class User(BaseAsset):
                 kind=ek.REALM_CONTAINS,
                 start=EdgePath(value=self.realm_id, match_by="id"),
                 end=EdgePath(value=self.id, match_by="id"),
-                properties=EdgeProperties(traversable=ek.traversable(ek.REALM_CONTAINS)),
+                properties=EdgeProperties(traversable=True),
             )
 
     @property
@@ -197,7 +197,7 @@ class User(BaseAsset):
                     kind=ek.MANAGER_OF,
                     start=EdgePath(value=manager_id, match_by="id"),
                     end=EdgePath(value=self.id, match_by="id"),
-                    properties=EdgeProperties(traversable=ek.traversable(ek.MANAGER_OF)),
+                    properties=EdgeProperties(traversable=False),
                 )
 
     @property

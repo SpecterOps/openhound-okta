@@ -60,49 +60,49 @@ class Profile(BaseModel):
             kind=ek.APP_ASSIGNMENT,
             start=nk.USER,
             end=nk.APPLICATION,
-            traversable=ek.traversable(ek.APP_ASSIGNMENT),
+            traversable=False,
             description="User is assigned to an application",
         ),
         EdgeDef(
             kind=ek.USER_PULL,
             start=nk.APPLICATION,
             end=nk.USER,
-            traversable=ek.traversable(ek.USER_PULL),
+            traversable=False,
             description="User is pulled form an external application",
         ),
         EdgeDef(
             kind=ek.USER_PUSH,
             start=nk.USER,
             end=nk.APPLICATION,
-            traversable=ek.traversable(ek.USER_PUSH),
+            traversable=False,
             description="User is pushed to an application",
         ),
         EdgeDef(
             kind=ek.USER_SYNC,
             start=nk.USER,
             end=nk.AD_USER,
-            traversable=ek.traversable(ek.USER_SYNC),
+            traversable=False,
             description="User is synced to an Active Directory user",
         ),
         EdgeDef(
             kind=ek.USER_SYNC,
             start=nk.AD_USER,
             end=nk.USER,
-            traversable=ek.traversable(ek.USER_SYNC),
+            traversable=False,
             description="User is synced from an Active Directory user",
         ),
         EdgeDef(
             kind=ek.PASSWORD_SYNC,
             start=nk.AD_USER,
             end=nk.USER,
-            traversable=ek.traversable(ek.PASSWORD_SYNC),
+            traversable=True,
             description="Credentials are synced between AD and Okta users",
         ),
         EdgeDef(
             kind=ek.PASSWORD_SYNC,
             start=nk.USER,
             end=nk.USER,
-            traversable=ek.traversable(ek.PASSWORD_SYNC),
+            traversable=True,
             description="Credentials are synced between okta orgs",
         ),
     ],
@@ -144,7 +144,7 @@ class ApplicationUser(BaseAsset):
                 kind=ek.READ_PASSWORD_UPDATES,
                 start=EdgePath(value=self.app_id, match_by="id"),
                 end=EdgePath(value=self.id, match_by="id"),
-                properties=EdgeProperties(traversable=ek.traversable(ek.READ_PASSWORD_UPDATES)),
+                properties=EdgeProperties(traversable=True),
             )
 
     @property
@@ -156,7 +156,7 @@ class ApplicationUser(BaseAsset):
                 kind=ek.APP_ASSIGNMENT,
                 start=EdgePath(value=self.id, match_by="id"),
                 end=EdgePath(value=self.app_id, match_by="id"),
-                properties=EdgeProperties(traversable=ek.traversable(ek.APP_ASSIGNMENT)),
+                properties=EdgeProperties(traversable=False),
             )
 
     @property
@@ -167,14 +167,14 @@ class ApplicationUser(BaseAsset):
                     kind=ek.USER_PULL,
                     start=EdgePath(value=self.app_id, match_by="id"),
                     end=EdgePath(value=self.id, match_by="id"),
-                    properties=EdgeProperties(traversable=ek.traversable(ek.USER_PULL)),
+                    properties=EdgeProperties(traversable=False),
                 )
             else:
                 yield Edge(
                     kind=ek.USER_PUSH,
                     start=EdgePath(value=self.id, match_by="id"),
                     end=EdgePath(value=self.app_id, match_by="id"),
-                    properties=EdgeProperties(traversable=ek.traversable(ek.USER_PUSH)),
+                    properties=EdgeProperties(traversable=False),
                 )
 
     @property
@@ -185,7 +185,7 @@ class ApplicationUser(BaseAsset):
                     kind=ek.USER_SYNC,
                     start=EdgePath(value=self.profile.object_sid, match_by="id"),
                     end=EdgePath(value=self.id, match_by="id"),
-                    properties=EdgeProperties(traversable=ek.traversable(ek.USER_SYNC)),
+                    properties=EdgeProperties(traversable=False),
                 )
 
                 if "OUTBOUND_DEL_AUTH" in self.app_features:
@@ -193,21 +193,21 @@ class ApplicationUser(BaseAsset):
                         kind=ek.PASSWORD_SYNC,
                         start=EdgePath(value=self.profile.object_sid, match_by="id"),
                         end=EdgePath(value=self.id, match_by="id"),
-                        properties=EdgeProperties(traversable=ek.traversable(ek.PASSWORD_SYNC)),
+                        properties=EdgeProperties(traversable=True),
                     )
             else:
                 yield Edge(
                     kind=ek.USER_SYNC,
                     start=EdgePath(value=self.id, match_by="id"),
                     end=EdgePath(value=self.profile.object_sid, match_by="id"),
-                    properties=EdgeProperties(traversable=ek.traversable(ek.USER_SYNC)),
+                    properties=EdgeProperties(traversable=False),
                 )
                 if "PUSH_PASSWORD_UPDATES" in self.app_features:
                     yield Edge(
                         kind=ek.PASSWORD_SYNC,
                         start=EdgePath(value=self.id, match_by="id"),
                         end=EdgePath(value=self.profile.object_sid, match_by="id"),
-                        properties=EdgeProperties(traversable=ek.traversable(ek.PASSWORD_SYNC)),
+                        properties=EdgeProperties(traversable=True),
                     )
 
     @property
@@ -218,7 +218,7 @@ class ApplicationUser(BaseAsset):
                     kind=ek.USER_SYNC,
                     start=EdgePath(value=self.external_id, match_by="id"),
                     end=EdgePath(value=self.id, match_by="id"),
-                    properties=EdgeProperties(traversable=ek.traversable(ek.USER_SYNC)),
+                    properties=EdgeProperties(traversable=False),
                 )
 
             else:
@@ -226,7 +226,7 @@ class ApplicationUser(BaseAsset):
                     kind=ek.USER_SYNC,
                     start=EdgePath(value=self.id, match_by="id"),
                     end=EdgePath(value=self.external_id, match_by="id"),
-                    properties=EdgeProperties(traversable=ek.traversable(ek.USER_SYNC)),
+                    properties=EdgeProperties(traversable=False),
                 )
 
                 if "PUSH_PASSWORD_UPDATES" in self.app_features:
@@ -234,7 +234,7 @@ class ApplicationUser(BaseAsset):
                         kind=ek.PASSWORD_SYNC,
                         start=EdgePath(value=self.id, match_by="id"),
                         end=EdgePath(value=self.external_id, match_by="id"),
-                        properties=EdgeProperties(traversable=ek.traversable(ek.PASSWORD_SYNC)),
+                        properties=EdgeProperties(traversable=True),
                     )
 
     @property
