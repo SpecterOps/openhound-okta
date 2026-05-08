@@ -66,7 +66,7 @@ class RoleAssignment(BaseAsset):
     def _manage_app_edges(self):
         if self.type == "CUSTOM" and self.role:
             has_permissions = self._lookup.has_role_permission(
-                self.role, "okta.groups.manage"
+                self.role, "okta.apps.manage"
             )
             if has_permissions:
                 for (app_id,) in self._lookup.all_applications():
