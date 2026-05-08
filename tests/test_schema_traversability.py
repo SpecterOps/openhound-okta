@@ -83,11 +83,15 @@ def test_model_traversable_values_come_from_schema():
 
             kind = _keyword(node, "kind")
             properties = _keyword(node, "properties")
+            assert kind, f"{path}:{node.lineno} Edge() must declare kind"
+            assert properties, f"{path}:{node.lineno} Edge() must declare properties"
+            assert isinstance(properties.value, ast.Call), f"{path}:{properties.value.lineno} properties must call EdgeProperties()"
             if not kind or not properties or not isinstance(properties.value, ast.Call):
                 continue
-            if _call_name(properties.value.func) != "EdgeProperties":
-                continue
+            assert _call_name(properties.value.func) == "EdgeProperties", (
+                f"{path}:{properties.value.lineno} properties must call EdgeProperties()"
+            )
 
             traversable = _keyword(properties.value, "traversable")
-            if traversable:
-                _assert_schema_traversable_call(traversable.value, kind.value, path)
+            assert traversable, f"{path}:{properties.value.lineno} EdgeProperties() must declare traversable"
+            _assert_schema_traversable_call(traversable.value, kind.value, path)

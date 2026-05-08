@@ -169,6 +169,7 @@ class Application(BaseAsset):
     #             kind=ek.KERBEROS_SSO,
     #             start=ConditionalEdgePath(kind="User", property_matchers=[condition]),
     #             end=EdgePath(value=self.id, match_by="id"),
+    #             properties=EdgeProperties(traversable=ek.traversable(ek.KERBEROS_SSO)),
     #         )
 
     @property
