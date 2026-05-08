@@ -42,7 +42,7 @@ class RoleAssignment(BaseAsset):
             kind=ek.HAS_ROLE_ASSIGNMENT,
             start=EdgePath(value=self.source_id, match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=False),
+            properties=EdgeProperties(traversable=ek.traversable(ek.HAS_ROLE_ASSIGNMENT)),
         )
 
     @property
@@ -52,14 +52,14 @@ class RoleAssignment(BaseAsset):
                 kind=ek.HAS_ROLE,
                 start=EdgePath(value=self.source_id, match_by="id"),
                 end=EdgePath(value=self.type, match_by="id"),
-                properties=EdgeProperties(traversable=False),
+                properties=EdgeProperties(traversable=ek.traversable(ek.HAS_ROLE)),
             )
         else:
             yield Edge(
                 kind=ek.HAS_ROLE,
                 start=EdgePath(value=self.source_id, match_by="id"),
                 end=EdgePath(value=self.role, match_by="id"),
-                properties=EdgeProperties(traversable=False),
+                properties=EdgeProperties(traversable=ek.traversable(ek.HAS_ROLE)),
             )
 
     @property
@@ -74,7 +74,7 @@ class RoleAssignment(BaseAsset):
                         kind=ek.MANAGE_APP,
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=app_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
+                        properties=EdgeProperties(traversable=ek.traversable(ek.MANAGE_APP)),
                     )
 
     @property
@@ -94,7 +94,7 @@ class RoleAssignment(BaseAsset):
                         kind=ek.RESET_FACTORS,
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=user_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
+                        properties=EdgeProperties(traversable=ek.traversable(ek.RESET_FACTORS)),
                     )
 
     @property
@@ -117,7 +117,7 @@ class RoleAssignment(BaseAsset):
                         kind=ek.RESET_PASSWORD,
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=user_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
+                        properties=EdgeProperties(traversable=ek.traversable(ek.RESET_PASSWORD)),
                     )
 
     @property
@@ -134,7 +134,7 @@ class RoleAssignment(BaseAsset):
                 kind=ek.SCOPED_TO,
                 start=EdgePath(value=self.id, match_by="id"),
                 end=EdgePath(value=self._lookup.org_id(), match_by="id"),
-                properties=EdgeProperties(traversable=False),
+                properties=EdgeProperties(traversable=ek.traversable(ek.SCOPED_TO)),
             )
 
     @property
@@ -145,7 +145,7 @@ class RoleAssignment(BaseAsset):
                     kind=ek.SCOPED_TO,
                     start=EdgePath(value=self.id, match_by="id"),
                     end=EdgePath(value=group.id, match_by="id"),
-                    properties=EdgeProperties(traversable=False),
+                    properties=EdgeProperties(traversable=ek.traversable(ek.SCOPED_TO)),
                 )
 
     @property
@@ -156,7 +156,7 @@ class RoleAssignment(BaseAsset):
                     kind=ek.MOBILE_ADMIN,
                     start=EdgePath(value=self.source_id, match_by="id"),
                     end=EdgePath(value=device_id, match_by="id"),
-                    properties=EdgeProperties(traversable=True),
+                    properties=EdgeProperties(traversable=ek.traversable(ek.MOBILE_ADMIN)),
                 )
 
     @property
@@ -166,7 +166,7 @@ class RoleAssignment(BaseAsset):
                 kind=ek.SUPER_ADMIN,
                 start=EdgePath(value=self.source_id, match_by="id"),
                 end=EdgePath(value=self._lookup.org_id(), match_by="id"),
-                properties=EdgeProperties(traversable=True),
+                properties=EdgeProperties(traversable=ek.traversable(ek.SUPER_ADMIN)),
             )
 
     @property
@@ -215,7 +215,7 @@ class RoleAssignment(BaseAsset):
                         kind=ek.READ_CLIENT_SECRET,
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=secret_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
+                        properties=EdgeProperties(traversable=ek.traversable(ek.READ_CLIENT_SECRET)),
                     )
 
         elif self.type in ["API_ACCESS_MANAGEMENT_ADMIN", "READ_ONLY_ADMIN"]:
@@ -225,7 +225,7 @@ class RoleAssignment(BaseAsset):
                         kind=ek.READ_CLIENT_SECRET,
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=secret_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
+                        properties=EdgeProperties(traversable=ek.traversable(ek.READ_CLIENT_SECRET)),
                     )
 
         elif (
@@ -242,5 +242,5 @@ class RoleAssignment(BaseAsset):
                         kind=ek.READ_CLIENT_SECRET,
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=secret_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
+                        properties=EdgeProperties(traversable=ek.traversable(ek.READ_CLIENT_SECRET)),
                     )

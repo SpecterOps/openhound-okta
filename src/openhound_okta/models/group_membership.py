@@ -74,5 +74,5 @@ class GroupMembership(BaseAsset):
             kind=ek.MEMBER_OF,
             start=EdgePath(value=self.id, match_by="id"),
             end=EdgePath(value=self.group_id, match_by="id"),
-            properties=EdgeProperties(traversable=True),
+            properties=EdgeProperties(traversable=ek.traversable(ek.MEMBER_OF)),
         )

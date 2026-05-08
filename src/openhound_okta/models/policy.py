@@ -38,7 +38,7 @@ class PolicyProperties(OktaNodeProperties):
             end=nk.POLICY,
             kind=ek.CONTAINS,
             description="Organization contains policy",
-            traversable=False,
+            traversable=ek.traversable(ek.CONTAINS),
         ),
     ],
 )
@@ -80,5 +80,5 @@ class Policy(BaseAsset):
             kind=ek.CONTAINS,
             start=EdgePath(value=self._lookup.org_id(), match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=False),
+            properties=EdgeProperties(traversable=ek.traversable(ek.CONTAINS)),
         )

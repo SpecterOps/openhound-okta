@@ -50,7 +50,7 @@ class BuiltInRoleProperties(OktaNodeProperties):
             end=nk.ROLE,
             kind=ek.CONTAINS,
             description="Organization contains built-in role",
-            traversable=False,
+            traversable=ek.traversable(ek.CONTAINS),
         )
     ],
 )
@@ -82,5 +82,5 @@ class BuiltInRole(BaseAsset):
             kind=ek.CONTAINS,
             start=EdgePath(value=self._lookup.org_id(), match_by="id"),
             end=EdgePath(value=self.type, match_by="id"),
-            properties=EdgeProperties(traversable=False),
+            properties=EdgeProperties(traversable=ek.traversable(ek.CONTAINS)),
         )

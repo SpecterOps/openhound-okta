@@ -26,6 +26,7 @@ local_scheme = "no-local-version"
 
 [tool.hatch.build.targets.wheel.force-include]
 "extension.yaml" = "openhound_okta/extension.yaml"
+"extension/schema.json" = "openhound_okta/schema.json"
 
 [dependency-groups]
 dev = [

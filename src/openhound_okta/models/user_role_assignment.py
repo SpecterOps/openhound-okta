@@ -74,63 +74,63 @@ class Embedded(BaseModel):
             end=nk.ROLE_ASSIGNMENT,
             kind=ek.HAS_ROLE_ASSIGNMENT,
             description="User has a role assignment",
-            traversable=False,
+            traversable=ek.traversable(ek.HAS_ROLE_ASSIGNMENT),
         ),
         EdgeDef(
             start=nk.GROUP,
             end=nk.ROLE_ASSIGNMENT,
             kind=ek.HAS_ROLE_ASSIGNMENT,
             description="Group has a role assignment",
-            traversable=False,
+            traversable=ek.traversable(ek.HAS_ROLE_ASSIGNMENT),
         ),
         EdgeDef(
             start=nk.USER,
             end=nk.ROLE,
             kind=ek.HAS_ROLE,
             description="User is assigned a built-in role",
-            traversable=False,
+            traversable=ek.traversable(ek.HAS_ROLE),
         ),
         EdgeDef(
             start=nk.GROUP,
             end=nk.ROLE,
             kind=ek.HAS_ROLE,
             description="Group is assigned a built-in role",
-            traversable=False,
+            traversable=ek.traversable(ek.HAS_ROLE),
         ),
         EdgeDef(
             start=nk.USER,
             end=nk.CUSTOM_ROLE,
             kind=ek.HAS_ROLE,
             description="User is assigned a custom role",
-            traversable=False,
+            traversable=ek.traversable(ek.HAS_ROLE),
         ),
         EdgeDef(
             start=nk.GROUP,
             end=nk.CUSTOM_ROLE,
             kind=ek.HAS_ROLE,
             description="Group is assigned a custom role",
-            traversable=False,
+            traversable=ek.traversable(ek.HAS_ROLE),
         ),
         EdgeDef(
             start=nk.GROUP,
             end=nk.GROUP,
             kind=ek.ADD_MEMBER,
             description="Group can add member to groups",
-            traversable=False,
+            traversable=ek.traversable(ek.ADD_MEMBER),
         ),
         EdgeDef(
             start=nk.USER,
             end=nk.GROUP,
             kind=ek.ADD_MEMBER,
             description="User can add member to groups",
-            traversable=False,
+            traversable=ek.traversable(ek.ADD_MEMBER),
         ),
         EdgeDef(
             start=nk.APPLICATION,
             end=nk.GROUP,
             kind=ek.ADD_MEMBER,
             description="Application can add member to groups",
-            traversable=False,
+            traversable=ek.traversable(ek.ADD_MEMBER),
         ),
         # Group Admin Role (USER_ADMIN in OktaHound)
         EdgeDef(
@@ -138,70 +138,70 @@ class Embedded(BaseModel):
             end=nk.USER,
             kind=ek.GROUP_ADMIN,
             description="Group has group admin role",
-            traversable=True,
+            traversable=ek.traversable(ek.GROUP_ADMIN),
         ),
         EdgeDef(
             start=nk.USER,
             end=nk.USER,
             kind=ek.GROUP_ADMIN,
             description="User has group admin role",
-            traversable=True,
+            traversable=ek.traversable(ek.GROUP_ADMIN),
         ),
         EdgeDef(
             start=nk.APPLICATION,
             end=nk.USER,
             kind=ek.GROUP_ADMIN,
             description="Application has group admin role",
-            traversable=True,
+            traversable=ek.traversable(ek.GROUP_ADMIN),
         ),
         EdgeDef(
             start=nk.GROUP,
             end=nk.GROUP,
             kind=ek.GROUP_ADMIN,
             description="Group has group admin role for groups",
-            traversable=True,
+            traversable=ek.traversable(ek.GROUP_ADMIN),
         ),
         EdgeDef(
             start=nk.USER,
             end=nk.GROUP,
             kind=ek.GROUP_ADMIN,
             description="User has group admin role",
-            traversable=True,
+            traversable=ek.traversable(ek.GROUP_ADMIN),
         ),
         EdgeDef(
             start=nk.APPLICATION,
             end=nk.GROUP,
             kind=ek.GROUP_ADMIN,
             description="Application has group admin role",
-            traversable=True,
+            traversable=ek.traversable(ek.GROUP_ADMIN),
         ),
         EdgeDef(
             start=nk.GROUP,
             end=nk.APPLICATION,
             kind=ek.APP_ADMIN,
             description="Group has app admin role",
-            traversable=True,
+            traversable=ek.traversable(ek.APP_ADMIN),
         ),
         EdgeDef(
             start=nk.USER,
             end=nk.APPLICATION,
             kind=ek.APP_ADMIN,
             description="User has app admin role",
-            traversable=True,
+            traversable=ek.traversable(ek.APP_ADMIN),
         ),
         EdgeDef(
             start=nk.APPLICATION,
             end=nk.APPLICATION,
             kind=ek.APP_ADMIN,
             description="Application has app admin role",
-            traversable=True,
+            traversable=ek.traversable(ek.APP_ADMIN),
         ),
         EdgeDef(
             start=nk.USER,
             end=nk.CLIENT_SECRET,
             kind=ek.READ_CLIENT_SECRET,
             description="User can read application client secrets",
-            traversable=True,
+            traversable=ek.traversable(ek.READ_CLIENT_SECRET),
         ),
         # Group Membership Role
         EdgeDef(
@@ -209,21 +209,21 @@ class Embedded(BaseModel):
             end=nk.GROUP,
             kind=ek.GROUP_MEMBERSHIP_ADMIN,
             description="Group has app GROUP_MEMBERSHIP_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.GROUP_MEMBERSHIP_ADMIN),
         ),
         EdgeDef(
             start=nk.USER,
             end=nk.GROUP,
             kind=ek.GROUP_MEMBERSHIP_ADMIN,
             description="User has GROUP_MEMBERSHIP_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.GROUP_MEMBERSHIP_ADMIN),
         ),
         EdgeDef(
             start=nk.APPLICATION,
             end=nk.GROUP,
             kind=ek.GROUP_MEMBERSHIP_ADMIN,
             description="Application has GROUP_MEMBERSHIP_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.GROUP_MEMBERSHIP_ADMIN),
         ),
         # Helpdesk role
         EdgeDef(
@@ -231,21 +231,21 @@ class Embedded(BaseModel):
             end=nk.USER,
             kind=ek.HELPDESK_ADMIN,
             description="Group has HELPDESK_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.HELPDESK_ADMIN),
         ),
         EdgeDef(
             start=nk.USER,
             end=nk.USER,
             kind=ek.HELPDESK_ADMIN,
             description="User has HELPDESK_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.HELPDESK_ADMIN),
         ),
         EdgeDef(
             start=nk.APPLICATION,
             end=nk.USER,
             kind=ek.HELPDESK_ADMIN,
             description="Application has HELPDESK_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.HELPDESK_ADMIN),
         ),
         # Mobile admin role
         EdgeDef(
@@ -253,21 +253,21 @@ class Embedded(BaseModel):
             end=nk.DEVICE,
             kind=ek.MOBILE_ADMIN,
             description="Group has app MOBILE_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.MOBILE_ADMIN),
         ),
         EdgeDef(
             start=nk.USER,
             end=nk.DEVICE,
             kind=ek.MOBILE_ADMIN,
             description="User has MOBILE_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.MOBILE_ADMIN),
         ),
         EdgeDef(
             start=nk.APPLICATION,
             end=nk.DEVICE,
             kind=ek.MOBILE_ADMIN,
             description="Application has MOBILE_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.MOBILE_ADMIN),
         ),
         # Org admin
         EdgeDef(
@@ -275,21 +275,21 @@ class Embedded(BaseModel):
             end=nk.USER,
             kind=ek.ORG_ADMIN,
             description="Group has ORG_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.ORG_ADMIN),
         ),
         EdgeDef(
             start=nk.USER,
             end=nk.GROUP,
             kind=ek.ORG_ADMIN,
             description="User has ORG_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.ORG_ADMIN),
         ),
         EdgeDef(
             start=nk.USER,
             end=nk.DEVICE,
             kind=ek.ORG_ADMIN,
             description="Application has ORG_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.ORG_ADMIN),
         ),
         # Org admin
         EdgeDef(
@@ -297,21 +297,21 @@ class Embedded(BaseModel):
             end=nk.USER,
             kind=ek.ORG_ADMIN,
             description="Group has ORG_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.ORG_ADMIN),
         ),
         EdgeDef(
             start=nk.GROUP,
             end=nk.GROUP,
             kind=ek.ORG_ADMIN,
             description="Group has ORG_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.ORG_ADMIN),
         ),
         EdgeDef(
             start=nk.GROUP,
             end=nk.DEVICE,
             kind=ek.ORG_ADMIN,
             description="Group has ORG_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.ORG_ADMIN),
         ),
         # Org admin
         EdgeDef(
@@ -319,21 +319,21 @@ class Embedded(BaseModel):
             end=nk.USER,
             kind=ek.ORG_ADMIN,
             description="Application has ORG_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.ORG_ADMIN),
         ),
         EdgeDef(
             start=nk.APPLICATION,
             end=nk.GROUP,
             kind=ek.ORG_ADMIN,
             description="Application has ORG_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.ORG_ADMIN),
         ),
         EdgeDef(
             start=nk.APPLICATION,
             end=nk.DEVICE,
             kind=ek.ORG_ADMIN,
             description="Application has ORG_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.ORG_ADMIN),
         ),
         # Super admin
         EdgeDef(
@@ -341,35 +341,35 @@ class Embedded(BaseModel):
             end=nk.ORG,
             kind=ek.SUPER_ADMIN,
             description="User has SUPER_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.SUPER_ADMIN),
         ),
         EdgeDef(
             start=nk.GROUP,
             end=nk.ORG,
             kind=ek.SUPER_ADMIN,
             description="Group has SUPER_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.SUPER_ADMIN),
         ),
         EdgeDef(
             start=nk.APPLICATION,
             end=nk.ORG,
             kind=ek.SUPER_ADMIN,
             description="Application has SUPER_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.SUPER_ADMIN),
         ),
         EdgeDef(
             start=nk.USER,
             end=nk.GROUP,
             kind=ek.GROUP_ADMIN,
             description="User has GROUP_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.GROUP_ADMIN),
         ),
         EdgeDef(
             start=nk.USER,
             end=nk.USER,
             kind=ek.GROUP_ADMIN,
             description="User has GROUP_ADMIN role",
-            traversable=True,
+            traversable=ek.traversable(ek.GROUP_ADMIN),
         ),
         # Scoped to
         EdgeDef(
@@ -377,21 +377,21 @@ class Embedded(BaseModel):
             end=nk.GROUP,
             kind=ek.SCOPED_TO,
             description="Role assignment is scoped to group",
-            traversable=False,
+            traversable=ek.traversable(ek.SCOPED_TO),
         ),
         EdgeDef(
             start=nk.USER,
             end=nk.ORG,
             kind=ek.SCOPED_TO,
             description="Role assignment is scoped to org",
-            traversable=False,
+            traversable=ek.traversable(ek.SCOPED_TO),
         ),
         EdgeDef(
             start=nk.USER,
             end=nk.APPLICATION,
             kind=ek.SCOPED_TO,
             description="Role assignment is scoped to application",
-            traversable=False,
+            traversable=ek.traversable(ek.SCOPED_TO),
         ),
     ],
 )
@@ -434,7 +434,7 @@ class UserRoleAssignment(RoleAssignment):
                         kind=ek.SCOPED_TO,
                         start=EdgePath(value=self.id, match_by="id"),
                         end=EdgePath(value=app.id, match_by="id"),
-                        properties=EdgeProperties(traversable=False),
+                        properties=EdgeProperties(traversable=ek.traversable(ek.SCOPED_TO)),
                     )
 
     @property
@@ -453,7 +453,7 @@ class UserRoleAssignment(RoleAssignment):
                         kind=ek.GROUP_MEMBERSHIP_ADMIN,
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=group.id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
+                        properties=EdgeProperties(traversable=ek.traversable(ek.GROUP_MEMBERSHIP_ADMIN)),
                     )
             else:
                 # No targets specified, emit to all groups
@@ -463,7 +463,7 @@ class UserRoleAssignment(RoleAssignment):
                         kind=ek.GROUP_MEMBERSHIP_ADMIN,
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=group_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
+                        properties=EdgeProperties(traversable=ek.traversable(ek.GROUP_MEMBERSHIP_ADMIN)),
                     )
 
     @property
@@ -487,7 +487,7 @@ class UserRoleAssignment(RoleAssignment):
                             kind=ek.APP_ADMIN,
                             start=EdgePath(value=self.source_id, match_by="id"),
                             end=EdgePath(value=app.id, match_by="id"),
-                            properties=EdgeProperties(traversable=True),
+                            properties=EdgeProperties(traversable=ek.traversable(ek.APP_ADMIN)),
                         )
             else:
                 # No targets specified, emit to all apps and API service integrations
@@ -496,7 +496,7 @@ class UserRoleAssignment(RoleAssignment):
                         kind=ek.APP_ADMIN,
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=app_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
+                        properties=EdgeProperties(traversable=ek.traversable(ek.APP_ADMIN)),
                     )
 
     @property
@@ -514,7 +514,7 @@ class UserRoleAssignment(RoleAssignment):
                         kind=ek.HELPDESK_ADMIN,
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=group.id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
+                        properties=EdgeProperties(traversable=ek.traversable(ek.HELPDESK_ADMIN)),
                     )
             else:
                 # No targets specified, emit to all users
@@ -524,7 +524,7 @@ class UserRoleAssignment(RoleAssignment):
                         kind=ek.HELPDESK_ADMIN,
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=user_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
+                        properties=EdgeProperties(traversable=ek.traversable(ek.HELPDESK_ADMIN)),
                     )
 
     @property
@@ -561,7 +561,7 @@ class UserRoleAssignment(RoleAssignment):
                             kind=ek.ORG_ADMIN,
                             start=EdgePath(value=self.source_id, match_by="id"),
                             end=EdgePath(value=group.id, match_by="id"),
-                            properties=EdgeProperties(traversable=True),
+                            properties=EdgeProperties(traversable=ek.traversable(ek.ORG_ADMIN)),
                         )
 
                 if self.embedded.targets.catalog and self.embedded.targets.catalog.apps:
@@ -571,7 +571,7 @@ class UserRoleAssignment(RoleAssignment):
                                 kind=ek.ORG_ADMIN,
                                 start=EdgePath(value=self.source_id, match_by="id"),
                                 end=EdgePath(value=app.id, match_by="id"),
-                                properties=EdgeProperties(traversable=True),
+                                properties=EdgeProperties(traversable=ek.traversable(ek.ORG_ADMIN)),
                             )
             else:
                 # No targets specified, emit to all users, groups, devices, and apps
@@ -581,7 +581,7 @@ class UserRoleAssignment(RoleAssignment):
                         kind=ek.ORG_ADMIN,
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=device_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
+                        properties=EdgeProperties(traversable=ek.traversable(ek.ORG_ADMIN)),
                     )
 
                 all_users = self._lookup.all_users()
@@ -590,7 +590,7 @@ class UserRoleAssignment(RoleAssignment):
                         kind=ek.ORG_ADMIN,
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=user_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
+                        properties=EdgeProperties(traversable=ek.traversable(ek.ORG_ADMIN)),
                     )
 
                 all_groups = self._lookup.all_groups()
@@ -599,7 +599,7 @@ class UserRoleAssignment(RoleAssignment):
                         kind=ek.ORG_ADMIN,
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=group_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
+                        properties=EdgeProperties(traversable=ek.traversable(ek.ORG_ADMIN)),
                     )
 
                 all_apps = self._lookup.all_applications()
@@ -608,7 +608,7 @@ class UserRoleAssignment(RoleAssignment):
                         kind=ek.ORG_ADMIN,
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=app_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
+                        properties=EdgeProperties(traversable=ek.traversable(ek.ORG_ADMIN)),
                     )
 
     @property
@@ -627,7 +627,7 @@ class UserRoleAssignment(RoleAssignment):
                         kind=ek.GROUP_ADMIN,
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=group.id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
+                        properties=EdgeProperties(traversable=ek.traversable(ek.GROUP_ADMIN)),
                     )
             else:
                 # No targets specified, emit to all users and groups
@@ -636,7 +636,7 @@ class UserRoleAssignment(RoleAssignment):
                         kind=ek.GROUP_ADMIN,
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=user_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
+                        properties=EdgeProperties(traversable=ek.traversable(ek.GROUP_ADMIN)),
                     )
 
                 for (group_id,) in self._lookup.all_groups():
@@ -644,7 +644,7 @@ class UserRoleAssignment(RoleAssignment):
                         kind=ek.GROUP_ADMIN,
                         start=EdgePath(value=self.source_id, match_by="id"),
                         end=EdgePath(value=group_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
+                        properties=EdgeProperties(traversable=ek.traversable(ek.GROUP_ADMIN)),
                     )
 
     @property

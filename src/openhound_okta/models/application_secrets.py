@@ -44,7 +44,7 @@ class SecretProperties(OktaNodeProperties):
             end=nk.APPLICATION,
             kind=ek.SECRET_OF,
             description="Client secret belongs to application",
-            traversable=True,
+            traversable=ek.traversable(ek.SECRET_OF),
         )
     ],
 )
@@ -84,5 +84,5 @@ class ApplicationSecrets(BaseAsset):
             kind=ek.SECRET_OF,
             start=EdgePath(value=self.id, match_by="id"),
             end=EdgePath(value=self.app_id, match_by="id"),
-            properties=EdgeProperties(traversable=True),
+            properties=EdgeProperties(traversable=ek.traversable(ek.SECRET_OF)),
         )

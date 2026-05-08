@@ -104,21 +104,21 @@ class Protocol(BaseModel):
             end=nk.IDP,
             kind=ek.CONTAINS,
             description="Organization contains identity provider",
-            traversable=False,
+            traversable=ek.traversable(ek.CONTAINS),
         ),
         EdgeDef(
             start=nk.IDP,
             end=nk.GROUP,
             kind=ek.IDP_GROUP_ASSIGNMENT,
             description="Group provisioned by IDP",
-            traversable=False,
+            traversable=ek.traversable(ek.IDP_GROUP_ASSIGNMENT),
         ),
         EdgeDef(
             start=nk.ORG,
             end=nk.IDP,
             kind=ek.INBOUND_ORG_SSO,
             description="Organization SSO via identity provider",
-            traversable=False,
+            traversable=ek.traversable(ek.INBOUND_ORG_SSO),
         ),
     ],
 )
@@ -191,7 +191,7 @@ class IdentityProvider(BaseAsset):
                     kind=ek.IDP_GROUP_ASSIGNMENT,
                     start=EdgePath(value=self.id, match_by="id"),
                     end=EdgePath(value=group, match_by="id"),
-                    properties=EdgeProperties(traversable=False),
+                    properties=EdgeProperties(traversable=ek.traversable(ek.IDP_GROUP_ASSIGNMENT)),
                 )
 
     @property
@@ -200,7 +200,7 @@ class IdentityProvider(BaseAsset):
             kind=ek.CONTAINS,
             start=EdgePath(value=self._lookup.org_id(), match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=False),
+            properties=EdgeProperties(traversable=ek.traversable(ek.CONTAINS)),
         )
 
     @property
@@ -212,7 +212,7 @@ class IdentityProvider(BaseAsset):
                 kind=ek.INBOUND_ORG_SSO,
                 start=EdgePath(value=tenant_id, match_by="id"),
                 end=EdgePath(value=self.id, match_by="id"),
-                properties=EdgeProperties(traversable=False),
+                properties=EdgeProperties(traversable=ek.traversable(ek.INBOUND_ORG_SSO)),
             )
 
     @property
