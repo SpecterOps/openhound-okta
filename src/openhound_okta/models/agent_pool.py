@@ -32,8 +32,10 @@ class Agent(BaseModel):
     active: bool | None = None
     support_auto_update: bool | None = Field(alias="supportAutoUpdate", default=None)
     error_state: bool | None = Field(alias="errorState", default=None)
-    is_hidden: bool = Field(alias="isHidden")
-    is_latest_gaed_version: bool = Field(alias="isLatestGAedVersion")
+    is_hidden: bool | None = Field(alias="isHidden", default=None)
+    is_latest_gaed_version: bool | None = Field(
+        alias="isLatestGAedVersion", default=None
+    )
     last_connection: datetime | None = Field(alias="lastConnection", default=None)
     operational_status: str | None = Field(alias="operationalStatus", default=None)
     pool_id: str = Field(alias="poolId")
@@ -72,8 +74,8 @@ class AgentPool(BaseAsset):
     id: str
     name: str
     type: str
-    disrupted_agents: int = Field(alias="disruptedAgents")
-    inactive_agents: int = Field(alias="inactiveAgents")
+    disrupted_agents: int | None = Field(alias="disruptedAgents", default=None)
+    inactive_agents: int | None = Field(alias="inactiveAgents", default=None)
     operational_status: str = Field(alias="operationalStatus")
     agents: list[Agent] | None = Field(default=list)
 
