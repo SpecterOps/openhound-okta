@@ -47,9 +47,9 @@ class OauthClientSettings(BaseModel):
     client_uri: str | None = None
     response_types: list[str] = Field(default_factory=list)
     grant_types: list[str] = Field(default_factory=list)
-    application_type: str
-    issuer_mode: str
-    consent_method: str
+    application_type: str | None = None
+    issuer_mode: str | None = None
+    consent_method: str | None = None
     jwks: OauthKeys | None = None
 
 
