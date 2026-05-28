@@ -52,7 +52,7 @@ class ApiService(BaseAsset):
     name: str
     created_at: datetime = Field(alias="createdAt")
     created_by: str = Field(alias="createdBy")
-    config_guide_url: str = Field(alias="configGuideUrl")
+    config_guide_url: str | None = Field(alias="configGuideUrl", default=None)
     granted_scopes: list[str] = Field(alias="grantedScopes")
 
     @property
