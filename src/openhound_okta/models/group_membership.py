@@ -10,7 +10,7 @@ from openhound_okta.main import app
 
 class Provider(BaseModel):
     name: str
-    type: str
+    type: str | None = None
 
 
 class Credentials(BaseModel):
@@ -51,13 +51,13 @@ class GroupMembership(BaseAsset):
     model_config = ConfigDict(populate_by_name=True)
 
     id: str
-    created: datetime
+    created: datetime | None = None
     activated: datetime | None = None
     last_login: datetime | None = Field(default=None, alias="lastLogin")
     last_updated: datetime | None = Field(default=None, alias="lastUpdated")
     password_changed: datetime | None = Field(default=None, alias="passwordChanged")
     profile: Profile
-    status: str
+    status: str | None = None
     realm_id: str | None = Field(default=None, alias="realmId")
     credentials: Credentials | None = None
 
