@@ -26,7 +26,7 @@ class ApplicationGroupMapping(BaseAsset):
     created: datetime | None = None
     error_summary: str | None = Field(alias="errorSummary", default=None)
     id: str
-    status: str
+    status: str | None = None
     target_group_id: str = Field(alias="targetGroupId")
     last_push: datetime | None = Field(alias="lastPush", default=None)
     last_updated: datetime | None = Field(alias="lastUpdated", default=None)
