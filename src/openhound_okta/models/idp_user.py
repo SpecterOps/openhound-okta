@@ -41,7 +41,7 @@ class IDPUser(BaseAsset):
     external_id: str = Field(alias="externalId")
     created: datetime | None = None
     last_updated: datetime | None = Field(alias="lastUpdated", default=None)
-    profile: Profile
+    profile: Profile | None = None
 
     # Additional
     idp_id: str

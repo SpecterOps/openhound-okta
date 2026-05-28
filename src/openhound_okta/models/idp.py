@@ -28,22 +28,22 @@ class IdentityProviderProperties(OktaNodeProperties):
 
 class SSO(BaseModel):
     url: str
-    binding: str
+    binding: str | None = None
     destination: str | None = None
 
 
 class SLO(BaseModel):
-    url: str
-    binding: str
+    url: str | None = None
+    binding: str | None = None
 
 
 class ACS(BaseModel):
-    type: str
-    binding: str
+    type: str | None = None
+    binding: str | None = None
 
 
 class Authorization(BaseModel):
-    binding: str
+    binding: str | None = None
     url: str
 
 
@@ -75,7 +75,7 @@ class Policy(BaseModel):
 
 
 class Client(BaseModel):
-    client_id: str
+    client_id: str | None = None
 
 
 class Credential(BaseModel):
