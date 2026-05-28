@@ -28,8 +28,8 @@ class DeviceProperties(OktaNodeProperties):
 
 
 class DisplayName(BaseModel):
-    value: str
-    sensitive: bool
+    value: str | None = None
+    sensitive: bool | None = None
 
 
 class Profile(BaseModel):
@@ -48,7 +48,7 @@ class Profile(BaseModel):
 
 class UserDetails(BaseModel):
     id: str
-    realm_id: str = Field(alias="realmId")
+    realm_id: str | None = Field(alias="realmId", default=None)
 
 
 class EmbeddedUser(BaseModel):
