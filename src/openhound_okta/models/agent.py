@@ -64,7 +64,7 @@ class Agent(BaseAsset):
     active: bool | None = None
     support_auto_update: bool | None = Field(alias="supportAutoUpdate", default=None)
     error_state: bool | None = Field(alias="errorState", default=None)
-    is_hidden: bool = Field(alias="isHidden")
+    is_hidden: bool | None = Field(alias="isHidden", default=None)
     is_latest_gaed_version: bool | None = Field(
         alias="isLatestGAedVersion", default=None
     )
@@ -99,11 +99,9 @@ class Agent(BaseAsset):
         if self.agent_type == "AD":
             # The agent name has a prefix that needs to be stripped before matching is possible
             agent_name_split = self.name.split("-")
-            agent_name = '-'.join(agent_name_split[1:])
+            agent_name = "-".join(agent_name_split[1:])
             agent_match = f"{agent_name.upper()}.{self.agent_pool_name.upper()}"
-            match_with = PropertyMatch(
-                key="name", value=agent_match
-            )
+            match_with = PropertyMatch(key="name", value=agent_match)
             yield Edge(
                 start=ConditionalEdgePath(
                     kind="Computer", property_matchers=[match_with]

@@ -44,7 +44,7 @@ class ApiToken(BaseAsset):
 
     name: str
     user_id: str = Field(alias="userId")
-    token_window: str = Field(alias="tokenWindow")
+    token_window: str | None = Field(alias="tokenWindow", default=None)
     network: dict | None = None
     id: str
     client_name: str = Field(alias="clientName")

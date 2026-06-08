@@ -30,10 +30,10 @@ class ApplicationProperties(OktaNodeProperties):
 
 class JWK(BaseModel):
     id: str
-    kid: str
+    kid: str | None = None
     alf: str | None = None
-    use: str
-    n: str
+    use: str | None = None
+    n: str | None = None
     status: str
     last_updated: datetime | None = Field(default=None, alias="lastUpdated")
     created: datetime | None = None
@@ -47,9 +47,9 @@ class OauthClientSettings(BaseModel):
     client_uri: str | None = None
     response_types: list[str] = Field(default_factory=list)
     grant_types: list[str] = Field(default_factory=list)
-    application_type: str
-    issuer_mode: str
-    consent_method: str
+    application_type: str | None = None
+    issuer_mode: str | None = None
+    consent_method: str | None = None
     jwks: OauthKeys | None = None
 
 
@@ -65,9 +65,9 @@ class Settings(BaseModel):
 
 class OAuthCredential(BaseModel):
     auto_key_rotation: bool | None = Field(default=None, alias="autoKeyRotation")
-    client_id: str
+    client_id: str | None = None
     token_endpoint_auth_method: str
-    pkce_required: bool
+    pkce_required: bool | None = None
 
 
 class Credentials(BaseModel):

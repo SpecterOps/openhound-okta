@@ -21,10 +21,10 @@ class ClientApplication(BaseModel):
     dlt_config: ClassVar[DltConfig] = {"return_validated_models": True}
 
     client_id: str
-    client_id_issued_at: int
+    client_id_issued_at: int | None = None
     client_secret_expires_at: int | None = None
-    response_types: list[str]
-    grant_types: list[str]
+    response_types: list[str] = Field(default_factory=list)
+    grant_types: list[str] = Field(default_factory=list)
     jwks: OauthKeys | None = None
-    token_endpoint_auth_method: str
+    token_endpoint_auth_method: str | None = None
     application_type: str

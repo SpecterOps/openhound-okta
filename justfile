@@ -1,16 +1,16 @@
 set dotenv-load := true
 
-collect +args:
+collect +args='okta /tmp/output/raw/':
     @echo "Collecting data"
-    uv run src/main.py collect okta {{args}}
+    uv run src/main.py collect {{args}}
 
-preprocess +args:
-    @echo "Collecting data"
-    uv run src/main.py preprocess okta {{args}}
+preprocess +args='okta /tmp/output/raw/okta':
+    @echo "Preprocessing data"
+    uv run openhound preprocess {{args}}
 
-convert +args:
+convert +args='okta /tmp/output/raw/okta /tmp/output/graph/okta':
     @echo "Converting data"
-    uv run src/main.py convert okta {{args}}
+    uv run openhound convert {{args}}
 
 sync:
     @echo "Syncing dependencies"

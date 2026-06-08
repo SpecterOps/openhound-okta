@@ -28,22 +28,22 @@ class IdentityProviderProperties(OktaNodeProperties):
 
 class SSO(BaseModel):
     url: str
-    binding: str
+    binding: str | None = None
     destination: str | None = None
 
 
 class SLO(BaseModel):
-    url: str
-    binding: str
+    url: str | None = None
+    binding: str | None = None
 
 
 class ACS(BaseModel):
-    type: str
-    binding: str
+    type: str | None = None
+    binding: str | None = None
 
 
 class Authorization(BaseModel):
-    binding: str
+    binding: str | None = None
     url: str
 
 
@@ -75,7 +75,7 @@ class Policy(BaseModel):
 
 
 class Client(BaseModel):
-    client_id: str
+    client_id: str | None = None
 
 
 class Credential(BaseModel):
@@ -185,7 +185,7 @@ class IdentityProvider(BaseAsset):
 
     @property
     def _group_assignment_edges(self):
-        if self.policy.provisioning and self.policy.provisioning.groups:
+        if self.policy and self.policy.provisioning and self.policy.provisioning.groups:
             for group in self.policy.provisioning.groups.assignments:
                 yield Edge(
                     kind=ek.IDP_GROUP_ASSIGNMENT,
@@ -206,7 +206,7 @@ class IdentityProvider(BaseAsset):
     @property
     def _inbound_org_sso_edge(self):
         uri = self.idp_url
-        if self.type == "SAML2" and "microsoftonline.com" in uri:
+        if self.type == "SAML2" and uri and "microsoftonline.com" in uri:
             tenant_id = uri.split("/")[-2]
             yield Edge(
                 kind=ek.INBOUND_ORG_SSO,

@@ -53,9 +53,9 @@ class ApplicationJWKS(BaseAsset):
     model_config = ConfigDict(populate_by_name=True)
 
     id: str
-    kid: str
-    use: str
-    n: str
+    kid: str | None = None
+    use: str | None = None
+    n: str | None = None
     status: str
     last_updated: datetime | None = Field(default=None, alias="lastUpdated")
     created: datetime | None = None

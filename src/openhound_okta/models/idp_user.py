@@ -41,7 +41,7 @@ class IDPUser(BaseAsset):
     external_id: str = Field(alias="externalId")
     created: datetime | None = None
     last_updated: datetime | None = Field(alias="lastUpdated", default=None)
-    profile: Profile
+    profile: Profile | None = None
 
     # Additional
     idp_id: str
@@ -55,7 +55,11 @@ class IDPUser(BaseAsset):
 
     @property
     def _inbound_sso_edge(self):
-        if self.idp_type == "SAML2" and "microsoftonline.com" in self.idp_url:
+        if (
+            self.idp_type == "SAML2"
+            and self.idp_url
+            and "microsoftonline.com" in self.idp_url
+        ):
             yield Edge(
                 kind=ek.INBOUND_SSO,
                 start=EdgePath(value=self.external_id, match_by="id"),
