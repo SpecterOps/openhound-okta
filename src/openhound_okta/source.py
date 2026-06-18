@@ -1,8 +1,9 @@
 import fnmatch
 import logging
+import xml.etree.ElementTree as ET
 from base64 import b64decode
 from dataclasses import dataclass
-from typing import Union
+from typing import Any, Union
 
 import dlt
 from dlt.common.configuration import configspec
@@ -43,8 +44,16 @@ from .models import (
     Realm,
     Resource,
     ResourceSet,
+    SamlAssertionConsumerService,
+    SamlFederationProvider,
+    SamlIssuer,
     User,
     UserRoleAssignment,
+)
+from .models.saml import (
+    saml_acs_rows,
+    saml_federation_provider_row,
+    saml_issuer_row,
 )
 from .models.built_in_role import BUILT_IN_ROLES
 from .models.built_in_role_permission import BUILT_IN_PERMISSIONS
@@ -161,6 +170,12 @@ class ClientPool:
             )
             for pattern in API_RATE_LIMIT_ENDPOINTS
         }
+        self._saml_metadata_client = RESTClient(
+            base_url=base_url,
+            headers={"accept": "application/xml"},
+            auth=auth,
+            paginator=paginator,
+        )
 
     def get_client(self, path: str) -> RESTClient:
         for pattern in self._clients:
@@ -173,6 +188,9 @@ class ClientPool:
 
     def get(self, path: str, **kwargs):
         return self.get_client(path).get(path, **kwargs)
+
+    def get_saml_metadata(self, path: str):
+        return self._saml_metadata_client.get(path)
 
 
 @dataclass
@@ -286,7 +304,45 @@ def applications(ctx: SourceContext):
     """
     for page in ctx.pool.paginate("/api/v1/apps"):
         for item in page:
+            if item.get("signOnMode") == "SAML_2_0":
+                item = {**item, **_saml_metadata_fields(ctx, item)}
             yield item
+
+
+def _saml_metadata_fields(ctx: SourceContext, application: dict[str, Any]) -> dict[str, str]:
+    metadata_link = (application.get("_links") or {}).get("metadata") or {}
+    if not metadata_link.get("href"):
+        return {}
+
+    app_id = application.get("id")
+    if not app_id:
+        return {}
+
+    try:
+        response = ctx.pool.get_saml_metadata(f"/api/v1/apps/{app_id}/sso/saml/metadata")
+        metadata = response.text
+        root = ET.fromstring(metadata)
+    except Exception:
+        logger.warning("Failed to collect SAML metadata for Okta app %s", app_id, exc_info=True)
+        return {}
+
+    namespace = {"md": "urn:oasis:names:tc:SAML:2.0:metadata"}
+    sso_url = None
+    for node in root.findall(".//md:SingleSignOnService", namespace):
+        location = node.attrib.get("Location")
+        binding = node.attrib.get("Binding")
+        # Prefer the HTTP-POST SSO endpoint when metadata exposes multiple bindings.
+        if location and (
+            sso_url is None or binding == "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
+        ):
+            sso_url = location
+
+    result = {}
+    if root.attrib.get("entityID"):
+        result["saml_metadata_entity_id"] = root.attrib["entityID"]
+    if sso_url:
+        result["saml_metadata_sso_url"] = sso_url
+    return result
 
 
 @app.transformer(name="application_jwks", columns=ApplicationJWKS, parallelized=True)
@@ -350,8 +406,37 @@ def application_users(application: Application, ctx: SourceContext):
                 "app_name": application.name,
                 "app_label": application.label,
                 "app_settings": application.settings.app,
+                "app_sign_on_mode": application.sign_on_mode,
                 **item,
             }
+
+
+@app.transformer(
+    name="saml_federation_providers",
+    columns=SamlFederationProvider,
+    parallelized=True,
+)
+def saml_federation_providers(application: Application):
+    # Keep SAML row builders pure; DLT transformer boundaries recompute by design.
+    row = saml_federation_provider_row(application)
+    if row:
+        yield row
+
+
+@app.transformer(name="saml_issuers", columns=SamlIssuer, parallelized=True)
+def saml_issuers(application: Application):
+    row = saml_issuer_row(application)
+    if row:
+        yield row
+
+
+@app.transformer(
+    name="saml_assertion_consumer_services",
+    columns=SamlAssertionConsumerService,
+    parallelized=True,
+)
+def saml_assertion_consumer_services(application: Application):
+    yield from saml_acs_rows(application)
 
 
 @app.resource(name="client_applications", columns=ClientApplication, parallelized=True)
@@ -678,6 +763,9 @@ def source(
         client_apps_resource | client_role_assignments(ctx),
         applications_resource,
         applications_resource | application_users(ctx),
+        applications_resource | saml_federation_providers(),
+        applications_resource | saml_issuers(),
+        applications_resource | saml_assertion_consumer_services(),
         applications_resource | application_jwks(ctx),
         applications_resource | application_secrets(ctx),
         applications_resource | application_group_push_mappings(ctx),

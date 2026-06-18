@@ -6,6 +6,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
+from openhound_okta.models.saml import (
+    SamlMatchValuesEdgeProperties,
+    saml_match_values,
+    saml_provider_id,
+)
 
 # To ignore system apps optionally
 SYSTEM_APPS = [
@@ -105,6 +110,13 @@ class Profile(BaseModel):
             traversable=True,
             description="Credentials are synced between okta orgs",
         ),
+        EdgeDef(
+            kind=ek.SAML_ELIGIBLE_FOR,
+            start=nk.USER,
+            end=nk.SAML_FEDERATION_PROVIDER,
+            traversable=False,
+            description="Okta user is eligible for a normalized SAML provider",
+        ),
     ],
 )
 class ApplicationUser(BaseAsset):
@@ -128,6 +140,7 @@ class ApplicationUser(BaseAsset):
     app_name: str
     app_label: str
     app_settings: dict | None = None
+    app_sign_on_mode: str | None = None
 
     # "USER" = directly assigned and "GROUP" = assigned via group membership.
     scope: str = Field(default="USER")
@@ -238,9 +251,33 @@ class ApplicationUser(BaseAsset):
                     )
 
     @property
+    def _saml_eligible_for_edges(self):
+        if self.app_sign_on_mode != "SAML_2_0":
+            return
+        if self.status not in {"ACTIVE", "PROVISIONED"}:
+            return
+        match_values = saml_match_values(
+            self.credentials.username if self.credentials else None,
+            self.profile.login,
+            self.profile.email,
+        )
+        if not match_values:
+            return
+        yield Edge(
+            kind=ek.SAML_ELIGIBLE_FOR,
+            start=EdgePath(value=self.id, match_by="id"),
+            end=EdgePath(value=saml_provider_id(self.app_id), match_by="id"),
+            properties=SamlMatchValuesEdgeProperties(
+                traversable=False,
+                match_values=match_values,
+            ),
+        )
+
+    @property
     def edges(self):
         yield from self._app_assignment_edge
         yield from self._read_password_updates_edge
         yield from self._user_push_poll_edges
         yield from self._password_sync_edge
         yield from self._okta_org2org_edges
+        yield from self._saml_eligible_for_edges

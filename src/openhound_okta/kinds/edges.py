@@ -45,3 +45,9 @@ USER_PULL = "Okta_UserPull"
 USER_PUSH = "Okta_UserPush"
 USER_SYNC = "Okta_UserSync"
 PASSWORD_SYNC = "Okta_PasswordSync"
+
+# Normalized OpenGraph-SAML edges
+SAML_ELIGIBLE_FOR = "SAML_EligibleFor"
+SAML_IMPLEMENTS = "SAML_Implements"
+SAML_ISSUES_AS = "SAML_IssuesAs"
+SAML_ISSUES_ASSERTIONS_TO = "SAML_IssuesAssertionsTo"

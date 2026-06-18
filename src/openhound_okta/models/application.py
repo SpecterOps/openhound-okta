@@ -53,9 +53,60 @@ class OauthClientSettings(BaseModel):
     jwks: OauthKeys | None = None
 
 
+class SamlAcsEndpoint(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    url: str | None = None
+    index: int | None = None
+    binding: str | None = None
+    is_default: bool | None = Field(default=None, alias="isDefault")
+
+
+class AssertionEncryptionSettings(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    acs_endpoints: list[SamlAcsEndpoint] = Field(
+        default_factory=list,
+        alias="acsEndpoints",
+    )
+
+
+class SignOnSettings(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    idp_issuer: str | None = Field(default=None, alias="idpIssuer")
+    sso_acs_url: str | None = Field(default=None, alias="ssoAcsUrl")
+    sso_acs_url_override: str | None = Field(default=None, alias="ssoAcsUrlOverride")
+    sp_issuer: str | None = Field(default=None, alias="spIssuer")
+    audience: str | None = None
+    audience_override: str | None = Field(default=None, alias="audienceOverride")
+    recipient: str | None = None
+    recipient_override: str | None = Field(default=None, alias="recipientOverride")
+    destination: str | None = None
+    destination_override: str | None = Field(default=None, alias="destinationOverride")
+    subject_name_id_template: str | None = Field(
+        default=None,
+        alias="subjectNameIdTemplate",
+    )
+    subject_name_id_format: str | None = Field(
+        default=None,
+        alias="subjectNameIdFormat",
+    )
+    acs_endpoints: list[SamlAcsEndpoint] = Field(
+        default_factory=list,
+        alias="acsEndpoints",
+    )
+    assertion_encryption: AssertionEncryptionSettings | None = Field(
+        default=None,
+        alias="assertionEncryption",
+    )
+    slo: dict | None = None
+
+
 class Settings(BaseModel):
     app: dict | None = None
     notifications: dict | None = None
+    sign_on: SignOnSettings | None = Field(default=None, alias="signOn")
     manual_provisioning: bool | None = Field(default=None, alias="manualProvisioning")
     implicit_assignment: bool | None = Field(default=None, alias="implicitAssignment")
     em_opt_in_status: str | None = Field(default=None, alias="emOptInStatus")
@@ -109,6 +160,8 @@ class Application(BaseAsset):
     credentials: Credentials | None = None
     settings: Settings | None = None
     features: list[str] = Field(default_factory=list)
+    saml_metadata_entity_id: str | None = None
+    saml_metadata_sso_url: str | None = None
 
     @property
     def as_node(self):

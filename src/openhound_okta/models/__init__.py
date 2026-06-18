@@ -28,6 +28,11 @@ from .policy_type import PolicyType
 from .realm import Realm
 from .resource import Resource
 from .resource_set import ResourceSet
+from .saml import (
+    SamlAssertionConsumerService,
+    SamlFederationProvider,
+    SamlIssuer,
+)
 from .user import User
 from .user_role_assignment import UserRoleAssignment
 
@@ -65,4 +70,7 @@ __all__ = [
     "IDPUser",
     "PolicyType",
     "Resource",
+    "SamlAssertionConsumerService",
+    "SamlFederationProvider",
+    "SamlIssuer",
 ]
