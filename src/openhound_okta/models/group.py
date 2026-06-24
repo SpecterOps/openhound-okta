@@ -66,7 +66,7 @@ class Source(BaseModel):
             end=nk.GROUP,
             kind=ek.CONTAINS,
             description="Organization contains group",
-            traversable=False,
+            traversable=True,
         ),
         EdgeDef(
             start=nk.APPLICATION,
@@ -155,7 +155,7 @@ class Group(BaseAsset):
             kind=ek.CONTAINS,
             start=EdgePath(value=self._lookup.org_id(), match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=False),
+            properties=EdgeProperties(traversable=True),
         )
 
     @property

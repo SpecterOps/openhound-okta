@@ -67,7 +67,7 @@ class Profile(BaseModel):
             kind=ek.USER_PULL,
             start=nk.APPLICATION,
             end=nk.USER,
-            traversable=True,
+            traversable=False,
             description="User is pulled form an external application",
         ),
         EdgeDef(
@@ -156,7 +156,7 @@ class ApplicationUser(BaseAsset):
                 kind=ek.APP_ASSIGNMENT,
                 start=EdgePath(value=self.id, match_by="id"),
                 end=EdgePath(value=self.app_id, match_by="id"),
-                properties=EdgeProperties(traversable=True),
+                properties=EdgeProperties(traversable=False),
             )
 
     @property
@@ -167,7 +167,7 @@ class ApplicationUser(BaseAsset):
                     kind=ek.USER_PULL,
                     start=EdgePath(value=self.app_id, match_by="id"),
                     end=EdgePath(value=self.id, match_by="id"),
-                    properties=EdgeProperties(traversable=True),
+                    properties=EdgeProperties(traversable=False),
                 )
             else:
                 yield Edge(

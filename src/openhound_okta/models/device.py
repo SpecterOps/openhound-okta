@@ -74,7 +74,7 @@ class Embedded(BaseModel):
             end=nk.DEVICE,
             kind=ek.CONTAINS,
             description="Organization contains device",
-            traversable=False,
+            traversable=True,
         ),
         EdgeDef(
             start=nk.DEVICE,
@@ -142,7 +142,7 @@ class Device(BaseAsset):
             kind=ek.CONTAINS,
             start=EdgePath(value=self._lookup.org_id(), match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=False),
+            properties=EdgeProperties(traversable=True),
         )
 
     @property

@@ -56,14 +56,14 @@ class Agent(BaseModel):
             end=nk.AGENT_POOL,
             kind=ek.CONTAINS,
             description="Organization contains agent pool",
-            traversable=False,
+            traversable=True,
         ),
         EdgeDef(
             start=nk.AGENT_POOL,
             end=nk.AGENT,
             kind=ek.AGENT_POOL_FOR,
             description="Agent pool for okta agent",
-            traversable=False,
+            traversable=True,
         ),
     ],
 )
@@ -102,7 +102,7 @@ class AgentPool(BaseAsset):
                 kind=ek.AGENT_POOL_FOR,
                 start=EdgePath(value=self.id, match_by="id"),
                 end=EdgePath(value=agent.id, match_by="id"),
-                properties=EdgeProperties(traversable=False),
+                properties=EdgeProperties(traversable=True),
             )
 
     @property
@@ -111,7 +111,7 @@ class AgentPool(BaseAsset):
             kind=ek.CONTAINS,
             start=EdgePath(value=self._lookup.org_id(), match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=False),
+            properties=EdgeProperties(traversable=True),
         )
 
     @property

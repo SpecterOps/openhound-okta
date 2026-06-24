@@ -36,7 +36,7 @@ class CustomRoleProperties(OktaNodeProperties):
             end=nk.CUSTOM_ROLE,
             kind=ek.CONTAINS,
             description="Organization contains custom role",
-            traversable=False,
+            traversable=True,
         )
     ],
 )
@@ -75,5 +75,5 @@ class CustomRole(BaseAsset):
             kind=ek.CONTAINS,
             start=EdgePath(value=self._lookup.org_id(), match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=False),
+            properties=EdgeProperties(traversable=True),
         )

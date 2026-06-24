@@ -104,7 +104,7 @@ class Protocol(BaseModel):
             end=nk.IDP,
             kind=ek.CONTAINS,
             description="Organization contains identity provider",
-            traversable=False,
+            traversable=True,
         ),
         EdgeDef(
             start=nk.IDP,
@@ -118,7 +118,7 @@ class Protocol(BaseModel):
             end=nk.IDP,
             kind=ek.INBOUND_ORG_SSO,
             description="Organization SSO via identity provider",
-            traversable=False,
+            traversable=True,
         ),
     ],
 )
@@ -200,7 +200,7 @@ class IdentityProvider(BaseAsset):
             kind=ek.CONTAINS,
             start=EdgePath(value=self._lookup.org_id(), match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=False),
+            properties=EdgeProperties(traversable=True),
         )
 
     @property
@@ -212,7 +212,7 @@ class IdentityProvider(BaseAsset):
                 kind=ek.INBOUND_ORG_SSO,
                 start=EdgePath(value=tenant_id, match_by="id"),
                 end=EdgePath(value=self.id, match_by="id"),
-                properties=EdgeProperties(traversable=False),
+                properties=EdgeProperties(traversable=True),
             )
 
     @property

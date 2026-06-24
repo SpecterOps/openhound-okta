@@ -95,7 +95,7 @@ class Embedded(BaseModel):
             end=nk.GROUP,
             kind=ek.ADD_MEMBER,
             description="Group can add member to groups",
-            traversable=False,
+            traversable=True,
         ),
         EdgeDef(
             start=nk.GROUP,

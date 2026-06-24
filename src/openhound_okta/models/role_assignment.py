@@ -193,6 +193,7 @@ class RoleAssignment(BaseAsset):
                 kind=ek.ADD_MEMBER,
                 start=EdgePath(value=self.source_id, match_by="id"),
                 end=EdgePath(value=group_id, match_by="id"),
+                properties=EdgeProperties(traversable=True),
             )
 
     @property

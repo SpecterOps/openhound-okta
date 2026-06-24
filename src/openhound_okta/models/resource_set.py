@@ -36,7 +36,7 @@ class ResourceSetProperties(OktaNodeProperties):
             end=nk.RESOURCE_SET,
             kind=ek.CONTAINS,
             description="Organization contains resource set",
-            traversable=False,
+            traversable=True,
         )
     ],
 )
@@ -75,5 +75,5 @@ class ResourceSet(BaseAsset):
             kind=ek.CONTAINS,
             start=EdgePath(value=self._lookup.org_id(), match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=False),
+            properties=EdgeProperties(traversable=True),
         )

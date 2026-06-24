@@ -90,7 +90,7 @@ class Credentials(BaseModel):
             end=nk.APPLICATION,
             kind=ek.CONTAINS,
             description="Organization contains application",
-            traversable=False,
+            traversable=True,
         ),
     ],
 )
@@ -169,6 +169,7 @@ class Application(BaseAsset):
     #             kind=ek.KERBEROS_SSO,
     #             start=ConditionalEdgePath(kind="User", property_matchers=[condition]),
     #             end=EdgePath(value=self.id, match_by="id"),
+    #             properties=EdgeProperties(traversable=True),
     #         )
 
     @property
@@ -177,7 +178,7 @@ class Application(BaseAsset):
             kind=ek.CONTAINS,
             start=EdgePath(value=self._lookup.org_id(), match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=False),
+            properties=EdgeProperties(traversable=True),
         )
 
     @property

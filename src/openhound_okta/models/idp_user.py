@@ -30,7 +30,7 @@ class Profile(BaseModel):
             end=nk.USER,
             kind=ek.INBOUND_SSO,
             description="User identity via SSO",
-            traversable=False,
+            traversable=True,
         ),
     ],
 )
@@ -64,7 +64,7 @@ class IDPUser(BaseAsset):
                 kind=ek.INBOUND_SSO,
                 start=EdgePath(value=self.external_id, match_by="id"),
                 end=EdgePath(value=self.id, match_by="id"),
-                properties=EdgeProperties(traversable=False),
+                properties=EdgeProperties(traversable=True),
             )
 
     @property

@@ -95,7 +95,7 @@ class Embedded(BaseModel):
             end=nk.GROUP,
             kind=ek.ADD_MEMBER,
             description="Application can add member to groups",
-            traversable=False,
+            traversable=True,
         ),
         EdgeDef(
             start=nk.APPLICATION,

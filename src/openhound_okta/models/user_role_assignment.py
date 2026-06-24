@@ -116,21 +116,21 @@ class Embedded(BaseModel):
             end=nk.GROUP,
             kind=ek.ADD_MEMBER,
             description="Group can add member to groups",
-            traversable=False,
+            traversable=True,
         ),
         EdgeDef(
             start=nk.USER,
             end=nk.GROUP,
             kind=ek.ADD_MEMBER,
             description="User can add member to groups",
-            traversable=False,
+            traversable=True,
         ),
         EdgeDef(
             start=nk.APPLICATION,
             end=nk.GROUP,
             kind=ek.ADD_MEMBER,
             description="Application can add member to groups",
-            traversable=False,
+            traversable=True,
         ),
         # Group Admin Role (USER_ADMIN in OktaHound)
         EdgeDef(
