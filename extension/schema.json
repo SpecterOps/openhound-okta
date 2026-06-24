@@ -2,7 +2,7 @@
   "schema": {
     "name": "SOOkta",
     "display_name": "Okta Extension (by SpecterOps)",
-    "version": "v2.8.1",
+    "version": "v2.8.3",
     "namespace": "Okta"
   },
   "node_kinds": [
@@ -402,7 +402,6 @@
       "source_kind": "Okta",
       "principal_kinds": [
         "Okta_User",
-        "Okta_Group",
         "Okta_Application",
         "Okta_ApiServiceIntegration"
       ]
