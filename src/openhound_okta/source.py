@@ -10,6 +10,7 @@ from dlt.common.configuration.specs import CredentialsConfiguration
 from dlt.sources.helpers.rest_client.auth import APIKeyAuth
 from dlt.sources.helpers.rest_client.client import RESTClient
 from dlt.sources.helpers.rest_client.paginators import HeaderLinkPaginator
+from requests import HTTPError
 
 from .main import app
 from .models import (
@@ -361,15 +362,77 @@ def client_applications(ctx: SourceContext):
             yield item
 
 
+def _fetch_role_assignment_targets(
+    pool: ClientPool, role_assignment_base_path: str
+) -> dict:
+    """Fetch group and catalog/apps targets for a single role assignment.
+
+    Returns a dict shaped like Okta's ``_embedded.targets``: optionally containing
+    ``groups`` (list) and/or ``catalog.apps`` (list). A 400 response is treated as
+    "this role does not support scoped targets" and is logged and skipped so
+    the rest of the role assignment collection can continue.
+    """
+    targets: dict = {}
+
+    groups_path = f"{role_assignment_base_path}/targets/groups"
+    try:
+        groups = [item for page in pool.paginate(groups_path) for item in page]
+    except HTTPError as exc:
+        status = getattr(exc.response, "status_code", None)
+        if status == 400:
+            logger.warning(
+                f"Skipping group targets for {role_assignment_base_path}: {status}"
+            )
+        else:
+            raise
+    else:
+        if groups:
+            targets["groups"] = groups
+
+    apps_path = f"{role_assignment_base_path}/targets/catalog/apps"
+    try:
+        apps = [item for page in pool.paginate(apps_path) for item in page]
+    except HTTPError as exc:
+        status = getattr(exc.response, "status_code", None)
+        if status == 400:
+            logger.warning(
+                f"Skipping app targets for {role_assignment_base_path}: {status}"
+            )
+        else:
+            raise
+    else:
+        if apps:
+            targets["catalog"] = {"apps": apps}
+
+    return targets
+
+
+def _merge_role_targets(role: dict, targets: dict) -> dict:
+    """Merge fetched targets into a role assignment dict's ``_embedded.targets``."""
+    if not targets:
+        return role
+    embedded = dict(role.get("_embedded") or {})
+    existing_targets = dict(embedded.get("targets") or {})
+    existing_targets.update(targets)
+    embedded["targets"] = existing_targets
+    role["_embedded"] = embedded
+    return role
+
+
 @app.transformer(
     name="client_role_assignments", columns=ClientRoleAssignment, parallelized=True
 )
 def client_role_assignments(client: ClientApplication, ctx: SourceContext):
     if client.application_type == "service":
-        for page in ctx.pool.paginate(
-            f"/oauth2/v1/clients/{client.client_id}/roles?expand=targets/catalog/apps&expand=targets/groups"
-        ):
+        base_path = f"/oauth2/v1/clients/{client.client_id}/roles"
+        for page in ctx.pool.paginate(base_path):
             for item in page:
+                role_id = item.get("id")
+                if role_id:
+                    targets = _fetch_role_assignment_targets(
+                        ctx.pool, f"{base_path}/{role_id}"
+                    )
+                    item = _merge_role_targets(item, targets)
                 yield {"from_resource": "client", "source_id": client.client_id, **item}
 
 
@@ -391,12 +454,16 @@ def built_in_roles():
 def user_role_assignments(ctx: SourceContext):
     @app.defer
     def _assignee_details(user_id: str):
+        base_path = f"/api/v1/users/{user_id}/roles"
         try:
-            user_details = ctx.pool.paginate(
-                f"/api/v1/users/{user_id}/roles?expand=targets/catalog/apps&expand=targets/groups"
-            )
-            for roles in user_details:
-                for role in roles:
+            for page in ctx.pool.paginate(base_path):
+                for role in page:
+                    role_id = role.get("id")
+                    if role_id:
+                        targets = _fetch_role_assignment_targets(
+                            ctx.pool, f"{base_path}/{role_id}"
+                        )
+                        role = _merge_role_targets(role, targets)
                     yield {"from_resource": "user", "source_id": user_id, **role}
 
         except Exception as e:
@@ -416,10 +483,15 @@ def user_role_assignments(ctx: SourceContext):
 )
 def group_role_assignments(group: Group, ctx: SourceContext):
     if group.embedded.stats.has_admin_privilege:
-        for page in ctx.pool.paginate(
-            f"/api/v1/groups/{group.id}/roles?expand=targets/catalog/apps&expand=targets/groups"
-        ):
+        base_path = f"/api/v1/groups/{group.id}/roles"
+        for page in ctx.pool.paginate(base_path):
             for role in page:
+                role_id = role.get("id")
+                if role_id:
+                    targets = _fetch_role_assignment_targets(
+                        ctx.pool, f"{base_path}/{role_id}"
+                    )
+                    role = _merge_role_targets(role, targets)
                 yield {"from_resource": "group", "source_id": group.id, **role}
 
 
