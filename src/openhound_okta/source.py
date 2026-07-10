@@ -45,15 +45,21 @@ from .models import (
     Resource,
     ResourceSet,
     SamlAssertionConsumerService,
+    SamlClaimMapping,
     SamlFederationProvider,
     SamlIssuer,
+    SamlServiceProvider,
     User,
     UserRoleAssignment,
 )
 from .models.saml import (
     saml_acs_rows,
+    saml_claim_mapping_rows,
     saml_federation_provider_row,
     saml_issuer_row,
+    saml_service_provider_row,
+    saml_sp_acs_rows,
+    saml_trusted_issuer_row,
 )
 from .models.built_in_role import BUILT_IN_ROLES
 from .models.built_in_role_permission import BUILT_IN_PERMISSIONS
@@ -400,13 +406,27 @@ def application_users(application: Application, ctx: SourceContext):
     """
     for page in ctx.pool.paginate(f"/api/v1/apps/{application.id}/users"):
         for item in page:
+            sign_on = application.settings.sign_on if application.settings else None
+            user_name_template = (
+                application.credentials.user_name_template
+                if application.credentials
+                else None
+            )
             yield {
                 "app_id": application.id,
                 "app_features": application.features,
                 "app_name": application.name,
                 "app_label": application.label,
-                "app_settings": application.settings.app,
+                "app_settings": application.settings.app if application.settings else None,
                 "app_sign_on_mode": application.sign_on_mode,
+                "app_subject_name_id_template": (
+                    sign_on.subject_name_id_template if sign_on else None
+                ),
+                "app_user_name_template": (
+                    user_name_template.get("template")
+                    if isinstance(user_name_template, dict)
+                    else None
+                ),
                 **item,
             }
 
@@ -437,6 +457,38 @@ def saml_issuers(application: Application):
 )
 def saml_assertion_consumer_services(application: Application):
     yield from saml_acs_rows(application)
+
+
+@app.transformer(name="saml_claim_mappings", columns=SamlClaimMapping, parallelized=True)
+def saml_claim_mappings(application: Application):
+    yield from saml_claim_mapping_rows(application)
+
+
+@app.transformer(
+    name="saml_service_providers",
+    columns=SamlServiceProvider,
+    parallelized=True,
+)
+def saml_service_providers(identity_provider: IdentityProvider):
+    row = saml_service_provider_row(identity_provider)
+    if row:
+        yield row
+
+
+@app.transformer(name="saml_trusted_issuers", columns=SamlIssuer, parallelized=True)
+def saml_trusted_issuers(identity_provider: IdentityProvider):
+    row = saml_trusted_issuer_row(identity_provider)
+    if row:
+        yield row
+
+
+@app.transformer(
+    name="saml_sp_assertion_consumer_services",
+    columns=SamlAssertionConsumerService,
+    parallelized=True,
+)
+def saml_sp_assertion_consumer_services(identity_provider: IdentityProvider):
+    yield from saml_sp_acs_rows(identity_provider)
 
 
 @app.resource(name="client_applications", columns=ClientApplication, parallelized=True)
@@ -633,11 +685,17 @@ def identity_providers(ctx: SourceContext):
 def identity_provider_users(idp: IdentityProvider, ctx: SourceContext):
     for page in ctx.pool.paginate(f"/api/v1/idps/{idp.id}/users"):
         for item in page:
+            subject = (idp.policy.subject or {}) if idp.policy else {}
+            user_name_template = subject.get("userNameTemplate") or {}
             yield {
                 "idp_id": idp.id,
                 "idp_name": idp.name,
                 "idp_type": idp.type,
+                "idp_status": idp.status,
                 "idp_url": idp.idp_url,
+                "idp_subject_user_name_template": user_name_template.get("template"),
+                "idp_subject_match_type": subject.get("matchType"),
+                "idp_subject_filter": subject.get("filter"),
                 **item,
             }
 
@@ -766,6 +824,7 @@ def source(
         applications_resource | saml_federation_providers(),
         applications_resource | saml_issuers(),
         applications_resource | saml_assertion_consumer_services(),
+        applications_resource | saml_claim_mappings(),
         applications_resource | application_jwks(ctx),
         applications_resource | application_secrets(ctx),
         applications_resource | application_group_push_mappings(ctx),
@@ -774,6 +833,9 @@ def source(
         policies_resource | policy_mappings(ctx),
         realms(ctx),
         identity_providers_resource,
+        identity_providers_resource | saml_service_providers(),
+        identity_providers_resource | saml_trusted_issuers(),
+        identity_providers_resource | saml_sp_assertion_consumer_services(),
         identity_providers_resource | identity_provider_users(ctx),
         authorization_servers(ctx),
         agent_pools_resource,

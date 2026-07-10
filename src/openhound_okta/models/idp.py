@@ -78,8 +78,16 @@ class Client(BaseModel):
     client_id: str | None = None
 
 
+class Trust(BaseModel):
+    issuer: str | None = None
+    audience: str | None = None
+    kid: str | None = None
+    additional_kids: list[str] = Field(default_factory=list, alias="additionalKids")
+
+
 class Credential(BaseModel):
     client: Client | None = None
+    trust: Trust | None = None
 
 
 class Protocol(BaseModel):
@@ -134,6 +142,7 @@ class IdentityProvider(BaseAsset):
     last_updated: datetime = Field(alias="lastUpdated")
     protocol: Protocol
     policy: Policy | None = None
+    links: dict | None = Field(default=None, alias="_links")
 
     @computed_field
     @property

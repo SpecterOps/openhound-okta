@@ -6,6 +6,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
+from openhound_okta.models.saml import (
+    SamlAccountEdgeProperties,
+    saml_idp_user_match_values,
+    saml_match_source,
+    saml_service_provider_id,
+)
 
 
 class Profile(BaseModel):
@@ -13,6 +19,14 @@ class Profile(BaseModel):
     first_name: str | None = Field(alias="firstName", default=None)
     email: str | None = None
     subject_name_id: str | None = Field(alias="subjectNameId", default=None)
+    subject_name_qualifier: str | None = Field(
+        alias="subjectNameQualifier",
+        default=None,
+    )
+    subject_sp_name_qualifier: str | None = Field(
+        alias="subjectSpNameQualifier",
+        default=None,
+    )
 
 
 @app.asset(
@@ -32,6 +46,13 @@ class Profile(BaseModel):
             description="User identity via SSO",
             traversable=True,
         ),
+        EdgeDef(
+            start=nk.SAML_SERVICE_PROVIDER,
+            end=nk.USER,
+            kind=ek.SAML_HAS_ACCOUNT,
+            description="SAML service provider can map assertions to an Okta user account",
+            traversable=False,
+        ),
     ],
 )
 class IDPUser(BaseAsset):
@@ -47,7 +68,11 @@ class IDPUser(BaseAsset):
     idp_id: str
     idp_type: str
     idp_name: str
+    idp_status: str | None = None
     idp_url: str | None = None
+    idp_subject_user_name_template: str | None = None
+    idp_subject_match_type: str | None = None
+    idp_subject_filter: str | None = None
 
     @property
     def as_node(self):
@@ -77,6 +102,29 @@ class IDPUser(BaseAsset):
         )
 
     @property
+    def _saml_has_account_edge(self):
+        if self.idp_type != "SAML2":
+            return
+        if self.idp_status and self.idp_status != "ACTIVE":
+            return
+
+        match_values = saml_idp_user_match_values(self)
+        if not match_values:
+            return
+        yield Edge(
+            kind=ek.SAML_HAS_ACCOUNT,
+            start=EdgePath(value=saml_service_provider_id(self.idp_id), match_by="id"),
+            end=EdgePath(value=self.id, match_by="id"),
+            properties=SamlAccountEdgeProperties(
+                traversable=False,
+                match_values=match_values,
+                source_property=saml_match_source(self.idp_subject_user_name_template),
+                account_state=None,
+            ),
+        )
+
+    @property
     def edges(self):
         yield from self._identity_provider_for_edge
         yield from self._inbound_sso_edge
+        yield from self._saml_has_account_edge

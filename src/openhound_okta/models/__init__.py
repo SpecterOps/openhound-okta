@@ -30,8 +30,10 @@ from .resource import Resource
 from .resource_set import ResourceSet
 from .saml import (
     SamlAssertionConsumerService,
+    SamlClaimMapping,
     SamlFederationProvider,
     SamlIssuer,
+    SamlServiceProvider,
 )
 from .user import User
 from .user_role_assignment import UserRoleAssignment
@@ -71,6 +73,8 @@ __all__ = [
     "PolicyType",
     "Resource",
     "SamlAssertionConsumerService",
+    "SamlClaimMapping",
     "SamlFederationProvider",
     "SamlIssuer",
+    "SamlServiceProvider",
 ]

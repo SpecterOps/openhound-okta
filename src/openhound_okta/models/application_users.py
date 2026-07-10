@@ -8,7 +8,8 @@ from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 from openhound_okta.models.saml import (
     SamlMatchValuesEdgeProperties,
-    saml_match_values,
+    saml_application_match_values,
+    saml_match_source,
     saml_provider_id,
 )
 
@@ -141,6 +142,8 @@ class ApplicationUser(BaseAsset):
     app_label: str
     app_settings: dict | None = None
     app_sign_on_mode: str | None = None
+    app_subject_name_id_template: str | None = None
+    app_user_name_template: str | None = None
 
     # "USER" = directly assigned and "GROUP" = assigned via group membership.
     scope: str = Field(default="USER")
@@ -256,11 +259,7 @@ class ApplicationUser(BaseAsset):
             return
         if self.status not in {"ACTIVE", "PROVISIONED"}:
             return
-        match_values = saml_match_values(
-            self.credentials.username if self.credentials else None,
-            self.profile.login,
-            self.profile.email,
-        )
+        match_values = saml_application_match_values(self)
         if not match_values:
             return
         yield Edge(
@@ -270,6 +269,9 @@ class ApplicationUser(BaseAsset):
             properties=SamlMatchValuesEdgeProperties(
                 traversable=False,
                 match_values=match_values,
+                source_property=saml_match_source(
+                    self.app_subject_name_id_template or self.app_user_name_template
+                ),
             ),
         )
 

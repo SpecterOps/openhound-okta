@@ -92,6 +92,14 @@ class SignOnSettings(BaseModel):
         default=None,
         alias="subjectNameIdFormat",
     )
+    attribute_statements: list[dict] = Field(
+        default_factory=list,
+        alias="attributeStatements",
+    )
+    configured_attribute_statements: list[dict] = Field(
+        default_factory=list,
+        alias="configuredAttributeStatements",
+    )
     acs_endpoints: list[SamlAcsEndpoint] = Field(
         default_factory=list,
         alias="acsEndpoints",
