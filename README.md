@@ -40,3 +40,26 @@ BloodHound.
 Follow the OpenHound docs to get started:
 
 - [OpenHound Documentation](https://bloodhound.specterops.io/openhound/overview)
+
+## Rate-limit behavior
+
+The collector coordinates requests by Okta API endpoint family. It limits concurrent requests, observes
+`X-Rate-Limit-Remaining` and `X-Rate-Limit-Reset` on successful responses, and paces later requests before a bucket
+is exhausted. HTTP 429 responses retry the same request and pagination cursor until a bounded elapsed-time budget is
+reached. Transport failures and HTTP 5xx responses retain DLT's retry coverage.
+
+Fan-out resources use explicit page sizes where Okta documents safe maxima. Application-user collection requests 500
+rows per page, group-push mapping collection requests 1,000 rows per page, and identity-provider user collection
+requests 200 rows per page. Rows stream to DLT; an exhausted required request fails the collection so DLT does not
+publish an incomplete replacement.
+
+The defaults can be adjusted with DLT source configuration environment variables:
+
+| Environment variable | Default | Purpose |
+| --- | ---: | --- |
+| `SOURCES__SOURCE__OKTA__APPLICATION_USERS_PAGE_SIZE` | `500` | Application users per page, from 1 through 500 |
+| `SOURCES__SOURCE__OKTA__GROUP_PUSH_MAPPINGS_PAGE_SIZE` | `1000` | Group push mappings per page, from 1 through 1,000 |
+| `SOURCES__SOURCE__OKTA__IDENTITY_PROVIDER_USERS_PAGE_SIZE` | `200` | Identity-provider users per page, from 1 through 200 |
+| `SOURCES__SOURCE__OKTA__ENDPOINT_CONCURRENCY` | `2` | Maximum simultaneous requests per endpoint family |
+| `SOURCES__SOURCE__OKTA__RATE_LIMIT_MAX_ELAPSED_SECONDS` | `900` | Maximum elapsed retry window for an individual 429 request |
+| `SOURCES__SOURCE__OKTA__RATE_LIMIT_REMAINING_RESERVE` | `1` | Requests held in reserve when pacing against a rate-limit window |
