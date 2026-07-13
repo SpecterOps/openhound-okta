@@ -33,7 +33,9 @@ from .saml import (
     SamlClaimMapping,
     SamlFederationProvider,
     SamlIssuer,
+    SamlServiceProviderAssertionConsumerService,
     SamlServiceProvider,
+    SamlTrustedIssuer,
 )
 from .user import User
 from .user_role_assignment import UserRoleAssignment
@@ -76,5 +78,7 @@ __all__ = [
     "SamlClaimMapping",
     "SamlFederationProvider",
     "SamlIssuer",
+    "SamlServiceProviderAssertionConsumerService",
     "SamlServiceProvider",
+    "SamlTrustedIssuer",
 ]

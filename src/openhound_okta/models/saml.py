@@ -1,5 +1,6 @@
-from dataclasses import dataclass, field as dc_field
+from dataclasses import dataclass, field as dc_field, replace
 import json
+import re
 from typing import Any
 
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
@@ -76,53 +77,345 @@ def _idp_issuer(application, sign_on: Any) -> str | None:
     )
 
 
-def _sp_entity(sign_on: Any) -> str | None:
+@dataclass(frozen=True)
+class _SamlRouteEvidence:
+    acs_url: str
+    sp_entity_id: str
+    index: int | None
+    binding: str | None
+    is_default: bool | None
+    target_product_family: str
+    route_source: str
+    extraction_mode: str
+    acs_source_field: str
+    sp_entity_source_field: str
+    route_conflicts: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _ExplicitRouteExtraction:
+    routes: tuple[_SamlRouteEvidence, ...] = ()
+    acs_urls: tuple[str, ...] = ()
+    sp_entity_id: str | None = None
+    diagnostics: tuple[str, ...] = ()
+    contradictory: bool = False
+
+
+_HOST_LABEL = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+_GITHUB_SLUG = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,98}[A-Za-z0-9])?$")
+
+
+def _valid_host_scope(value: Any) -> str | None:
+    if not isinstance(value, str) or value != value.strip():
+        return None
+    if not value or len(value) > 253 or "." not in value:
+        return None
+    labels = value.split(".")
+    if any(not _HOST_LABEL.fullmatch(label) for label in labels):
+        return None
+    return value
+
+
+def _valid_github_slug(value: Any) -> str | None:
+    if not isinstance(value, str) or value != value.strip():
+        return None
+    return value if _GITHUB_SLUG.fullmatch(value) else None
+
+
+def _explicit_sp_entity(sign_on: Any) -> tuple[str | None, str | None, list[str]]:
+    audience_override = _clean(getattr(sign_on, "audience_override", None))
+    if audience_override:
+        return audience_override, "settings.signOn.audienceOverride", []
+
     slo = getattr(sign_on, "slo", None) or {}
-    return _clean(
-        getattr(sign_on, "sp_issuer", None)
-        or getattr(sign_on, "audience", None)
-        or getattr(sign_on, "audience_override", None)
-        or slo.get("spIssuer")
+    candidates = [
+        (
+            _clean(getattr(sign_on, "sp_issuer", None)),
+            "settings.signOn.spIssuer",
+        ),
+        (_clean(getattr(sign_on, "audience", None)), "settings.signOn.audience"),
+        (_clean(slo.get("spIssuer")), "settings.signOn.slo.spIssuer"),
+    ]
+    populated = [(value, source) for value, source in candidates if value]
+    if len({value for value, _ in populated}) > 1:
+        return None, None, ["conflicting_explicit_sp_entity_fields"]
+    if populated:
+        value, source = populated[0]
+        return value, source, []
+    return None, None, []
+
+
+def _primary_explicit_acs(sign_on: Any) -> tuple[str | None, str | None]:
+    candidates = [
+        (
+            _clean(getattr(sign_on, "sso_acs_url_override", None)),
+            "settings.signOn.ssoAcsUrlOverride",
+        ),
+        (
+            _clean(getattr(sign_on, "sso_acs_url", None)),
+            "settings.signOn.ssoAcsUrl",
+        ),
+        (
+            _clean(getattr(sign_on, "recipient_override", None)),
+            "settings.signOn.recipientOverride",
+        ),
+        (
+            _clean(getattr(sign_on, "destination_override", None)),
+            "settings.signOn.destinationOverride",
+        ),
+        (
+            _clean(getattr(sign_on, "recipient", None)),
+            "settings.signOn.recipient",
+        ),
+        (
+            _clean(getattr(sign_on, "destination", None)),
+            "settings.signOn.destination",
+        ),
+    ]
+    return next(((value, source) for value, source in candidates if value), (None, None))
+
+
+def _explicit_acs_endpoints(sign_on: Any) -> list[tuple[Any, str]]:
+    direct = [
+        (endpoint, f"settings.signOn.acsEndpoints[{index}].url")
+        for index, endpoint in enumerate(
+            getattr(sign_on, "acs_endpoints", None) or []
+        )
+    ]
+    assertion_encryption = getattr(sign_on, "assertion_encryption", None)
+    encrypted = [
+        (
+            endpoint,
+            f"settings.signOn.assertionEncryption.acsEndpoints[{index}].url",
+        )
+        for index, endpoint in enumerate(
+            getattr(assertion_encryption, "acs_endpoints", None) or []
+        )
+    ]
+    return [*direct, *encrypted]
+
+
+def _explicit_saml_routes(application) -> _ExplicitRouteExtraction:
+    sign_on = _sign_on(application)
+    if not sign_on:
+        return _ExplicitRouteExtraction()
+
+    sp_entity_id, sp_entity_source, diagnostics = _explicit_sp_entity(sign_on)
+    primary_acs_url, primary_acs_source = _primary_explicit_acs(sign_on)
+    acs_candidates: list[tuple[str, str, int | None, str | None, bool | None]] = []
+    if primary_acs_url and primary_acs_source:
+        acs_candidates.append(
+            (primary_acs_url, primary_acs_source, 0, None, True)
+        )
+    for endpoint, source_field in _explicit_acs_endpoints(sign_on):
+        acs_url = _clean(getattr(endpoint, "url", None))
+        if acs_url:
+            acs_candidates.append(
+                (
+                    acs_url,
+                    source_field,
+                    getattr(endpoint, "index", None),
+                    _clean(getattr(endpoint, "binding", None)),
+                    getattr(endpoint, "is_default", None),
+                )
+            )
+
+    acs_urls = tuple(dict.fromkeys(item[0] for item in acs_candidates))
+    if diagnostics:
+        return _ExplicitRouteExtraction(
+            acs_urls=acs_urls,
+            diagnostics=tuple(diagnostics),
+            contradictory=True,
+        )
+    if not sp_entity_id or not sp_entity_source or not acs_candidates:
+        return _ExplicitRouteExtraction(
+            acs_urls=acs_urls,
+            sp_entity_id=sp_entity_id,
+        )
+
+    routes: list[_SamlRouteEvidence] = []
+    route_keys: set[tuple[str, str]] = set()
+    for acs_url, acs_source, index, binding, is_default in acs_candidates:
+        route_key = (acs_url, sp_entity_id)
+        if route_key in route_keys:
+            continue
+        route_keys.add(route_key)
+        routes.append(
+            _SamlRouteEvidence(
+                acs_url=acs_url,
+                sp_entity_id=sp_entity_id,
+                index=index,
+                binding=binding,
+                is_default=is_default,
+                target_product_family="generic_saml",
+                route_source="settings.signOn",
+                extraction_mode="explicit_generic",
+                acs_source_field=acs_source,
+                sp_entity_source_field=sp_entity_source,
+            )
+        )
+    return _ExplicitRouteExtraction(
+        routes=tuple(routes),
+        acs_urls=acs_urls,
+        sp_entity_id=sp_entity_id,
     )
 
 
-def _primary_acs_url(sign_on: Any) -> str | None:
-    return _clean(
-        getattr(sign_on, "sso_acs_url", None)
-        or getattr(sign_on, "sso_acs_url_override", None)
-        or getattr(sign_on, "recipient_override", None)
-        or getattr(sign_on, "destination_override", None)
-    )
-
-
-def _github_oin_sp_route(application) -> tuple[str | None, str | None]:
+def _oin_saml_route(
+    application,
+) -> tuple[_SamlRouteEvidence | None, list[str]]:
     app_settings = _app_settings(application)
     app_name = getattr(application, "name", None)
 
+    if app_name == "okta_org2org":
+        acs_url = _clean(app_settings.get("acsUrl"))
+        sp_entity_id = _clean(app_settings.get("audRestriction"))
+        missing = []
+        if not acs_url:
+            missing.append("missing_settings.app.acsUrl")
+        if not sp_entity_id:
+            missing.append("missing_settings.app.audRestriction")
+        if missing:
+            return None, missing
+        assert acs_url is not None and sp_entity_id is not None
+        return (
+            _SamlRouteEvidence(
+                acs_url=acs_url,
+                sp_entity_id=sp_entity_id,
+                index=0,
+                binding=None,
+                is_default=True,
+                target_product_family="okta_org2org",
+                route_source="settings.app",
+                extraction_mode="oin_explicit_fields",
+                acs_source_field="settings.app.acsUrl",
+                sp_entity_source_field="settings.app.audRestriction",
+            ),
+            [],
+        )
+
+    if app_name == "jamfsoftwareserver":
+        domain = _valid_host_scope(app_settings.get("domain"))
+        if not domain:
+            return None, ["missing_or_malformed_settings.app.domain"]
+        return (
+            _SamlRouteEvidence(
+                acs_url=f"https://{domain}/saml/SSO",
+                sp_entity_id=f"https://{domain}/saml/metadata",
+                index=0,
+                binding=None,
+                is_default=True,
+                target_product_family="jamf_pro",
+                route_source="settings.app+documented_jamf_route",
+                extraction_mode="allowlisted_deterministic_route",
+                acs_source_field="settings.app.domain",
+                sp_entity_source_field="settings.app.domain",
+            ),
+            [],
+        )
+
     if app_name == "githubenterprisemanageduser":
-        enterprise_name = _clean(app_settings.get("enterpriseName"))
-        if enterprise_name:
-            return (
-                f"https://github.com/enterprises/{enterprise_name}/saml/consume",
-                f"https://github.com/enterprises/{enterprise_name}",
-            )
+        enterprise_name = _valid_github_slug(app_settings.get("enterpriseName"))
+        if not enterprise_name:
+            return None, ["missing_or_malformed_settings.app.enterpriseName"]
+        return (
+            _SamlRouteEvidence(
+                acs_url=(
+                    f"https://github.com/enterprises/{enterprise_name}/saml/consume"
+                ),
+                sp_entity_id=f"https://github.com/enterprises/{enterprise_name}",
+                index=0,
+                binding=None,
+                is_default=True,
+                target_product_family="github_enterprise",
+                route_source="settings.app+documented_github_route",
+                extraction_mode="allowlisted_deterministic_route",
+                acs_source_field="settings.app.enterpriseName",
+                sp_entity_source_field="settings.app.enterpriseName",
+            ),
+            [],
+        )
 
     if app_name == "githubcloud":
-        org_name = _clean(app_settings.get("githubOrg") or app_settings.get("orgName"))
-        if org_name:
-            return (
-                f"https://github.com/orgs/{org_name}/saml/consume",
-                f"https://github.com/orgs/{org_name}",
+        org_field = "githubOrg" if app_settings.get("githubOrg") else "orgName"
+        org_name = _valid_github_slug(app_settings.get(org_field))
+        if not org_name:
+            return None, [
+                "missing_or_malformed_settings.app.githubOrg_or_orgName"
+            ]
+        source_field = f"settings.app.{org_field}"
+        return (
+            _SamlRouteEvidence(
+                acs_url=f"https://github.com/orgs/{org_name}/saml/consume",
+                sp_entity_id=f"https://github.com/orgs/{org_name}",
+                index=0,
+                binding=None,
+                is_default=True,
+                target_product_family="github_organization",
+                route_source="settings.app+documented_github_route",
+                extraction_mode="allowlisted_deterministic_route",
+                acs_source_field=source_field,
+                sp_entity_source_field=source_field,
+            ),
+            [],
+        )
+
+    return None, []
+
+
+def _saml_routes(
+    application,
+) -> tuple[list[_SamlRouteEvidence], list[str]]:
+    if not is_saml_application(application):
+        return [], []
+
+    explicit = _explicit_saml_routes(application)
+    oin_route, oin_diagnostics = _oin_saml_route(application)
+    if explicit.contradictory:
+        return [], list(explicit.diagnostics)
+
+    if explicit.routes:
+        diagnostics = list(explicit.diagnostics)
+        explicit_keys = {
+            (route.acs_url, route.sp_entity_id) for route in explicit.routes
+        }
+        if oin_route and (
+            oin_route.acs_url,
+            oin_route.sp_entity_id,
+        ) not in explicit_keys:
+            conflict = "explicit_generic_route_overrides_conflicting_oin_route"
+            diagnostics.append(conflict)
+            return [
+                replace(
+                    route,
+                    route_conflicts=(*route.route_conflicts, conflict),
+                )
+                for route in explicit.routes
+            ], diagnostics
+        return list(explicit.routes), diagnostics
+
+    if oin_route:
+        partial_conflicts = []
+        if explicit.acs_urls and oin_route.acs_url not in explicit.acs_urls:
+            partial_conflicts.append("partial_explicit_acs_conflicts_with_oin_route")
+        if (
+            explicit.sp_entity_id
+            and explicit.sp_entity_id != oin_route.sp_entity_id
+        ):
+            partial_conflicts.append(
+                "partial_explicit_sp_entity_conflicts_with_oin_route"
             )
+        if partial_conflicts:
+            return [], partial_conflicts
+        return [oin_route], []
 
-    return None, None
-
-
-def _acs_endpoints(sign_on: Any) -> list[Any]:
-    direct = list(getattr(sign_on, "acs_endpoints", None) or [])
-    assertion_encryption = getattr(sign_on, "assertion_encryption", None)
-    encrypted = list(getattr(assertion_encryption, "acs_endpoints", None) or [])
-    return [*direct, *encrypted]
+    if oin_diagnostics:
+        return [], oin_diagnostics
+    if explicit.acs_urls and not explicit.sp_entity_id:
+        return [], ["missing_authoritative_sp_entity_evidence"]
+    if explicit.sp_entity_id and not explicit.acs_urls:
+        return [], ["missing_authoritative_acs_evidence"]
+    return [], ["missing_authoritative_acs_and_sp_entity_evidence"]
 
 
 def _field_value(source: Any, field_name: str) -> str | None:
@@ -279,7 +572,8 @@ def saml_federation_provider_row(application) -> dict[str, Any] | None:
     if not is_saml_application(application):
         return None
     idp_issuer = _idp_issuer(application, sign_on)
-    acs_rows = saml_acs_rows(application)
+    routes, route_diagnostics = _saml_routes(application)
+    acs_rows = _saml_acs_rows(application, routes)
     claim_mapping_rows = saml_claim_mapping_rows(application)
     return {
         "id": saml_provider_id(application.id),
@@ -291,6 +585,7 @@ def saml_federation_provider_row(application) -> dict[str, Any] | None:
         "acs_ids": [row["id"] for row in acs_rows],
         "claim_mapping_ids": [row["id"] for row in claim_mapping_rows],
         "enabled": application.status == "ACTIVE",
+        "route_diagnostics": route_diagnostics,
     }
 
 
@@ -378,58 +673,43 @@ def saml_issuer_row(application) -> dict[str, Any] | None:
 
 
 def saml_acs_rows(application) -> list[dict[str, Any]]:
-    sign_on = _sign_on(application)
-    if not is_saml_application(application) or not sign_on:
-        return []
+    routes, _ = _saml_routes(application)
+    return _saml_acs_rows(application, routes)
 
-    sp_entity_id = _sp_entity(sign_on)
-    fallback_acs_url, fallback_sp_entity_id = _github_oin_sp_route(application)
-    if not sp_entity_id:
-        sp_entity_id = fallback_sp_entity_id
+
+def _saml_acs_rows(
+    application,
+    routes: list[_SamlRouteEvidence],
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    route_keys: set[tuple[str, str]] = set()
-    primary_acs_url = _primary_acs_url(sign_on) or fallback_acs_url
-    if primary_acs_url and sp_entity_id:
-        route_keys.add((primary_acs_url, sp_entity_id))
-        rows.append(
-            {
-                "id": saml_acs_id(application.id, 0),
-                "app_id": application.id,
-                "app_name": application.name,
-                "app_label": application.label,
-                "source_object_kind": nk.APPLICATION,
-                "acs_url": primary_acs_url,
-                "sp_entity_id": sp_entity_id,
-                "index": 0,
-                "binding": None,
-                "is_default": True,
-            }
-        )
-
-    for endpoint in _acs_endpoints(sign_on):
-        acs_url = _clean(getattr(endpoint, "url", None))
-        if not acs_url or not sp_entity_id:
-            continue
-        route_key = (acs_url, sp_entity_id)
-        if route_key in route_keys:
-            continue
-        endpoint_index = getattr(endpoint, "index", None)
-        index = int(endpoint_index) if endpoint_index is not None else len(rows)
+    used_id_indexes: set[int] = set()
+    for route in routes:
+        preferred_id_index = route.index if route.index is not None else len(rows)
+        id_index = int(preferred_id_index)
+        while id_index in used_id_indexes:
+            id_index += 1
+        used_id_indexes.add(id_index)
         row = {
-            "id": saml_acs_id(application.id, index),
+            "id": saml_acs_id(application.id, id_index),
             "app_id": application.id,
             "app_name": application.name,
             "app_label": application.label,
             "source_object_kind": nk.APPLICATION,
-            "acs_url": acs_url,
-            "sp_entity_id": sp_entity_id,
-            "index": index,
-            "binding": _clean(getattr(endpoint, "binding", None)),
-            "is_default": getattr(endpoint, "is_default", None),
+            "acs_url": route.acs_url,
+            "sp_entity_id": route.sp_entity_id,
+            "index": route.index if route.index is not None else id_index,
+            "binding": route.binding,
+            "is_default": route.is_default,
+            "source_technology": "okta",
+            "provider_family": "okta",
+            "target_product_family": route.target_product_family,
+            "route_source": route.route_source,
+            "extraction_mode": route.extraction_mode,
+            "acs_source_field": route.acs_source_field,
+            "sp_entity_source_field": route.sp_entity_source_field,
+            "route_conflicts": list(route.route_conflicts),
         }
-        if row["id"] not in {existing["id"] for existing in rows}:
-            route_keys.add(route_key)
-            rows.append(row)
+        rows.append(row)
 
     return rows
 
@@ -514,6 +794,7 @@ class SamlFederationProviderProperties(OktaNodeProperties):
         app_label: The Okta application display label.
         app_status: The Okta application lifecycle status.
         enabled: Whether the application is active.
+        route_diagnostics: Missing or conflicting route evidence retained for review.
     """
 
     app_id: str
@@ -521,6 +802,7 @@ class SamlFederationProviderProperties(OktaNodeProperties):
     app_label: str
     app_status: str
     enabled: bool
+    route_diagnostics: list[str] = dc_field(default_factory=list)
 
 
 @dataclass
@@ -556,6 +838,14 @@ class SamlAssertionConsumerServiceProperties(OktaNodeProperties):
         index: The ACS endpoint index from Okta.
         binding: The SAML binding for this ACS endpoint, when present.
         is_default: Whether Okta marks this ACS endpoint as default.
+        source_technology: The native technology that produced the route evidence.
+        provider_family: The SAML identity-provider technology family.
+        target_product_family: The allowlisted downstream product family.
+        route_source: The native settings source used for the route tuple.
+        extraction_mode: Whether the route was explicit or deterministically derived.
+        acs_source_field: The exact native field that proved or scoped the ACS URL.
+        sp_entity_source_field: The exact native field that proved or scoped the SP entity.
+        route_conflicts: Conflicting lower-precedence route evidence retained for review.
     """
 
     app_id: str
@@ -567,6 +857,14 @@ class SamlAssertionConsumerServiceProperties(OktaNodeProperties):
     source_object_kind: str = nk.APPLICATION
     binding: str | None = None
     is_default: bool | None = None
+    source_technology: str = "okta"
+    provider_family: str = "okta"
+    target_product_family: str = "generic_saml"
+    route_source: str = "settings.signOn"
+    extraction_mode: str = "explicit_generic"
+    acs_source_field: str | None = None
+    sp_entity_source_field: str | None = None
+    route_conflicts: list[str] = dc_field(default_factory=list)
 
 
 @dataclass
@@ -691,6 +989,7 @@ class SamlFederationProvider(BaseAsset):
     acs_ids: list[str] = Field(default_factory=list)
     claim_mapping_ids: list[str] = Field(default_factory=list)
     enabled: bool
+    route_diagnostics: list[str] = Field(default_factory=list)
 
     @property
     def as_node(self):
@@ -708,6 +1007,7 @@ class SamlFederationProvider(BaseAsset):
                 app_label=self.app_label,
                 app_status=self.app_status,
                 enabled=self.enabled,
+                route_diagnostics=self.route_diagnostics,
             ),
         )
 
@@ -834,6 +1134,23 @@ class SamlIssuer(BaseAsset):
 
 @app.asset(
     node=NodeDef(
+        icon="key-round",
+        kind=nk.SAML_ISSUER,
+        description="Normalized SAML issuer trusted by an Okta inbound IdP",
+        properties=SamlIssuerProperties,
+    ),
+)
+class SamlTrustedIssuer(SamlIssuer):
+    """Distinct conversion asset for inbound trusted issuers.
+
+    OpenHound derives output filenames from the asset class name. Keeping inbound
+    and outbound issuer streams on the same class causes the later stream to
+    overwrite the earlier ``samlissuer`` graph file during conversion.
+    """
+
+
+@app.asset(
+    node=NodeDef(
         icon="route",
         kind=nk.SAML_ASSERTION_CONSUMER_SERVICE,
         description="Normalized SAML ACS route for an Okta SAML app",
@@ -853,6 +1170,14 @@ class SamlAssertionConsumerService(BaseAsset):
     source_object_kind: str = nk.APPLICATION
     binding: str | None = None
     is_default: bool | None = None
+    source_technology: str = "okta"
+    provider_family: str = "okta"
+    target_product_family: str = "generic_saml"
+    route_source: str = "settings.signOn"
+    extraction_mode: str = "explicit_generic"
+    acs_source_field: str | None = None
+    sp_entity_source_field: str | None = None
+    route_conflicts: list[str] = Field(default_factory=list)
 
     @property
     def as_node(self):
@@ -874,12 +1199,32 @@ class SamlAssertionConsumerService(BaseAsset):
                 source_object_kind=self.source_object_kind,
                 binding=self.binding,
                 is_default=self.is_default,
+                source_technology=self.source_technology,
+                provider_family=self.provider_family,
+                target_product_family=self.target_product_family,
+                route_source=self.route_source,
+                extraction_mode=self.extraction_mode,
+                acs_source_field=self.acs_source_field,
+                sp_entity_source_field=self.sp_entity_source_field,
+                route_conflicts=self.route_conflicts,
             ),
         )
 
     @property
     def edges(self):
         return iter(())
+
+
+@app.asset(
+    node=NodeDef(
+        icon="route",
+        kind=nk.SAML_ASSERTION_CONSUMER_SERVICE,
+        description="Normalized SAML ACS route owned by an Okta inbound IdP",
+        properties=SamlAssertionConsumerServiceProperties,
+    ),
+)
+class SamlServiceProviderAssertionConsumerService(SamlAssertionConsumerService):
+    """Distinct conversion asset for inbound service-provider ACS routes."""
 
 
 @app.asset(

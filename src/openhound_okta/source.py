@@ -49,7 +49,9 @@ from .models import (
     SamlClaimMapping,
     SamlFederationProvider,
     SamlIssuer,
+    SamlServiceProviderAssertionConsumerService,
     SamlServiceProvider,
+    SamlTrustedIssuer,
     User,
     UserRoleAssignment,
 )
@@ -566,7 +568,9 @@ def saml_service_providers(identity_provider: IdentityProvider):
         yield row
 
 
-@app.transformer(name="saml_trusted_issuers", columns=SamlIssuer, parallelized=True)
+@app.transformer(
+    name="saml_trusted_issuers", columns=SamlTrustedIssuer, parallelized=True
+)
 def saml_trusted_issuers(identity_provider: IdentityProvider):
     row = saml_trusted_issuer_row(identity_provider)
     if row:
@@ -575,7 +579,7 @@ def saml_trusted_issuers(identity_provider: IdentityProvider):
 
 @app.transformer(
     name="saml_sp_assertion_consumer_services",
-    columns=SamlAssertionConsumerService,
+    columns=SamlServiceProviderAssertionConsumerService,
     parallelized=True,
 )
 def saml_sp_assertion_consumer_services(identity_provider: IdentityProvider):

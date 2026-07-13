@@ -4,9 +4,13 @@ from openhound_okta.models.application_users import ApplicationUser
 from openhound_okta.models.idp import IdentityProvider
 from openhound_okta.models.idp_user import IDPUser
 from openhound_okta.models.saml import (
+    SamlAssertionConsumerService,
     SamlClaimMapping,
     SamlFederationProvider,
+    SamlIssuer,
+    SamlServiceProviderAssertionConsumerService,
     SamlServiceProvider,
+    SamlTrustedIssuer,
     saml_acs_rows,
     saml_application_match_values,
     saml_claim_mapping_rows,
@@ -162,6 +166,14 @@ def test_saml_provider_links_only_to_resolved_route_nodes():
     ]
 
 
+def test_inbound_and_outbound_route_assets_have_distinct_conversion_names():
+    assert SamlIssuer.__name__ != SamlTrustedIssuer.__name__
+    assert (
+        SamlAssertionConsumerService.__name__
+        != SamlServiceProviderAssertionConsumerService.__name__
+    )
+
+
 def test_saml_provider_emits_claim_mapping_explanation():
     app = _application(
         credentials={
@@ -266,7 +278,259 @@ def test_github_emu_oin_route_uses_enterprise_slug_contract():
             "index": 0,
             "binding": None,
             "is_default": True,
+            "source_technology": "okta",
+            "provider_family": "okta",
+            "target_product_family": "github_enterprise",
+            "route_source": "settings.app+documented_github_route",
+            "extraction_mode": "allowlisted_deterministic_route",
+            "acs_source_field": "settings.app.enterpriseName",
+            "sp_entity_source_field": "settings.app.enterpriseName",
+            "route_conflicts": [],
         }
+    ]
+
+
+def test_generic_saml_route_records_explicit_field_provenance():
+    rows = saml_acs_rows(_application())
+
+    assert len(rows) == 1
+    assert rows[0]["route_source"] == "settings.signOn"
+    assert rows[0]["extraction_mode"] == "explicit_generic"
+    assert rows[0]["acs_source_field"] == "settings.signOn.ssoAcsUrl"
+    assert rows[0]["sp_entity_source_field"] == "settings.signOn.audience"
+    assert rows[0]["target_product_family"] == "generic_saml"
+    assert rows[0]["route_conflicts"] == []
+
+
+def test_org2org_saml_uses_exact_oin_acs_and_audience_fields():
+    app = _application(
+        name="okta_org2org",
+        settings={
+            "app": {
+                "acsUrl": "https://target.example.test/sso/saml2/0oa_target",
+                "audRestriction": (
+                    "https://www.okta.com/saml2/service-provider/target"
+                ),
+                "baseUrl": "https://target.example.test/",
+            },
+            "signOn": {"idpIssuer": None},
+        },
+        saml_metadata_entity_id="http://www.okta.com/exk_org2org",
+        saml_metadata_sso_url=(
+            "https://source.example.test/app/okta_org2org/exk_org2org/sso/saml"
+        ),
+    )
+
+    rows = saml_acs_rows(app)
+
+    assert len(rows) == 1
+    assert rows[0]["acs_url"] == (
+        "https://target.example.test/sso/saml2/0oa_target"
+    )
+    assert rows[0]["sp_entity_id"] == (
+        "https://www.okta.com/saml2/service-provider/target"
+    )
+    assert rows[0]["route_source"] == "settings.app"
+    assert rows[0]["extraction_mode"] == "oin_explicit_fields"
+    assert rows[0]["acs_source_field"] == "settings.app.acsUrl"
+    assert rows[0]["sp_entity_source_field"] == "settings.app.audRestriction"
+    assert rows[0]["target_product_family"] == "okta_org2org"
+
+
+def test_oidc_org2org_never_enters_saml_route_extraction():
+    app = _application(
+        name="okta_org2org",
+        signOnMode="OPENID_CONNECT",
+        settings={
+            "app": {
+                "acsUrl": "https://target.example.test/sso/saml2/0oa_target",
+                "audRestriction": "https://www.okta.com/saml2/service-provider",
+            }
+        },
+    )
+
+    assert saml_acs_rows(app) == []
+    assert saml_federation_provider_row(app) is None
+
+
+def test_jamf_oin_route_uses_allowlisted_documented_paths():
+    app = _application(
+        name="jamfsoftwareserver",
+        settings={
+            "app": {"domain": "sol.jamfcloud.com"},
+            "signOn": {"idpIssuer": None},
+        },
+        saml_metadata_entity_id="http://www.okta.com/exk_jamf",
+    )
+
+    rows = saml_acs_rows(app)
+
+    assert len(rows) == 1
+    assert rows[0]["acs_url"] == "https://sol.jamfcloud.com/saml/SSO"
+    assert rows[0]["sp_entity_id"] == "https://sol.jamfcloud.com/saml/metadata"
+    assert rows[0]["route_source"] == "settings.app+documented_jamf_route"
+    assert rows[0]["extraction_mode"] == "allowlisted_deterministic_route"
+    assert rows[0]["acs_source_field"] == "settings.app.domain"
+    assert rows[0]["sp_entity_source_field"] == "settings.app.domain"
+    assert rows[0]["target_product_family"] == "jamf_pro"
+
+
+def test_jamf_oin_route_fails_closed_for_absent_or_malformed_domain():
+    invalid_domains = [
+        None,
+        "",
+        "https://sol.jamfcloud.com",
+        "sol.jamfcloud.com/saml",
+        "sol..jamfcloud.com",
+        '"sol.jamfcloud.com"',
+    ]
+
+    for domain in invalid_domains:
+        app = _application(
+            name="jamfsoftwareserver",
+            settings={
+                "app": {"domain": domain},
+                "signOn": {"idpIssuer": None},
+            },
+            saml_metadata_entity_id="http://www.okta.com/exk_jamf",
+        )
+        assert saml_acs_rows(app) == []
+        provider = saml_federation_provider_row(app)
+        assert provider is not None
+        assert provider["acs_ids"] == []
+        assert any("settings.app.domain" in item for item in provider["route_diagnostics"])
+
+
+def test_github_organization_oin_route_uses_recognized_org_setting():
+    app = _application(
+        name="githubcloud",
+        settings={
+            "app": {"githubOrg": "k-nexus-global"},
+            "signOn": {"idpIssuer": "http://www.okta.com/exk123"},
+        },
+    )
+
+    rows = saml_acs_rows(app)
+
+    assert len(rows) == 1
+    assert rows[0]["acs_url"] == (
+        "https://github.com/orgs/k-nexus-global/saml/consume"
+    )
+    assert rows[0]["sp_entity_id"] == "https://github.com/orgs/k-nexus-global"
+    assert rows[0]["target_product_family"] == "github_organization"
+    assert rows[0]["acs_source_field"] == "settings.app.githubOrg"
+
+
+def test_explicit_generic_route_wins_over_conflicting_oin_default():
+    app = _application(
+        name="jamfsoftwareserver",
+        settings={
+            "app": {"domain": "derived.jamfcloud.com"},
+            "signOn": {
+                "idpIssuer": "http://www.okta.com/exk123",
+                "ssoAcsUrlOverride": "https://explicit.example.test/saml/consume",
+                "audienceOverride": "https://explicit.example.test/saml/metadata",
+            },
+        },
+    )
+
+    rows = saml_acs_rows(app)
+
+    assert len(rows) == 1
+    assert rows[0]["acs_url"] == "https://explicit.example.test/saml/consume"
+    assert rows[0]["sp_entity_id"] == (
+        "https://explicit.example.test/saml/metadata"
+    )
+    assert rows[0]["extraction_mode"] == "explicit_generic"
+    assert rows[0]["acs_source_field"] == "settings.signOn.ssoAcsUrlOverride"
+    assert rows[0]["sp_entity_source_field"] == (
+        "settings.signOn.audienceOverride"
+    )
+    assert rows[0]["route_conflicts"] == [
+        "explicit_generic_route_overrides_conflicting_oin_route"
+    ]
+
+    provider = saml_federation_provider_row(app)
+    assert provider is not None
+    assert provider["route_diagnostics"] == rows[0]["route_conflicts"]
+
+
+def test_explicit_acs_array_does_not_cross_product_with_conflicting_audiences():
+    app = _application(
+        settings={
+            "app": {},
+            "signOn": {
+                "idpIssuer": "http://www.okta.com/exk123",
+                "spIssuer": "https://sp-one.example.test/saml",
+                "audience": "https://sp-two.example.test/saml",
+                "acsEndpoints": [
+                    {"url": "https://sp.example.test/saml/one", "index": 0},
+                    {"url": "https://sp.example.test/saml/two", "index": 1},
+                ],
+            },
+        },
+    )
+
+    assert saml_acs_rows(app) == []
+    provider = saml_federation_provider_row(app)
+    assert provider is not None
+    assert provider["acs_ids"] == []
+    assert "conflicting_explicit_sp_entity_fields" in provider["route_diagnostics"]
+
+
+def test_multiple_explicit_acs_endpoints_preserve_one_to_one_route_tuples():
+    app = _application(
+        settings={
+            "app": {},
+            "signOn": {
+                "idpIssuer": "http://www.okta.com/exk123",
+                "audience": "https://sp.example.test/saml",
+                "acsEndpoints": [
+                    {"url": "https://sp.example.test/saml/one", "index": 0},
+                    {"url": "https://sp.example.test/saml/two", "index": 1},
+                ],
+            },
+        },
+    )
+
+    rows = saml_acs_rows(app)
+
+    assert [(row["acs_url"], row["sp_entity_id"]) for row in rows] == [
+        (
+            "https://sp.example.test/saml/one",
+            "https://sp.example.test/saml",
+        ),
+        (
+            "https://sp.example.test/saml/two",
+            "https://sp.example.test/saml",
+        ),
+    ]
+    assert [row["acs_source_field"] for row in rows] == [
+        "settings.signOn.acsEndpoints[0].url",
+        "settings.signOn.acsEndpoints[1].url",
+    ]
+
+
+def test_okta_metadata_is_issuer_evidence_not_downstream_route_evidence():
+    app = _application(
+        name="unknown_oin_saml",
+        settings={"app": {"domain": "sp.example.test"}, "signOn": {}},
+        saml_metadata_entity_id="http://www.okta.com/exk_metadata",
+        saml_metadata_sso_url=(
+            "https://source.example.test/app/unknown/exk_metadata/sso/saml"
+        ),
+    )
+
+    issuer = saml_issuer_row(app)
+    provider = saml_federation_provider_row(app)
+
+    assert issuer is not None
+    assert issuer["entity_id"] == "http://www.okta.com/exk_metadata"
+    assert saml_acs_rows(app) == []
+    assert provider is not None
+    assert provider["acs_ids"] == []
+    assert provider["route_diagnostics"] == [
+        "missing_authoritative_acs_and_sp_entity_evidence"
     ]
 
 
