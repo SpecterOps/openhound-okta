@@ -500,6 +500,9 @@ def application_user_rows(application: Application, ctx: SourceContext):
                     "app_subject_name_id_template": (
                         sign_on.subject_name_id_template if sign_on else None
                     ),
+                    "app_subject_name_id_format": (
+                        sign_on.subject_name_id_format if sign_on else None
+                    ),
                     "app_user_name_template": (
                         user_name_template.get("template")
                         if isinstance(user_name_template, dict)

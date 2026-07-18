@@ -8,7 +8,7 @@ from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 from openhound_okta.models.saml import (
     SamlAccountEdgeProperties,
-    saml_idp_user_match_values,
+    saml_idp_user_identity_evidence,
     saml_match_source,
     saml_service_provider_id,
 )
@@ -18,6 +18,10 @@ class Profile(BaseModel):
     last_name: str | None = Field(alias="lastName", default=None)
     first_name: str | None = Field(alias="firstName", default=None)
     email: str | None = None
+    ms_object_identifier: str | None = Field(
+        alias="msObjectIdentifier",
+        default=None,
+    )
     subject_name_id: str | None = Field(alias="subjectNameId", default=None)
     subject_name_qualifier: str | None = Field(
         alias="subjectNameQualifier",
@@ -59,7 +63,7 @@ class IDPUser(BaseAsset):
     model_config = ConfigDict(populate_by_name=True)
 
     id: str
-    external_id: str = Field(alias="externalId")
+    external_id: str | None = Field(alias="externalId", default=None)
     created: datetime | None = None
     last_updated: datetime | None = Field(alias="lastUpdated", default=None)
     profile: Profile | None = None
@@ -80,14 +84,18 @@ class IDPUser(BaseAsset):
 
     @property
     def _inbound_sso_edge(self):
+        entra_object_id = (
+            self.profile.ms_object_identifier if self.profile else None
+        )
         if (
             self.idp_type == "SAML2"
             and self.idp_url
             and "microsoftonline.com" in self.idp_url
+            and entra_object_id
         ):
             yield Edge(
                 kind=ek.INBOUND_SSO,
-                start=EdgePath(value=self.external_id, match_by="id"),
+                start=EdgePath(value=entra_object_id, match_by="id"),
                 end=EdgePath(value=self.id, match_by="id"),
                 properties=EdgeProperties(traversable=True),
             )
@@ -108,8 +116,8 @@ class IDPUser(BaseAsset):
         if self.idp_status and self.idp_status != "ACTIVE":
             return
 
-        match_values = saml_idp_user_match_values(self)
-        if not match_values:
+        evidence = saml_idp_user_identity_evidence(self)
+        if not evidence["match_values"]:
             return
         yield Edge(
             kind=ek.SAML_HAS_ACCOUNT,
@@ -117,9 +125,18 @@ class IDPUser(BaseAsset):
             end=EdgePath(value=self.id, match_by="id"),
             properties=SamlAccountEdgeProperties(
                 traversable=False,
-                match_values=match_values,
+                match_values=evidence["match_values"],
+                email_match_values=evidence["email_match_values"],
+                entra_object_id_match_values=evidence[
+                    "entra_object_id_match_values"
+                ],
+                scoped_exact_match_values=evidence[
+                    "scoped_exact_match_values"
+                ],
                 source_property=saml_match_source(self.idp_subject_user_name_template),
-                account_state=None,
+                account_state="unknown",
+                direct_binding=True,
+                direct_binding_source="GET /api/v1/idps/{idpId}/users",
             ),
         )
 

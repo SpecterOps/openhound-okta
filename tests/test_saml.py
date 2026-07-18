@@ -4,6 +4,7 @@ from openhound_okta.models.application_users import ApplicationUser
 from openhound_okta.models.idp import IdentityProvider
 from openhound_okta.models.idp_user import IDPUser
 from openhound_okta.models.saml import (
+    SAML_CONTRACT_VERSION,
     SamlAssertionConsumerService,
     SamlClaimMapping,
     SamlFederationProvider,
@@ -206,8 +207,19 @@ def test_saml_provider_emits_claim_mapping_explanation():
         "okta:saml:claim-mapping:0oa_saml:1",
     ]
     assert rows[0]["claim_name"] == "NameID"
+    assert rows[0]["claim_type"] == "name_id"
+    assert rows[0]["format"] == (
+        "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+    )
+    assert rows[0]["format_was_omitted"] is False
     assert rows[0]["source_property"] == "source.login"
     assert rows[1]["claim_name"] == "email"
+    assert rows[1]["claim_type"] == "attribute"
+    assert rows[1]["source_property"] == "user.email"
+    assert rows[1]["name_format"] == (
+        "urn:oasis:names:tc:SAML:2.0:attrname-format:unspecified"
+    )
+    assert rows[1]["name_format_was_omitted"] is True
     assert rows[1]["expression"] == "user.email"
 
     edge_kinds = [edge.kind for edge in SamlFederationProvider.model_validate(provider).edges]
@@ -219,6 +231,31 @@ def test_saml_provider_emits_claim_mapping_explanation():
         ek.SAML_HAS_CLAIM_MAPPING,
     ]
     assert SamlClaimMapping.model_validate(rows[0]).claim_name == "NameID"
+
+
+def test_group_claim_mapping_keeps_raw_statement_without_fake_source_property():
+    app = _application(
+        credentials={"signing": {}},
+        settings={
+            "app": {},
+            "signOn": {
+                "configuredAttributeStatements": [
+                    {
+                        "name": "http://schemas.xmlsoap.org/claims/Group",
+                        "type": "GROUP",
+                        "filterType": None,
+                        "filterValue": None,
+                    }
+                ]
+            },
+        },
+    )
+
+    rows = saml_claim_mapping_rows(app)
+
+    assert len(rows) == 1
+    assert rows[0]["source_property"] is None
+    assert rows[0]["expression"].startswith("{")
 
 
 def test_saml_acs_rows_dedup_repeated_acs_url_and_entity():
@@ -545,7 +582,29 @@ def test_saml_eligible_for_uses_configured_match_value():
     assert eligible[0].start.value == "00u_saml_user"
     assert eligible[0].end.value == "okta:saml:provider:0oa_saml"
     assert eligible[0].properties.match_values == ["alice.saml@example.test"]
+    assert eligible[0].properties.email_match_values == []
+    assert eligible[0].properties.scoped_exact_match_values == [
+        "alice.saml@example.test"
+    ]
+    assert eligible[0].properties.schema_contract_version == SAML_CONTRACT_VERSION
     assert eligible[0].properties.source_property == "source.login"
+
+
+def test_saml_eligible_for_promotes_standard_email_nameid() -> None:
+    app_user = _application_user(
+        app_subject_name_id_template="${source.login}",
+        app_subject_name_id_format=(
+            "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+        ),
+    )
+
+    eligible = next(
+        edge for edge in app_user.edges if edge.kind == ek.SAML_ELIGIBLE_FOR
+    )
+
+    assert eligible.properties.match_values == ["alice.saml@example.test"]
+    assert eligible.properties.email_match_values == ["alice.saml@example.test"]
+    assert eligible.properties.scoped_exact_match_values == []
 
 
 def test_saml_service_provider_links_only_to_resolved_route_nodes():
@@ -619,15 +678,59 @@ def test_saml_has_account_uses_inbound_idp_subject_template():
         )
     )
 
-    assert saml_idp_user_match_values(idp_user) == ["alice@example.test"]
+    assert saml_idp_user_match_values(idp_user) == [
+        "alice@example.test",
+        "external-user-id",
+    ]
 
     edges = list(idp_user.edges)
     account_edges = [edge for edge in edges if edge.kind == ek.SAML_HAS_ACCOUNT]
     assert len(account_edges) == 1
     assert account_edges[0].start.value == "okta:saml:service-provider:0oa_idp"
     assert account_edges[0].end.value == "00u_okta_user"
-    assert account_edges[0].properties.match_values == ["alice@example.test"]
+    assert account_edges[0].properties.match_values == [
+        "alice@example.test",
+        "external-user-id",
+    ]
+    assert account_edges[0].properties.scoped_exact_match_values == [
+        "alice@example.test",
+        "external-user-id",
+    ]
+    assert account_edges[0].properties.direct_binding is True
+    assert account_edges[0].properties.schema_contract_version == (
+        SAML_CONTRACT_VERSION
+    )
     assert (
         account_edges[0].properties.source_property
         == "idpuser.subjectNameId + '@' + idpuser.subjectNameQualifier"
     )
+
+
+def test_saml_has_account_types_entra_object_id_from_resolved_link() -> None:
+    object_id = "10ce139c-c176-470e-98b7-a2467ed97576"
+    idp_user = _idp_user(
+        externalId=None,
+        profile={
+            "email": "alice@example.test",
+            "firstName": "Alice",
+            "lastName": "Example",
+            "subjectNameId": "alice",
+            "subjectNameQualifier": "example.test",
+            "msObjectIdentifier": object_id.upper(),
+        },
+        idp_url="https://login.microsoftonline.com/example/saml2",
+        idp_subject_user_name_template="idpuser.email",
+    )
+
+    account = next(
+        edge for edge in idp_user.edges if edge.kind == ek.SAML_HAS_ACCOUNT
+    )
+
+    assert account.properties.email_match_values == ["alice@example.test"]
+    assert account.properties.entra_object_id_match_values == [object_id]
+    assert account.properties.scoped_exact_match_values == []
+
+    inbound_sso = next(
+        edge for edge in idp_user.edges if edge.kind == ek.INBOUND_SSO
+    )
+    assert inbound_sso.start.value == object_id.upper()

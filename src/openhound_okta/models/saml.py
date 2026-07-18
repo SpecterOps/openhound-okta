@@ -2,6 +2,7 @@ from dataclasses import dataclass, field as dc_field, replace
 import json
 import re
 from typing import Any
+from uuid import UUID
 
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
 from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
@@ -11,6 +12,16 @@ from openhound_okta.graph import OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek
 from openhound_okta.kinds import nodes as nk
 from openhound_okta.main import app
+
+
+SAML_CONTRACT_VERSION = "opengraph-saml-v0.3.0"
+EMAIL_NAME_ID_FORMAT = "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+UNSPECIFIED_NAME_ID_FORMAT = (
+    "urn:oasis:names:tc:SAML:1.0:nameid-format:unspecified"
+)
+UNSPECIFIED_ATTRIBUTE_NAME_FORMAT = (
+    "urn:oasis:names:tc:SAML:2.0:attrname-format:unspecified"
+)
 
 
 def _clean(value: Any) -> str | None:
@@ -475,45 +486,114 @@ def _idp_user_value(template: str | None, idp_user: Any) -> str | None:
 
 
 def saml_application_match_values(application_user: Any) -> list[str]:
-    return _dedupe(
-        [
-            _application_user_value(
-                getattr(application_user, "app_subject_name_id_template", None),
-                application_user,
-            ),
-            _application_user_value(
-                getattr(application_user, "app_user_name_template", None),
-                application_user,
-            ),
-        ]
+    return saml_application_identity_evidence(application_user)["match_values"]
+
+
+def saml_application_identity_evidence(
+    application_user: Any,
+) -> dict[str, list[str]]:
+    """Resolve the effective outbound NameID without guessing identity families."""
+
+    subject_template = getattr(
+        application_user, "app_subject_name_id_template", None
     )
+    template = subject_template or getattr(
+        application_user, "app_user_name_template", None
+    )
+    value = _application_user_value(template, application_user)
+    match_values = _dedupe([value])
+    if not match_values:
+        return {
+            "match_values": [],
+            "email_match_values": [],
+            "scoped_exact_match_values": [],
+        }
+
+    source_property = saml_match_source(template)
+    name_id_format = _clean(
+        getattr(application_user, "app_subject_name_id_format", None)
+    )
+    is_email = source_property in {"source.email", "user.email"} or (
+        subject_template is not None and name_id_format == EMAIL_NAME_ID_FORMAT
+    )
+    return {
+        "match_values": match_values,
+        "email_match_values": (
+            [value.casefold() for value in match_values] if is_email else []
+        ),
+        "scoped_exact_match_values": [] if is_email else match_values,
+    }
 
 
 def saml_idp_user_match_values(idp_user: Any) -> list[str]:
-    return _dedupe(
-        [
-            _idp_user_value(
-                getattr(idp_user, "idp_subject_user_name_template", None),
-                idp_user,
-            )
-        ]
+    return saml_idp_user_identity_evidence(idp_user)["match_values"]
+
+
+def saml_idp_user_identity_evidence(idp_user: Any) -> dict[str, list[str]]:
+    """Preserve values from Okta's native resolved inbound-IdP user link."""
+
+    template = getattr(idp_user, "idp_subject_user_name_template", None)
+    subject_value = _idp_user_value(template, idp_user)
+    external_id = _clean(getattr(idp_user, "external_id", None))
+    profile = getattr(idp_user, "profile", None)
+    ms_object_identifier = _profile_value(profile, "ms_object_identifier")
+    match_values = _dedupe([subject_value, external_id, ms_object_identifier])
+    source_property = saml_match_source(template)
+
+    email_values = (
+        [subject_value.casefold()]
+        if subject_value and source_property == "idpuser.email"
+        else []
     )
+    entra_object_ids: list[str] = []
+    idp_url = _clean(getattr(idp_user, "idp_url", None))
+    if (
+        ms_object_identifier
+        and idp_url
+        and "microsoftonline.com" in idp_url.casefold()
+    ):
+        try:
+            entra_object_ids.append(str(UUID(ms_object_identifier)))
+        except ValueError:
+            pass
+
+    classified = {*email_values, *entra_object_ids}
+    scoped_exact_values = [
+        value
+        for value in match_values
+        if value.casefold() not in {item.casefold() for item in classified}
+    ]
+    return {
+        "match_values": match_values,
+        "email_match_values": email_values,
+        "entra_object_id_match_values": entra_object_ids,
+        "scoped_exact_match_values": scoped_exact_values,
+    }
 
 
 def saml_match_source(template: str | None) -> str | None:
     return _template_field(template)
 
 
+def _statement_source_property(expression: str | None) -> str | None:
+    """Return a readable source field only when Okta supplied an expression."""
+
+    value = _clean(expression)
+    if not value or value.startswith(("{", "[")):
+        return None
+    return saml_match_source(value)
+
+
 def _statement_value(statement: dict[str, Any], *keys: str) -> str | None:
     for key in keys:
         value = statement.get(key)
         if isinstance(value, list):
-            cleaned = _dedupe([str(item) for item in value])
-            if cleaned:
-                return ",".join(cleaned)
-        cleaned = _clean(value)
-        if cleaned:
-            return cleaned
+            cleaned_values = _dedupe([str(item) for item in value])
+            if cleaned_values:
+                return ",".join(cleaned_values)
+        cleaned_value = _clean(value)
+        if cleaned_value:
+            return cleaned_value
     return None
 
 
@@ -603,6 +683,9 @@ def saml_claim_mapping_rows(application) -> list[dict[str, Any]]:
         user_name_template = _clean(user_name_template_value.get("template"))
 
     if subject_template or user_name_template:
+        native_format = _clean(
+            getattr(sign_on, "subject_name_id_format", None)
+        )
         rows.append(
             {
                 "id": saml_claim_mapping_id(application.id, len(rows)),
@@ -611,13 +694,16 @@ def saml_claim_mapping_rows(application) -> list[dict[str, Any]]:
                 "app_label": application.label,
                 "claim_name": "NameID",
                 "mapping_type": "name_id",
+                "claim_type": "name_id",
                 "source_property": saml_match_source(
                     subject_template or user_name_template
                 ),
                 "expression": subject_template or user_name_template,
-                "name_id_format": _clean(
-                    getattr(sign_on, "subject_name_id_format", None)
-                ),
+                "name_id_format": native_format,
+                "format": native_format or UNSPECIFIED_NAME_ID_FORMAT,
+                "format_was_omitted": native_format is None,
+                "name_format": None,
+                "name_format_was_omitted": None,
             }
         )
 
@@ -638,6 +724,11 @@ def saml_claim_mapping_rows(application) -> list[dict[str, Any]]:
         claim_name = _statement_value(statement, "name", "attributeName", "type")
         if not expression and not claim_name:
             continue
+        native_name_format = _statement_value(
+            statement,
+            "nameFormat",
+            "name_format",
+        )
         rows.append(
             {
                 "id": saml_claim_mapping_id(application.id, len(rows)),
@@ -646,9 +737,16 @@ def saml_claim_mapping_rows(application) -> list[dict[str, Any]]:
                 "app_label": application.label,
                 "claim_name": claim_name or "attribute",
                 "mapping_type": mapping_type,
-                "source_property": saml_match_source(expression),
+                "claim_type": "attribute",
+                "source_property": _statement_source_property(expression),
                 "expression": expression,
                 "name_id_format": None,
+                "format": None,
+                "format_was_omitted": None,
+                "name_format": (
+                    native_name_format or UNSPECIFIED_ATTRIBUTE_NAME_FORMAT
+                ),
+                "name_format_was_omitted": native_name_format is None,
             }
         )
 
@@ -795,6 +893,7 @@ class SamlFederationProviderProperties(OktaNodeProperties):
         app_status: The Okta application lifecycle status.
         enabled: Whether the application is active.
         route_diagnostics: Missing or conflicting route evidence retained for review.
+        schema_contract_version: Fact-local normalized SAML contract version.
     """
 
     app_id: str
@@ -803,6 +902,7 @@ class SamlFederationProviderProperties(OktaNodeProperties):
     app_status: str
     enabled: bool
     route_diagnostics: list[str] = dc_field(default_factory=list)
+    schema_contract_version: str = SAML_CONTRACT_VERSION
 
 
 @dataclass
@@ -815,6 +915,7 @@ class SamlIssuerProperties(OktaNodeProperties):
         app_label: The Okta application display label.
         source_object_kind: The native OpenGraph kind that owns this SAML issuer.
         entity_id: The byte-exact SAML issuer entity ID.
+        schema_contract_version: Fact-local normalized SAML contract version.
     """
 
     app_id: str
@@ -822,6 +923,7 @@ class SamlIssuerProperties(OktaNodeProperties):
     app_label: str
     entity_id: str
     source_object_kind: str = nk.APPLICATION
+    schema_contract_version: str = SAML_CONTRACT_VERSION
 
 
 @dataclass
@@ -846,6 +948,7 @@ class SamlAssertionConsumerServiceProperties(OktaNodeProperties):
         acs_source_field: The exact native field that proved or scoped the ACS URL.
         sp_entity_source_field: The exact native field that proved or scoped the SP entity.
         route_conflicts: Conflicting lower-precedence route evidence retained for review.
+        schema_contract_version: Fact-local normalized SAML contract version.
     """
 
     app_id: str
@@ -865,6 +968,7 @@ class SamlAssertionConsumerServiceProperties(OktaNodeProperties):
     acs_source_field: str | None = None
     sp_entity_source_field: str | None = None
     route_conflicts: list[str] = dc_field(default_factory=list)
+    schema_contract_version: str = SAML_CONTRACT_VERSION
 
 
 @dataclass
@@ -878,6 +982,7 @@ class SamlServiceProviderProperties(OktaNodeProperties):
         idp_status: The Okta identity provider lifecycle status.
         sp_entity_id: The byte-exact Okta SP entity ID or audience.
         enabled: Whether the identity provider is active.
+        schema_contract_version: Fact-local normalized SAML contract version.
     """
 
     idp_id: str
@@ -886,6 +991,7 @@ class SamlServiceProviderProperties(OktaNodeProperties):
     idp_status: str
     sp_entity_id: str | None = None
     enabled: bool = False
+    schema_contract_version: str = SAML_CONTRACT_VERSION
 
 
 @dataclass
@@ -901,6 +1007,12 @@ class SamlClaimMappingProperties(OktaNodeProperties):
         source_property: The portable source field name when it can be resolved.
         expression: The raw Okta expression or statement payload.
         name_id_format: The requested SAML NameID format when the mapping is NameID.
+        claim_type: Contract claim type, either name_id or attribute.
+        format: Effective NameID format for a name_id mapping.
+        format_was_omitted: Whether the native NameID format was omitted.
+        name_format: Effective attribute NameFormat for an attribute mapping.
+        name_format_was_omitted: Whether the native attribute NameFormat was omitted.
+        schema_contract_version: Fact-local normalized SAML contract version.
     """
 
     app_id: str
@@ -908,9 +1020,26 @@ class SamlClaimMappingProperties(OktaNodeProperties):
     app_label: str
     claim_name: str
     mapping_type: str
+    claim_type: str
     source_property: str | None = None
     expression: str | None = None
     name_id_format: str | None = None
+    format: str | None = None
+    format_was_omitted: bool | None = None
+    name_format: str | None = None
+    name_format_was_omitted: bool | None = None
+    schema_contract_version: str = SAML_CONTRACT_VERSION
+
+
+@dataclass
+class SamlRelationshipProperties(EdgeProperties):
+    """Fact-local metadata for normalized Okta SAML topology.
+
+    Attributes:
+        schema_contract_version: Fact-local normalized SAML contract version.
+    """
+
+    schema_contract_version: str = SAML_CONTRACT_VERSION
 
 
 @dataclass
@@ -920,10 +1049,16 @@ class SamlMatchValuesEdgeProperties(EdgeProperties):
     Attributes:
         match_values: Identity values Okta can assert for the assignment.
         source_property: The Okta field or expression source for the match values.
+        email_match_values: Canonical email values justified by native semantics.
+        scoped_exact_match_values: Route-scoped exact NameID or provider-subject values.
+        schema_contract_version: Fact-local normalized SAML contract version.
     """
 
     match_values: list[str] = dc_field(default_factory=list)
     source_property: str | None = None
+    email_match_values: list[str] = dc_field(default_factory=list)
+    scoped_exact_match_values: list[str] = dc_field(default_factory=list)
+    schema_contract_version: str = SAML_CONTRACT_VERSION
 
 
 @dataclass
@@ -934,9 +1069,15 @@ class SamlAccountEdgeProperties(SamlMatchValuesEdgeProperties):
         match_values: Concrete values accepted for SAML account matching.
         source_property: The Okta IdP user field used to resolve match values.
         account_state: Account reachability state when known.
+        entra_object_id_match_values: Entra object IDs proven by the inbound provider link.
+        direct_binding: Whether Okta directly resolved this provider-scoped account link.
+        direct_binding_source: Native Okta source that proved the resolved link.
     """
 
     account_state: str | None = None
+    entra_object_id_match_values: list[str] = dc_field(default_factory=list)
+    direct_binding: bool = False
+    direct_binding_source: str | None = None
 
 
 @app.asset(
@@ -1008,6 +1149,7 @@ class SamlFederationProvider(BaseAsset):
                 app_status=self.app_status,
                 enabled=self.enabled,
                 route_diagnostics=self.route_diagnostics,
+                schema_contract_version=SAML_CONTRACT_VERSION,
             ),
         )
 
@@ -1017,28 +1159,28 @@ class SamlFederationProvider(BaseAsset):
             kind=ek.SAML_IMPLEMENTS,
             start=EdgePath(value=self.app_id, match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=False),
+            properties=SamlRelationshipProperties(traversable=False),
         )
         if self.issuer_id:
             yield Edge(
                 kind=ek.SAML_ISSUES_AS,
                 start=EdgePath(value=self.id, match_by="id"),
                 end=EdgePath(value=self.issuer_id, match_by="id"),
-                properties=EdgeProperties(traversable=False),
+                properties=SamlRelationshipProperties(traversable=False),
             )
         for acs_id in self.acs_ids:
             yield Edge(
                 kind=ek.SAML_ISSUES_ASSERTIONS_TO,
                 start=EdgePath(value=self.id, match_by="id"),
                 end=EdgePath(value=acs_id, match_by="id"),
-                properties=EdgeProperties(traversable=False),
+                properties=SamlRelationshipProperties(traversable=False),
             )
         for claim_mapping_id in self.claim_mapping_ids:
             yield Edge(
                 kind=ek.SAML_HAS_CLAIM_MAPPING,
                 start=EdgePath(value=self.id, match_by="id"),
                 end=EdgePath(value=claim_mapping_id, match_by="id"),
-                properties=EdgeProperties(traversable=False),
+                properties=SamlRelationshipProperties(traversable=False),
             )
 
 
@@ -1059,9 +1201,14 @@ class SamlClaimMapping(BaseAsset):
     app_label: str
     claim_name: str
     mapping_type: str
+    claim_type: str
     source_property: str | None = None
     expression: str | None = None
     name_id_format: str | None = None
+    format: str | None = None
+    format_was_omitted: bool | None = None
+    name_format: str | None = None
+    name_format_was_omitted: bool | None = None
 
     @property
     def as_node(self):
@@ -1071,7 +1218,7 @@ class SamlClaimMapping(BaseAsset):
                 tenant=self._lookup.org_id(),
                 tenant_domain=self._extras["tenant"],
                 id=self.id,
-                name=f"{self.app_name}:{self.claim_name}",
+                name=self.claim_name,
                 displayname=f"{self.app_label}:{self.claim_name}",
                 environmentid=self._lookup.org_id(),
                 app_id=self.app_id,
@@ -1079,9 +1226,15 @@ class SamlClaimMapping(BaseAsset):
                 app_label=self.app_label,
                 claim_name=self.claim_name,
                 mapping_type=self.mapping_type,
+                claim_type=self.claim_type,
                 source_property=self.source_property,
                 expression=self.expression,
                 name_id_format=self.name_id_format,
+                format=self.format,
+                format_was_omitted=self.format_was_omitted,
+                name_format=self.name_format,
+                name_format_was_omitted=self.name_format_was_omitted,
+                schema_contract_version=SAML_CONTRACT_VERSION,
             ),
         )
 
@@ -1124,6 +1277,7 @@ class SamlIssuer(BaseAsset):
                 app_label=self.app_label,
                 entity_id=self.entity_id,
                 source_object_kind=self.source_object_kind,
+                schema_contract_version=SAML_CONTRACT_VERSION,
             ),
         )
 
@@ -1207,6 +1361,7 @@ class SamlAssertionConsumerService(BaseAsset):
                 acs_source_field=self.acs_source_field,
                 sp_entity_source_field=self.sp_entity_source_field,
                 route_conflicts=self.route_conflicts,
+                schema_contract_version=SAML_CONTRACT_VERSION,
             ),
         )
 
@@ -1288,6 +1443,7 @@ class SamlServiceProvider(BaseAsset):
                 idp_status=self.idp_status,
                 sp_entity_id=self.sp_entity_id,
                 enabled=self.enabled,
+                schema_contract_version=SAML_CONTRACT_VERSION,
             ),
         )
 
@@ -1297,19 +1453,19 @@ class SamlServiceProvider(BaseAsset):
             kind=ek.SAML_IMPLEMENTS,
             start=EdgePath(value=self.idp_id, match_by="id"),
             end=EdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=False),
+            properties=SamlRelationshipProperties(traversable=False),
         )
         if self.issuer_id:
             yield Edge(
                 kind=ek.SAML_TRUSTS_ISSUER,
                 start=EdgePath(value=self.id, match_by="id"),
                 end=EdgePath(value=self.issuer_id, match_by="id"),
-                properties=EdgeProperties(traversable=False),
+                properties=SamlRelationshipProperties(traversable=False),
             )
         for acs_id in self.acs_ids:
             yield Edge(
                 kind=ek.SAML_HAS_ASSERTION_CONSUMER_SERVICE,
                 start=EdgePath(value=self.id, match_by="id"),
                 end=EdgePath(value=acs_id, match_by="id"),
-                properties=EdgeProperties(traversable=False),
+                properties=SamlRelationshipProperties(traversable=False),
             )
