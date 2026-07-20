@@ -45,6 +45,8 @@ from .models import (
     Realm,
     Resource,
     ResourceSet,
+    SamlAccountResolutionField,
+    SamlAccountResolutionRule,
     SamlAssertionConsumerService,
     SamlClaimMapping,
     SamlFederationProvider,
@@ -56,6 +58,8 @@ from .models import (
     UserRoleAssignment,
 )
 from .models.saml import (
+    saml_account_resolution_field_row,
+    saml_account_resolution_rule_row,
     saml_acs_rows,
     saml_claim_mapping_rows,
     saml_federation_provider_row,
@@ -572,6 +576,28 @@ def saml_service_providers(identity_provider: IdentityProvider):
 
 
 @app.transformer(
+    name="saml_account_resolution_rules",
+    columns=SamlAccountResolutionRule,
+    parallelized=True,
+)
+def saml_account_resolution_rules(identity_provider: IdentityProvider):
+    row = saml_account_resolution_rule_row(identity_provider)
+    if row:
+        yield row
+
+
+@app.transformer(
+    name="saml_account_resolution_fields",
+    columns=SamlAccountResolutionField,
+    parallelized=True,
+)
+def saml_account_resolution_fields(identity_provider: IdentityProvider):
+    row = saml_account_resolution_field_row(identity_provider)
+    if row:
+        yield row
+
+
+@app.transformer(
     name="saml_trusted_issuers", columns=SamlTrustedIssuer, parallelized=True
 )
 def saml_trusted_issuers(identity_provider: IdentityProvider):
@@ -788,6 +814,11 @@ def identity_provider_users(idp: IdentityProvider, ctx: SourceContext):
                 "idp_id": idp.id,
                 "idp_name": idp.name,
                 "idp_type": idp.type,
+                "idp_protocol_type": getattr(
+                    getattr(idp, "protocol", None),
+                    "type",
+                    None,
+                ),
                 "idp_status": idp.status,
                 "idp_url": idp.idp_url,
                 "idp_subject_user_name_template": user_name_template.get("template"),
@@ -973,6 +1004,8 @@ def source(
         realms(ctx),
         identity_providers_resource,
         identity_providers_resource | saml_service_providers(),
+        identity_providers_resource | saml_account_resolution_rules(),
+        identity_providers_resource | saml_account_resolution_fields(),
         identity_providers_resource | saml_trusted_issuers(),
         identity_providers_resource | saml_sp_assertion_consumer_services(),
         identity_providers_resource | identity_provider_users(ctx),

@@ -66,12 +66,18 @@ class Provisioning(BaseModel):
 
 
 class Policy(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     provisioning: Provisioning | None = None
     account_link: dict | None = Field(default=None, alias="accountLink")
     subject: dict | None = None
     map_amr_claims: bool | None = Field(default=None, alias="mapAMRClaims")
     trust_claims: bool | None = Field(default=None, alias="trustClaims")
     max_clock_skew: int | None = Field(default=None, alias="maxClockSkew")
+    transformed_username_matching_enabled: bool | None = Field(
+        default=None,
+        alias="transformedUsernameMatchingEnabled",
+    )
 
 
 class Client(BaseModel):

@@ -32,6 +32,7 @@ def convert(ctx: ConvertContext):
     """
     from openhound_okta.source import source as okta_source
     from urllib.parse import urlparse
+
     tenant_url = dlt.secrets.get("sources.source.okta.credentials.base_url")
     return okta_source(), {"tenant": urlparse(tenant_url).netloc}
 
@@ -48,6 +49,8 @@ def preprocess(ctx: PreProcContext):
         "saml_assertion_consumer_services": "saml_assertion_consumer_services",
         "saml_claim_mappings": "saml_claim_mappings",
         "saml_service_providers": "saml_service_providers",
+        "saml_account_resolution_rules": "saml_account_resolution_rules",
+        "saml_account_resolution_fields": "saml_account_resolution_fields",
         "saml_trusted_issuers": "saml_trusted_issuers",
         "saml_sp_assertion_consumer_services": "saml_sp_assertion_consumer_services",
         "application_secrets": "application_secrets",

@@ -4,7 +4,10 @@ from openhound_okta.models.application_users import ApplicationUser
 from openhound_okta.models.idp import IdentityProvider
 from openhound_okta.models.idp_user import IDPUser
 from openhound_okta.models.saml import (
+    ACCOUNT_RESOLUTION_PROFILE,
     SAML_CONTRACT_VERSION,
+    SamlAccountResolutionField,
+    SamlAccountResolutionRule,
     SamlAssertionConsumerService,
     SamlClaimMapping,
     SamlFederationProvider,
@@ -12,6 +15,9 @@ from openhound_okta.models.saml import (
     SamlServiceProviderAssertionConsumerService,
     SamlServiceProvider,
     SamlTrustedIssuer,
+    normalize_okta_account_state,
+    saml_account_resolution_field_row,
+    saml_account_resolution_rule_row,
     saml_acs_rows,
     saml_application_match_values,
     saml_claim_mapping_rows,
@@ -125,12 +131,39 @@ def _idp_user(**overrides) -> IDPUser:
         },
         "idp_id": "0oa_idp",
         "idp_type": "SAML2",
+        "idp_protocol_type": "SAML2",
         "idp_name": "Example inbound SAML",
         "idp_status": "ACTIVE",
         "idp_subject_user_name_template": "idpuser.subjectNameId",
     }
     data.update(overrides)
     return IDPUser.model_validate(data)
+
+
+def _automatic_username_policy(template: str = "idpuser.email") -> dict:
+    return {
+        "accountLink": {"action": "AUTO", "filter": None},
+        "subject": {
+            "userNameTemplate": {"template": template},
+            "filter": "",
+            "matchType": "USERNAME",
+            "matchAttribute": None,
+        },
+        "transformedUsernameMatchingEnabled": False,
+    }
+
+
+class _SamlLookup:
+    def __init__(self, accounts=(), status: str | None = None):
+        self.accounts = accounts
+        self.status = status
+
+    def iter_user_saml_accounts(self):
+        yield from self.accounts
+
+    def user_status(self, user_id: str) -> str | None:
+        assert user_id == "00u_okta_user"
+        return self.status
 
 
 def test_saml_provider_is_emitted_when_route_metadata_is_partial():
@@ -143,7 +176,9 @@ def test_saml_provider_is_emitted_when_route_metadata_is_partial():
     assert row["issuer_id"] is None
     assert row["acs_ids"] == []
 
-    edge_kinds = [edge.kind for edge in SamlFederationProvider.model_validate(row).edges]
+    edge_kinds = [
+        edge.kind for edge in SamlFederationProvider.model_validate(row).edges
+    ]
     assert edge_kinds == [ek.SAML_IMPLEMENTS]
 
 
@@ -159,7 +194,9 @@ def test_saml_provider_links_only_to_resolved_route_nodes():
     assert provider["issuer_id"] == issuer["id"]
     assert provider["acs_ids"] == [acs_rows[0]["id"]]
 
-    edge_kinds = [edge.kind for edge in SamlFederationProvider.model_validate(provider).edges]
+    edge_kinds = [
+        edge.kind for edge in SamlFederationProvider.model_validate(provider).edges
+    ]
     assert edge_kinds == [
         ek.SAML_IMPLEMENTS,
         ek.SAML_ISSUES_AS,
@@ -222,7 +259,9 @@ def test_saml_provider_emits_claim_mapping_explanation():
     assert rows[1]["name_format_was_omitted"] is True
     assert rows[1]["expression"] == "user.email"
 
-    edge_kinds = [edge.kind for edge in SamlFederationProvider.model_validate(provider).edges]
+    edge_kinds = [
+        edge.kind for edge in SamlFederationProvider.model_validate(provider).edges
+    ]
     assert edge_kinds == [
         ek.SAML_IMPLEMENTS,
         ek.SAML_ISSUES_AS,
@@ -256,6 +295,23 @@ def test_group_claim_mapping_keeps_raw_statement_without_fake_source_property():
     assert len(rows) == 1
     assert rows[0]["source_property"] is None
     assert rows[0]["expression"].startswith("{")
+
+
+def test_claim_mapping_accepts_pre_v03_rows_without_claim_type():
+    claim = SamlClaimMapping.model_validate(
+        {
+            "id": "okta:saml:claim-mapping:0oa_saml:0",
+            "app_id": "0oa_saml",
+            "app_name": "custom_saml",
+            "app_label": "Custom SAML",
+            "claim_name": "NameID",
+            "mapping_type": "name_id",
+            "source_property": "source.login",
+            "expression": "${source.login}",
+        }
+    )
+
+    assert claim.claim_type == "name_id"
 
 
 def test_saml_acs_rows_dedup_repeated_acs_url_and_entity():
@@ -361,9 +417,7 @@ def test_org2org_saml_uses_exact_oin_acs_and_audience_fields():
     rows = saml_acs_rows(app)
 
     assert len(rows) == 1
-    assert rows[0]["acs_url"] == (
-        "https://target.example.test/sso/saml2/0oa_target"
-    )
+    assert rows[0]["acs_url"] == ("https://target.example.test/sso/saml2/0oa_target")
     assert rows[0]["sp_entity_id"] == (
         "https://www.okta.com/saml2/service-provider/target"
     )
@@ -388,6 +442,73 @@ def test_oidc_org2org_never_enters_saml_route_extraction():
 
     assert saml_acs_rows(app) == []
     assert saml_federation_provider_row(app) is None
+
+
+def test_org2org_requires_exact_saml_mode_for_every_normalized_fact():
+    for sign_on_mode in ("OPENID_CONNECT", "OIDC", "SWA", None, "unknown"):
+        app = _application(
+            name="okta_org2org",
+            signOnMode=sign_on_mode,
+            settings={
+                "app": {
+                    "acsUrl": "https://target.example.test/sso/saml2/target",
+                    "audRestriction": (
+                        "https://www.okta.com/saml2/service-provider/target"
+                    ),
+                    "baseUrl": "https://target.example.test/",
+                },
+                "signOn": {
+                    "idpIssuer": "http://www.okta.com/exk_org2org",
+                    "subjectNameIdTemplate": "${source.login}",
+                },
+            },
+            saml_metadata_entity_id="http://www.okta.com/exk_org2org",
+            saml_metadata_sso_url=(
+                "https://source.example.test/app/okta_org2org/exk/sso/saml"
+            ),
+        )
+        app_user = _application_user(
+            app_name="okta_org2org",
+            app_sign_on_mode=sign_on_mode,
+        )
+
+        assert saml_federation_provider_row(app) is None
+        assert saml_issuer_row(app) is None
+        assert saml_acs_rows(app) == []
+        assert saml_claim_mapping_rows(app) == []
+        assert ek.SAML_ELIGIBLE_FOR not in {edge.kind for edge in app_user.edges}
+
+
+def test_inbound_normalization_requires_saml_idp_type_and_protocol():
+    for idp_type, protocol_type in (("OIDC", "SAML2"), ("SAML2", "OIDC")):
+        idp = _identity_provider(
+            type=idp_type,
+            protocol={
+                "type": protocol_type,
+                "endpoints": {
+                    "sso": {"url": "https://idp.example.test/sso"},
+                    "acs": {"type": "INSTANCE"},
+                    "authorization": {"url": "https://idp.example.test/authorize"},
+                },
+                "credentials": {
+                    "trust": {
+                        "issuer": "https://idp.example.test/saml/issuer",
+                        "audience": "http://www.okta.com/0oa_idp",
+                    }
+                },
+            },
+        )
+        idp_user = _idp_user(
+            idp_type=idp_type,
+            idp_protocol_type=protocol_type,
+        )
+
+        assert saml_service_provider_row(idp) is None
+        assert saml_trusted_issuer_row(idp) is None
+        assert saml_sp_acs_rows(idp) == []
+        edge_kinds = {edge.kind for edge in idp_user.edges}
+        assert ek.IDENTITY_PROVIDER_FOR in edge_kinds
+        assert ek.SAML_HAS_ACCOUNT not in edge_kinds
 
 
 def test_jamf_oin_route_uses_allowlisted_documented_paths():
@@ -435,7 +556,9 @@ def test_jamf_oin_route_fails_closed_for_absent_or_malformed_domain():
         provider = saml_federation_provider_row(app)
         assert provider is not None
         assert provider["acs_ids"] == []
-        assert any("settings.app.domain" in item for item in provider["route_diagnostics"])
+        assert any(
+            "settings.app.domain" in item for item in provider["route_diagnostics"]
+        )
 
 
 def test_github_organization_oin_route_uses_recognized_org_setting():
@@ -450,9 +573,7 @@ def test_github_organization_oin_route_uses_recognized_org_setting():
     rows = saml_acs_rows(app)
 
     assert len(rows) == 1
-    assert rows[0]["acs_url"] == (
-        "https://github.com/orgs/k-nexus-global/saml/consume"
-    )
+    assert rows[0]["acs_url"] == ("https://github.com/orgs/k-nexus-global/saml/consume")
     assert rows[0]["sp_entity_id"] == "https://github.com/orgs/k-nexus-global"
     assert rows[0]["target_product_family"] == "github_organization"
     assert rows[0]["acs_source_field"] == "settings.app.githubOrg"
@@ -475,14 +596,10 @@ def test_explicit_generic_route_wins_over_conflicting_oin_default():
 
     assert len(rows) == 1
     assert rows[0]["acs_url"] == "https://explicit.example.test/saml/consume"
-    assert rows[0]["sp_entity_id"] == (
-        "https://explicit.example.test/saml/metadata"
-    )
+    assert rows[0]["sp_entity_id"] == ("https://explicit.example.test/saml/metadata")
     assert rows[0]["extraction_mode"] == "explicit_generic"
     assert rows[0]["acs_source_field"] == "settings.signOn.ssoAcsUrlOverride"
-    assert rows[0]["sp_entity_source_field"] == (
-        "settings.signOn.audienceOverride"
-    )
+    assert rows[0]["sp_entity_source_field"] == ("settings.signOn.audienceOverride")
     assert rows[0]["route_conflicts"] == [
         "explicit_generic_route_overrides_conflicting_oin_route"
     ]
@@ -722,15 +839,153 @@ def test_saml_has_account_types_entra_object_id_from_resolved_link() -> None:
         idp_subject_user_name_template="idpuser.email",
     )
 
-    account = next(
-        edge for edge in idp_user.edges if edge.kind == ek.SAML_HAS_ACCOUNT
-    )
+    account = next(edge for edge in idp_user.edges if edge.kind == ek.SAML_HAS_ACCOUNT)
 
     assert account.properties.email_match_values == ["alice@example.test"]
     assert account.properties.entra_object_id_match_values == [object_id]
     assert account.properties.scoped_exact_match_values == []
 
-    inbound_sso = next(
-        edge for edge in idp_user.edges if edge.kind == ek.INBOUND_SSO
-    )
+    inbound_sso = next(edge for edge in idp_user.edges if edge.kind == ek.INBOUND_SSO)
     assert inbound_sso.start.value == object_id.upper()
+
+
+def test_inbound_automatic_username_policy_emits_canonical_rule_and_accounts():
+    idp = _identity_provider(policy=_automatic_username_policy())
+
+    rule_row = saml_account_resolution_rule_row(idp)
+    field_row = saml_account_resolution_field_row(idp)
+    service_provider_row = saml_service_provider_row(idp)
+
+    assert rule_row == {
+        "id": "okta:saml:account-resolution-rule:0oa_idp",
+        "idp_id": "0oa_idp",
+        "idp_name": "Example inbound SAML",
+        "field_id": "okta:saml:account-resolution-field:0oa_idp:login",
+        "expression_language": "cel",
+        "expression_profile": ACCOUNT_RESOLUTION_PROFILE,
+        "expression": (
+            'account.fields.exists(field, field.name == "login" && '
+            "assertion.email_match_values.exists(value, value in "
+            "field.match_values))"
+        ),
+        "summary": ('Any assertion email value exactly matches account field "login"'),
+    }
+    assert field_row == {
+        "id": "okta:saml:account-resolution-field:0oa_idp:login",
+        "idp_id": "0oa_idp",
+        "idp_name": "Example inbound SAML",
+        "account_field_name": "login",
+    }
+    assert service_provider_row is not None
+    assert service_provider_row["account_resolution_rule_id"] == rule_row["id"]
+    assert service_provider_row["account_resolution_field_id"] == field_row["id"]
+    assert service_provider_row["account_resolution_diagnostics"] == []
+
+    rule = SamlAccountResolutionRule.model_validate(rule_row)
+    field = SamlAccountResolutionField.model_validate(field_row)
+    assert [edge.kind for edge in rule.edges] == [ek.SAML_USES_ACCOUNT_RESOLUTION_FIELD]
+    assert list(field.edges) == []
+
+    service_provider = SamlServiceProvider.model_validate(service_provider_row)
+    service_provider._lookup = _SamlLookup(
+        accounts=(
+            ("00u_enabled", "ACTIVE", "alice@example.test"),
+            ("00u_blocked", "SUSPENDED", "blocked@example.test"),
+            ("00u_missing", None, None),
+        )
+    )
+    edges = list(service_provider.edges)
+    assert ek.SAML_HAS_ACCOUNT_RESOLUTION_RULE in {edge.kind for edge in edges}
+    account_edges = [edge for edge in edges if edge.kind == ek.SAML_HAS_ACCOUNT]
+    value_edges = [
+        edge for edge in edges if edge.kind == ek.SAML_HAS_ACCOUNT_RESOLUTION_VALUE
+    ]
+    assert [edge.end.value for edge in account_edges] == [
+        "00u_enabled",
+        "00u_blocked",
+    ]
+    assert [edge.properties.account_state for edge in account_edges] == [
+        "enabled",
+        "suspended",
+    ]
+    assert all(edge.properties.direct_binding is False for edge in account_edges)
+    assert [edge.properties.canonical_match_values for edge in value_edges] == [
+        ["alice@example.test"],
+        ["blocked@example.test"],
+    ]
+
+
+def test_inbound_subject_nameid_policy_uses_route_scoped_exact_values():
+    row = saml_account_resolution_rule_row(
+        _identity_provider(policy=_automatic_username_policy("saml.subjectNameId"))
+    )
+
+    assert row is not None
+    assert "assertion.scoped_exact_match_values" in row["expression"]
+    assert row["summary"] == (
+        'Any assertion route-scoped exact value exactly matches account field "login"'
+    )
+
+
+def test_incomplete_or_conflicting_inbound_policy_fails_closed_with_diagnostic():
+    invalid_policies = [
+        None,
+        _automatic_username_policy("idpuser.unsupported"),
+        {
+            **_automatic_username_policy(),
+            "accountLink": {"action": "DISABLED", "filter": None},
+        },
+        {
+            **_automatic_username_policy(),
+            "subject": {
+                **_automatic_username_policy()["subject"],
+                "matchType": "USERNAME_OR_EMAIL",
+            },
+        },
+        {
+            **_automatic_username_policy(),
+            "subject": {
+                **_automatic_username_policy()["subject"],
+                "filter": "^.+@example.test$",
+            },
+        },
+        {
+            **_automatic_username_policy(),
+            "transformedUsernameMatchingEnabled": True,
+        },
+    ]
+
+    for policy in invalid_policies:
+        idp = _identity_provider(policy=policy)
+        service_provider = saml_service_provider_row(idp)
+
+        assert saml_account_resolution_rule_row(idp) is None
+        assert saml_account_resolution_field_row(idp) is None
+        assert service_provider is not None
+        assert service_provider["account_resolution_rule_id"] is None
+        assert service_provider["account_resolution_diagnostics"]
+
+
+def test_direct_idp_user_binding_uses_authoritative_okta_lifecycle_state():
+    expected = {
+        "ACTIVE": "enabled",
+        "SUSPENDED": "suspended",
+        "DEPROVISIONED": "deprovisioned",
+        "LOCKED_OUT": "login_blocked",
+        "PASSWORD_EXPIRED": "unknown",
+        None: "unknown",
+    }
+
+    for native_status, normalized_status in expected.items():
+        idp_user = _idp_user()
+        idp_user._lookup = _SamlLookup(status=native_status)
+        account = next(
+            edge for edge in idp_user.edges if edge.kind == ek.SAML_HAS_ACCOUNT
+        )
+
+        assert normalize_okta_account_state(native_status) == normalized_status
+        assert account.properties.account_state == normalized_status
+        assert account.properties.direct_binding is True
+        assert account.properties.direct_binding_source == (
+            "GET /api/v1/idps/{idpId}/users"
+        )

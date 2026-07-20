@@ -29,6 +29,8 @@ from .realm import Realm
 from .resource import Resource
 from .resource_set import ResourceSet
 from .saml import (
+    SamlAccountResolutionField,
+    SamlAccountResolutionRule,
     SamlAssertionConsumerService,
     SamlClaimMapping,
     SamlFederationProvider,
@@ -74,6 +76,8 @@ __all__ = [
     "IDPUser",
     "PolicyType",
     "Resource",
+    "SamlAccountResolutionField",
+    "SamlAccountResolutionRule",
     "SamlAssertionConsumerService",
     "SamlClaimMapping",
     "SamlFederationProvider",

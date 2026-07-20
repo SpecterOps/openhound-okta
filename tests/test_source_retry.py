@@ -467,6 +467,7 @@ def test_identity_provider_users_request_the_maximum_page_size():
             "idp_id": "0oa123",
             "idp_name": "example_idp",
             "idp_type": "SAML2",
+            "idp_protocol_type": None,
             "idp_status": "ACTIVE",
             "idp_url": "https://idp.example.test",
             "idp_subject_user_name_template": None,

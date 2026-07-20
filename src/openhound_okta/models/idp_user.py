@@ -11,6 +11,7 @@ from openhound_okta.models.saml import (
     saml_idp_user_identity_evidence,
     saml_match_source,
     saml_service_provider_id,
+    normalize_okta_account_state,
 )
 
 
@@ -71,6 +72,7 @@ class IDPUser(BaseAsset):
     # Additional
     idp_id: str
     idp_type: str
+    idp_protocol_type: str | None = None
     idp_name: str
     idp_status: str | None = None
     idp_url: str | None = None
@@ -84,9 +86,7 @@ class IDPUser(BaseAsset):
 
     @property
     def _inbound_sso_edge(self):
-        entra_object_id = (
-            self.profile.ms_object_identifier if self.profile else None
-        )
+        entra_object_id = self.profile.ms_object_identifier if self.profile else None
         if (
             self.idp_type == "SAML2"
             and self.idp_url
@@ -111,7 +111,7 @@ class IDPUser(BaseAsset):
 
     @property
     def _saml_has_account_edge(self):
-        if self.idp_type != "SAML2":
+        if self.idp_type != "SAML2" or self.idp_protocol_type != "SAML2":
             return
         if self.idp_status and self.idp_status != "ACTIVE":
             return
@@ -119,6 +119,13 @@ class IDPUser(BaseAsset):
         evidence = saml_idp_user_identity_evidence(self)
         if not evidence["match_values"]:
             return
+        try:
+            lookup = self._lookup
+        except AttributeError:
+            account_state = "unknown"
+        else:
+            account_state = normalize_okta_account_state(lookup.user_status(self.id))
+
         yield Edge(
             kind=ek.SAML_HAS_ACCOUNT,
             start=EdgePath(value=saml_service_provider_id(self.idp_id), match_by="id"),
@@ -127,14 +134,10 @@ class IDPUser(BaseAsset):
                 traversable=False,
                 match_values=evidence["match_values"],
                 email_match_values=evidence["email_match_values"],
-                entra_object_id_match_values=evidence[
-                    "entra_object_id_match_values"
-                ],
-                scoped_exact_match_values=evidence[
-                    "scoped_exact_match_values"
-                ],
+                entra_object_id_match_values=evidence["entra_object_id_match_values"],
+                scoped_exact_match_values=evidence["scoped_exact_match_values"],
                 source_property=saml_match_source(self.idp_subject_user_name_template),
-                account_state="unknown",
+                account_state=account_state,
                 direct_binding=True,
                 direct_binding_source="GET /api/v1/idps/{idpId}/users",
             ),

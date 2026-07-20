@@ -6,7 +6,7 @@ from uuid import UUID
 
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
 from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 
 from openhound_okta.graph import OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek
@@ -15,10 +15,9 @@ from openhound_okta.main import app
 
 
 SAML_CONTRACT_VERSION = "opengraph-saml-v0.3.0"
+ACCOUNT_RESOLUTION_PROFILE = "saml_account_resolution_v1"
 EMAIL_NAME_ID_FORMAT = "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
-UNSPECIFIED_NAME_ID_FORMAT = (
-    "urn:oasis:names:tc:SAML:1.0:nameid-format:unspecified"
-)
+UNSPECIFIED_NAME_ID_FORMAT = "urn:oasis:names:tc:SAML:1.0:nameid-format:unspecified"
 UNSPECIFIED_ATTRIBUTE_NAME_FORMAT = (
     "urn:oasis:names:tc:SAML:2.0:attrname-format:unspecified"
 )
@@ -68,6 +67,14 @@ def saml_trusted_issuer_id(idp_id: str) -> str:
 
 def saml_sp_acs_id(idp_id: str, index: int = 0) -> str:
     return f"okta:saml:sp-acs:{idp_id}:{index}"
+
+
+def saml_account_resolution_rule_id(idp_id: str) -> str:
+    return f"okta:saml:account-resolution-rule:{idp_id}"
+
+
+def saml_account_resolution_field_id(idp_id: str) -> str:
+    return f"okta:saml:account-resolution-field:{idp_id}:login"
 
 
 def _sign_on(application) -> Any:
@@ -183,15 +190,15 @@ def _primary_explicit_acs(sign_on: Any) -> tuple[str | None, str | None]:
             "settings.signOn.destination",
         ),
     ]
-    return next(((value, source) for value, source in candidates if value), (None, None))
+    return next(
+        ((value, source) for value, source in candidates if value), (None, None)
+    )
 
 
 def _explicit_acs_endpoints(sign_on: Any) -> list[tuple[Any, str]]:
     direct = [
         (endpoint, f"settings.signOn.acsEndpoints[{index}].url")
-        for index, endpoint in enumerate(
-            getattr(sign_on, "acs_endpoints", None) or []
-        )
+        for index, endpoint in enumerate(getattr(sign_on, "acs_endpoints", None) or [])
     ]
     assertion_encryption = getattr(sign_on, "assertion_encryption", None)
     encrypted = [
@@ -215,9 +222,7 @@ def _explicit_saml_routes(application) -> _ExplicitRouteExtraction:
     primary_acs_url, primary_acs_source = _primary_explicit_acs(sign_on)
     acs_candidates: list[tuple[str, str, int | None, str | None, bool | None]] = []
     if primary_acs_url and primary_acs_source:
-        acs_candidates.append(
-            (primary_acs_url, primary_acs_source, 0, None, True)
-        )
+        acs_candidates.append((primary_acs_url, primary_acs_source, 0, None, True))
     for endpoint, source_field in _explicit_acs_endpoints(sign_on):
         acs_url = _clean(getattr(endpoint, "url", None))
         if acs_url:
@@ -351,9 +356,7 @@ def _oin_saml_route(
         org_field = "githubOrg" if app_settings.get("githubOrg") else "orgName"
         org_name = _valid_github_slug(app_settings.get(org_field))
         if not org_name:
-            return None, [
-                "missing_or_malformed_settings.app.githubOrg_or_orgName"
-            ]
+            return None, ["missing_or_malformed_settings.app.githubOrg_or_orgName"]
         source_field = f"settings.app.{org_field}"
         return (
             _SamlRouteEvidence(
@@ -390,10 +393,14 @@ def _saml_routes(
         explicit_keys = {
             (route.acs_url, route.sp_entity_id) for route in explicit.routes
         }
-        if oin_route and (
-            oin_route.acs_url,
-            oin_route.sp_entity_id,
-        ) not in explicit_keys:
+        if (
+            oin_route
+            and (
+                oin_route.acs_url,
+                oin_route.sp_entity_id,
+            )
+            not in explicit_keys
+        ):
             conflict = "explicit_generic_route_overrides_conflicting_oin_route"
             diagnostics.append(conflict)
             return [
@@ -409,10 +416,7 @@ def _saml_routes(
         partial_conflicts = []
         if explicit.acs_urls and oin_route.acs_url not in explicit.acs_urls:
             partial_conflicts.append("partial_explicit_acs_conflicts_with_oin_route")
-        if (
-            explicit.sp_entity_id
-            and explicit.sp_entity_id != oin_route.sp_entity_id
-        ):
+        if explicit.sp_entity_id and explicit.sp_entity_id != oin_route.sp_entity_id:
             partial_conflicts.append(
                 "partial_explicit_sp_entity_conflicts_with_oin_route"
             )
@@ -494,9 +498,7 @@ def saml_application_identity_evidence(
 ) -> dict[str, list[str]]:
     """Resolve the effective outbound NameID without guessing identity families."""
 
-    subject_template = getattr(
-        application_user, "app_subject_name_id_template", None
-    )
+    subject_template = getattr(application_user, "app_subject_name_id_template", None)
     template = subject_template or getattr(
         application_user, "app_user_name_template", None
     )
@@ -547,11 +549,7 @@ def saml_idp_user_identity_evidence(idp_user: Any) -> dict[str, list[str]]:
     )
     entra_object_ids: list[str] = []
     idp_url = _clean(getattr(idp_user, "idp_url", None))
-    if (
-        ms_object_identifier
-        and idp_url
-        and "microsoftonline.com" in idp_url.casefold()
-    ):
+    if ms_object_identifier and idp_url and "microsoftonline.com" in idp_url.casefold():
         try:
             entra_object_ids.append(str(UUID(ms_object_identifier)))
         except ValueError:
@@ -625,6 +623,105 @@ def is_saml_identity_provider(identity_provider) -> bool:
     )
 
 
+def normalize_okta_account_state(status: Any) -> str:
+    """Map authoritative Okta lifecycle status to the v0.3 vocabulary."""
+
+    native_status = _clean(status)
+    if native_status is None:
+        return "unknown"
+    return {
+        "ACTIVE": "enabled",
+        "SUSPENDED": "suspended",
+        "DEPROVISIONED": "deprovisioned",
+        "LOCKED_OUT": "login_blocked",
+    }.get(native_status, "unknown")
+
+
+@dataclass(frozen=True)
+class _AccountResolutionEvidence:
+    assertion_field: str | None = None
+    expression: str | None = None
+    summary: str | None = None
+    diagnostics: tuple[str, ...] = ()
+
+
+def _empty_policy_filter(value: Any) -> bool:
+    return value is None or value == "" or value == {} or value == []
+
+
+def _account_resolution_evidence(identity_provider) -> _AccountResolutionEvidence:
+    """Fail closed unless Okta fully proves automatic exact login matching."""
+
+    if not is_saml_identity_provider(identity_provider):
+        return _AccountResolutionEvidence()
+
+    policy = getattr(identity_provider, "policy", None)
+    if policy is None:
+        return _AccountResolutionEvidence(
+            diagnostics=("missing_identity_provider_policy",)
+        )
+
+    account_link = getattr(policy, "account_link", None)
+    subject = getattr(policy, "subject", None)
+    diagnostics: list[str] = []
+    if not isinstance(account_link, dict):
+        diagnostics.append("missing_policy.accountLink")
+        account_link = {}
+    if not isinstance(subject, dict):
+        diagnostics.append("missing_policy.subject")
+        subject = {}
+
+    if _clean(account_link.get("action")) != "AUTO":
+        diagnostics.append("policy.accountLink.action_must_be_AUTO")
+    if not _empty_policy_filter(account_link.get("filter")):
+        diagnostics.append("policy.accountLink.filter_is_scoped_or_unsupported")
+
+    if _clean(subject.get("matchType")) != "USERNAME":
+        diagnostics.append("policy.subject.matchType_must_be_USERNAME")
+    if not _empty_policy_filter(subject.get("filter")):
+        diagnostics.append("policy.subject.filter_is_unsupported")
+    if not _empty_policy_filter(subject.get("matchAttribute")):
+        diagnostics.append("policy.subject.matchAttribute_conflicts_with_username")
+    if getattr(policy, "transformed_username_matching_enabled", None) is True:
+        diagnostics.append("transformed_username_matching_is_unsupported")
+
+    user_name_template = subject.get("userNameTemplate")
+    template = (
+        _clean(user_name_template.get("template"))
+        if isinstance(user_name_template, dict)
+        else None
+    )
+    assertion_field = (
+        {
+            "idpuser.email": "email_match_values",
+            "idpuser.subjectNameId": "scoped_exact_match_values",
+            "saml.subjectNameId": "scoped_exact_match_values",
+        }.get(template)
+        if template is not None
+        else None
+    )
+    if assertion_field is None:
+        diagnostics.append("policy.subject.userNameTemplate_is_unsupported")
+
+    if diagnostics:
+        return _AccountResolutionEvidence(diagnostics=tuple(diagnostics))
+
+    assert assertion_field is not None
+    assertion_label = {
+        "email_match_values": "email value",
+        "scoped_exact_match_values": "route-scoped exact value",
+    }[assertion_field]
+    return _AccountResolutionEvidence(
+        assertion_field=assertion_field,
+        expression=(
+            'account.fields.exists(field, field.name == "login" && '
+            f"assertion.{assertion_field}.exists(value, value in "
+            "field.match_values))"
+        ),
+        summary=f'Any assertion {assertion_label} exactly matches account field "login"',
+    )
+
+
 def _idp_trust(identity_provider) -> Any:
     protocol = getattr(identity_provider, "protocol", None)
     credentials = getattr(protocol, "credentials", None)
@@ -683,9 +780,7 @@ def saml_claim_mapping_rows(application) -> list[dict[str, Any]]:
         user_name_template = _clean(user_name_template_value.get("template"))
 
     if subject_template or user_name_template:
-        native_format = _clean(
-            getattr(sign_on, "subject_name_id_format", None)
-        )
+        native_format = _clean(getattr(sign_on, "subject_name_id_format", None))
         rows.append(
             {
                 "id": saml_claim_mapping_id(application.id, len(rows)),
@@ -818,6 +913,12 @@ def saml_service_provider_row(identity_provider) -> dict[str, Any] | None:
 
     issuer = _trusted_issuer(identity_provider)
     acs_rows = saml_sp_acs_rows(identity_provider)
+    resolution = _account_resolution_evidence(identity_provider)
+    rule_id = (
+        saml_account_resolution_rule_id(identity_provider.id)
+        if resolution.expression
+        else None
+    )
     return {
         "id": saml_service_provider_id(identity_provider.id),
         "idp_id": identity_provider.id,
@@ -827,7 +928,44 @@ def saml_service_provider_row(identity_provider) -> dict[str, Any] | None:
         "sp_entity_id": _trusted_audience(identity_provider),
         "issuer_id": saml_trusted_issuer_id(identity_provider.id) if issuer else None,
         "acs_ids": [row["id"] for row in acs_rows],
+        "account_resolution_rule_id": rule_id,
+        "account_resolution_field_id": (
+            saml_account_resolution_field_id(identity_provider.id) if rule_id else None
+        ),
+        "account_resolution_diagnostics": list(resolution.diagnostics),
         "enabled": identity_provider.status == "ACTIVE",
+    }
+
+
+def saml_account_resolution_rule_row(
+    identity_provider,
+) -> dict[str, Any] | None:
+    resolution = _account_resolution_evidence(identity_provider)
+    if not resolution.expression or not resolution.summary:
+        return None
+    return {
+        "id": saml_account_resolution_rule_id(identity_provider.id),
+        "idp_id": identity_provider.id,
+        "idp_name": identity_provider.name,
+        "field_id": saml_account_resolution_field_id(identity_provider.id),
+        "expression_language": "cel",
+        "expression_profile": ACCOUNT_RESOLUTION_PROFILE,
+        "expression": resolution.expression,
+        "summary": resolution.summary,
+    }
+
+
+def saml_account_resolution_field_row(
+    identity_provider,
+) -> dict[str, Any] | None:
+    resolution = _account_resolution_evidence(identity_provider)
+    if not resolution.expression:
+        return None
+    return {
+        "id": saml_account_resolution_field_id(identity_provider.id),
+        "idp_id": identity_provider.id,
+        "idp_name": identity_provider.name,
+        "account_field_name": "login",
     }
 
 
@@ -991,6 +1129,30 @@ class SamlServiceProviderProperties(OktaNodeProperties):
     idp_status: str
     sp_entity_id: str | None = None
     enabled: bool = False
+    account_resolution_diagnostics: list[str] = dc_field(default_factory=list)
+    schema_contract_version: str = SAML_CONTRACT_VERSION
+
+
+@dataclass
+class SamlAccountResolutionRuleProperties(OktaNodeProperties):
+    """Properties for a source-proven Okta account-resolution rule."""
+
+    idp_id: str
+    idp_name: str
+    expression_language: str
+    expression_profile: str
+    expression: str
+    summary: str
+    schema_contract_version: str = SAML_CONTRACT_VERSION
+
+
+@dataclass
+class SamlAccountResolutionFieldProperties(OktaNodeProperties):
+    """Properties for the Okta login field used by an inbound SAML policy."""
+
+    idp_id: str
+    idp_name: str
+    account_field_name: str
     schema_contract_version: str = SAML_CONTRACT_VERSION
 
 
@@ -1078,6 +1240,16 @@ class SamlAccountEdgeProperties(SamlMatchValuesEdgeProperties):
     entra_object_id_match_values: list[str] = dc_field(default_factory=list)
     direct_binding: bool = False
     direct_binding_source: str | None = None
+
+
+@dataclass
+class SamlResolutionValueEdgeProperties(EdgeProperties):
+    """Source and canonical values for an exceptional account field."""
+
+    match_values: list[str] = dc_field(default_factory=list)
+    canonical_match_values: list[str] = dc_field(default_factory=list)
+    incomplete: bool = False
+    schema_contract_version: str = SAML_CONTRACT_VERSION
 
 
 @app.asset(
@@ -1194,6 +1366,19 @@ class SamlFederationProvider(BaseAsset):
 )
 class SamlClaimMapping(BaseAsset):
     model_config = ConfigDict(populate_by_name=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def hydrate_legacy_claim_type(cls, value):
+        """Keep v0.2 collections convertible after the v0.3 schema upgrade."""
+        if not isinstance(value, dict) or value.get("claim_type"):
+            return value
+        mapping_type = value.get("mapping_type")
+        if not mapping_type:
+            return value
+        hydrated = dict(value)
+        hydrated["claim_type"] = "name_id" if mapping_type == "name_id" else "attribute"
+        return hydrated
 
     id: str
     app_id: str
@@ -1411,6 +1596,27 @@ class SamlServiceProviderAssertionConsumerService(SamlAssertionConsumerService):
             description="SAML service provider owns an ACS route",
             traversable=False,
         ),
+        EdgeDef(
+            start=nk.SAML_SERVICE_PROVIDER,
+            end=nk.SAML_ACCOUNT_RESOLUTION_RULE,
+            kind=ek.SAML_HAS_ACCOUNT_RESOLUTION_RULE,
+            description="SAML service provider uses an exact Okta login-resolution rule",
+            traversable=False,
+        ),
+        EdgeDef(
+            start=nk.SAML_SERVICE_PROVIDER,
+            end=nk.USER,
+            kind=ek.SAML_HAS_ACCOUNT,
+            description="SAML service provider can resolve assertions to an Okta account",
+            traversable=False,
+        ),
+        EdgeDef(
+            start=nk.USER,
+            end=nk.SAML_ACCOUNT_RESOLUTION_FIELD,
+            kind=ek.SAML_HAS_ACCOUNT_RESOLUTION_VALUE,
+            description="Okta account supplies an exact login-resolution value",
+            traversable=False,
+        ),
     ],
 )
 class SamlServiceProvider(BaseAsset):
@@ -1424,6 +1630,9 @@ class SamlServiceProvider(BaseAsset):
     sp_entity_id: str | None = None
     issuer_id: str | None = None
     acs_ids: list[str] = Field(default_factory=list)
+    account_resolution_rule_id: str | None = None
+    account_resolution_field_id: str | None = None
+    account_resolution_diagnostics: list[str] = Field(default_factory=list)
     enabled: bool
 
     @property
@@ -1443,9 +1652,54 @@ class SamlServiceProvider(BaseAsset):
                 idp_status=self.idp_status,
                 sp_entity_id=self.sp_entity_id,
                 enabled=self.enabled,
+                account_resolution_diagnostics=self.account_resolution_diagnostics,
                 schema_contract_version=SAML_CONTRACT_VERSION,
             ),
         )
+
+    @property
+    def _account_resolution_edges(self):
+        if not self.account_resolution_rule_id or not self.account_resolution_field_id:
+            return
+
+        yield Edge(
+            kind=ek.SAML_HAS_ACCOUNT_RESOLUTION_RULE,
+            start=EdgePath(value=self.id, match_by="id"),
+            end=EdgePath(value=self.account_resolution_rule_id, match_by="id"),
+            properties=SamlRelationshipProperties(traversable=False),
+        )
+
+        try:
+            lookup = self._lookup
+        except AttributeError:
+            return
+
+        for account_id, native_status, login in lookup.iter_user_saml_accounts():
+            match_values = _dedupe([login])
+            if not match_values:
+                continue
+            yield Edge(
+                kind=ek.SAML_HAS_ACCOUNT,
+                start=EdgePath(value=self.id, match_by="id"),
+                end=EdgePath(value=account_id, match_by="id"),
+                properties=SamlAccountEdgeProperties(
+                    traversable=False,
+                    match_values=match_values,
+                    source_property="profile.login",
+                    account_state=normalize_okta_account_state(native_status),
+                    direct_binding=False,
+                ),
+            )
+            yield Edge(
+                kind=ek.SAML_HAS_ACCOUNT_RESOLUTION_VALUE,
+                start=EdgePath(value=account_id, match_by="id"),
+                end=EdgePath(value=self.account_resolution_field_id, match_by="id"),
+                properties=SamlResolutionValueEdgeProperties(
+                    traversable=False,
+                    match_values=match_values,
+                    canonical_match_values=match_values,
+                ),
+            )
 
     @property
     def edges(self):
@@ -1469,3 +1723,103 @@ class SamlServiceProvider(BaseAsset):
                 end=EdgePath(value=acs_id, match_by="id"),
                 properties=SamlRelationshipProperties(traversable=False),
             )
+        yield from self._account_resolution_edges
+
+
+@app.asset(
+    node=NodeDef(
+        icon="link",
+        kind=nk.SAML_ACCOUNT_RESOLUTION_RULE,
+        description="Normalized source-proven Okta account-resolution rule",
+        properties=SamlAccountResolutionRuleProperties,
+    ),
+    edges=[
+        EdgeDef(
+            start=nk.SAML_ACCOUNT_RESOLUTION_RULE,
+            end=nk.SAML_ACCOUNT_RESOLUTION_FIELD,
+            kind=ek.SAML_USES_ACCOUNT_RESOLUTION_FIELD,
+            description="Okta account-resolution rule reads the native login field",
+            traversable=False,
+        )
+    ],
+)
+class SamlAccountResolutionRule(BaseAsset):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    idp_id: str
+    idp_name: str
+    field_id: str
+    expression_language: str
+    expression_profile: str
+    expression: str
+    summary: str
+
+    @property
+    def as_node(self):
+        return OktaNode(
+            kinds=[nk.SAML_ACCOUNT_RESOLUTION_RULE],
+            properties=SamlAccountResolutionRuleProperties(
+                tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
+                id=self.id,
+                name=f"{self.idp_name} exact login resolution",
+                displayname=f"{self.idp_name} exact login resolution",
+                environmentid=self._lookup.org_id(),
+                idp_id=self.idp_id,
+                idp_name=self.idp_name,
+                expression_language=self.expression_language,
+                expression_profile=self.expression_profile,
+                expression=self.expression,
+                summary=self.summary,
+                schema_contract_version=SAML_CONTRACT_VERSION,
+            ),
+        )
+
+    @property
+    def edges(self):
+        yield Edge(
+            kind=ek.SAML_USES_ACCOUNT_RESOLUTION_FIELD,
+            start=EdgePath(value=self.id, match_by="id"),
+            end=EdgePath(value=self.field_id, match_by="id"),
+            properties=SamlRelationshipProperties(traversable=False),
+        )
+
+
+@app.asset(
+    node=NodeDef(
+        icon="tag",
+        kind=nk.SAML_ACCOUNT_RESOLUTION_FIELD,
+        description="Normalized Okta login field used for SAML account resolution",
+        properties=SamlAccountResolutionFieldProperties,
+    ),
+)
+class SamlAccountResolutionField(BaseAsset):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    idp_id: str
+    idp_name: str
+    account_field_name: str
+
+    @property
+    def as_node(self):
+        return OktaNode(
+            kinds=[nk.SAML_ACCOUNT_RESOLUTION_FIELD],
+            properties=SamlAccountResolutionFieldProperties(
+                tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
+                id=self.id,
+                name=self.account_field_name,
+                displayname=f"{self.idp_name} account {self.account_field_name}",
+                environmentid=self._lookup.org_id(),
+                idp_id=self.idp_id,
+                idp_name=self.idp_name,
+                account_field_name=self.account_field_name,
+                schema_contract_version=SAML_CONTRACT_VERSION,
+            ),
+        )
+
+    @property
+    def edges(self):
+        return iter(())
