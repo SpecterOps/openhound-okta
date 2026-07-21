@@ -1,3 +1,5 @@
+from urllib.parse import urlparse
+
 import dlt
 from dlt.extract.source import DltSource
 from openhound.core.app import OpenHound
@@ -9,6 +11,22 @@ from openhound_okta.lookup import OktaLookup
 from openhound_okta.transforms import transforms
 
 app = OpenHound("okta", source_kind="Okta", help="OpenGraph collector for Okta")
+
+
+def _tenant_domain_from_config() -> str:
+    # DLT resolves source environment variables under sources.okta, while existing
+    # secrets.toml bundles use sources.source.okta. Check both so a missing value
+    # cannot become b"" and leak DLT's U+F02B bytes marker into tenant_domain.
+    tenant_url: str | None = dlt.secrets.get(
+        "sources.okta.credentials.base_url"
+    ) or dlt.secrets.get("sources.source.okta.credentials.base_url")
+    if not isinstance(tenant_url, str) or not tenant_url.strip():
+        raise ValueError("Okta base URL is unavailable during conversion")
+
+    tenant_domain = urlparse(tenant_url.strip()).netloc
+    if not tenant_domain:
+        raise ValueError("Okta base URL must include a URL scheme and hostname")
+    return tenant_domain
 
 
 @app.collect()
@@ -31,10 +49,8 @@ def convert(ctx: ConvertContext):
         ctx (ConvertContext): Returns DLT pipeline context.
     """
     from openhound_okta.source import source as okta_source
-    from urllib.parse import urlparse
 
-    tenant_url = dlt.secrets.get("sources.source.okta.credentials.base_url")
-    return okta_source(), {"tenant": urlparse(tenant_url).netloc}
+    return okta_source(), {"tenant": _tenant_domain_from_config()}
 
 
 @app.preproc(transformer=transforms)
