@@ -20,6 +20,7 @@ from openhound_okta.main import app
 class ApplicationProperties(OktaNodeProperties):
     """Properties for the Okta_ApplicationNode node"""
 
+    app_type: str
     label: str
     status: str
     created: datetime
@@ -112,14 +113,16 @@ class Application(BaseAsset):
 
     @property
     def as_node(self):
+        display_name = self.label or self.name
         return OktaNode(
             kinds=[nk.APPLICATION],
             properties=ApplicationProperties(
                 tenant=self._lookup.org_id(),
                 tenant_domain=self._extras["tenant"],
                 id=self.id,
-                name=self.name,
-                displayname=self.label or self.name,
+                name=display_name,
+                displayname=display_name,
+                app_type=self.name,
                 label=self.label,
                 status=self.status,
                 created=self.created,
