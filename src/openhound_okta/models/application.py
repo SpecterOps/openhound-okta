@@ -214,12 +214,63 @@ class OauthClientSettings(BaseModel):
     initiate_login_uri: str | None = Field(default=None, alias="initiateLoginUri")
 
 
-class SignOnSettings(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+class SamlAcsEndpoint(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
 
+    url: str | None = None
+    index: int | None = None
+    binding: str | None = None
+    is_default: bool | None = Field(default=None, alias="isDefault")
+
+
+class AssertionEncryptionSettings(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    acs_endpoints: list[SamlAcsEndpoint] = Field(
+        default_factory=list,
+        alias="acsEndpoints",
+    )
+
+
+class SignOnSettings(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    idp_issuer: str | None = Field(default=None, alias="idpIssuer")
     sso_acs_url: str | None = Field(default=None, alias="ssoAcsUrl")
     sso_acs_url_override: str | None = Field(default=None, alias="ssoAcsUrlOverride")
     login_url: str | None = Field(default=None, alias="loginUrl")
+    sp_issuer: str | None = Field(default=None, alias="spIssuer")
+    audience: str | None = None
+    audience_override: str | None = Field(default=None, alias="audienceOverride")
+    recipient: str | None = None
+    recipient_override: str | None = Field(default=None, alias="recipientOverride")
+    destination: str | None = None
+    destination_override: str | None = Field(default=None, alias="destinationOverride")
+    subject_name_id_template: str | None = Field(
+        default=None,
+        alias="subjectNameIdTemplate",
+    )
+    subject_name_id_format: str | None = Field(
+        default=None,
+        alias="subjectNameIdFormat",
+    )
+    attribute_statements: list[dict] = Field(
+        default_factory=list,
+        alias="attributeStatements",
+    )
+    configured_attribute_statements: list[dict] = Field(
+        default_factory=list,
+        alias="configuredAttributeStatements",
+    )
+    acs_endpoints: list[SamlAcsEndpoint] = Field(
+        default_factory=list,
+        alias="acsEndpoints",
+    )
+    assertion_encryption: AssertionEncryptionSettings | None = Field(
+        default=None,
+        alias="assertionEncryption",
+    )
+    slo: dict | None = None
 
 
 class Settings(BaseModel):
@@ -290,6 +341,8 @@ class Application(BaseAsset):
     credentials: Credentials | None = None
     settings: Settings | None = None
     features: list[str] = Field(default_factory=list)
+    saml_metadata_entity_id: str | None = None
+    saml_metadata_sso_url: str | None = None
 
     @property
     def _oauth_client_settings(self) -> OauthClientSettings | None:

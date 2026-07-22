@@ -6,6 +6,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
+from openhound_okta.models.saml import (
+    SamlMatchValuesEdgeProperties,
+    saml_application_identity_evidence,
+    saml_match_source,
+    saml_provider_id,
+)
 
 # To ignore system apps optionally
 SYSTEM_APPS = [
@@ -114,6 +120,13 @@ class Profile(BaseModel):
             traversable=True,
             description="Credentials are synced between okta orgs",
         ),
+        EdgeDef(
+            kind=ek.SAML_ELIGIBLE_FOR,
+            start=nk.USER,
+            end=nk.SAML_FEDERATION_PROVIDER,
+            traversable=False,
+            description="Okta user is eligible for a normalized SAML provider",
+        ),
     ],
 )
 class ApplicationUser(BaseAsset):
@@ -137,6 +150,10 @@ class ApplicationUser(BaseAsset):
     app_name: str
     app_label: str
     app_settings: dict | None = None
+    app_sign_on_mode: str | None = None
+    app_subject_name_id_template: str | None = None
+    app_subject_name_id_format: str | None = None
+    app_user_name_template: str | None = None
 
     # "USER" = directly assigned and "GROUP" = assigned via group membership.
     scope: str = Field(default="USER")
@@ -276,9 +293,34 @@ class ApplicationUser(BaseAsset):
                     )
 
     @property
+    def _saml_eligible_for_edges(self):
+        if self.app_sign_on_mode != "SAML_2_0":
+            return
+        if self.status not in {"ACTIVE", "PROVISIONED"}:
+            return
+        evidence = saml_application_identity_evidence(self)
+        if not evidence["match_values"]:
+            return
+        yield Edge(
+            kind=ek.SAML_ELIGIBLE_FOR,
+            start=EdgePath(value=self.id, match_by="id"),
+            end=EdgePath(value=saml_provider_id(self.app_id), match_by="id"),
+            properties=SamlMatchValuesEdgeProperties(
+                traversable=False,
+                match_values=evidence["match_values"],
+                email_match_values=evidence["email_match_values"],
+                scoped_exact_match_values=evidence["scoped_exact_match_values"],
+                source_property=saml_match_source(
+                    self.app_subject_name_id_template or self.app_user_name_template
+                ),
+            ),
+        )
+
+    @property
     def edges(self):
         yield from self._app_assignment_edge
         yield from self._read_password_updates_edge
         yield from self._user_push_pull_edges
         yield from self._password_sync_edge
         yield from self._okta_org2org_edges
+        yield from self._saml_eligible_for_edges

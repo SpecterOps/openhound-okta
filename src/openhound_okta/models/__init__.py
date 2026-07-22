@@ -31,6 +31,17 @@ from .realm import Realm
 from .resource import Resource
 from .resource_set import ResourceSet
 from .resource_set_role_assignment import ResourceSetRoleAssignment
+from .saml import (
+    SamlAccountResolutionField,
+    SamlAccountResolutionRule,
+    SamlAssertionConsumerService,
+    SamlClaimMapping,
+    SamlFederationProvider,
+    SamlIssuer,
+    SamlServiceProviderAssertionConsumerService,
+    SamlServiceProvider,
+    SamlTrustedIssuer,
+)
 from .user import User
 from .user_factors import UserFactor
 from .user_role_assignment import UserRoleAssignment
@@ -73,4 +84,13 @@ __all__ = [
     "PrivilegedUser",
     "Resource",
     "ResourceSetRoleAssignment",
+    "SamlAccountResolutionField",
+    "SamlAccountResolutionRule",
+    "SamlAssertionConsumerService",
+    "SamlClaimMapping",
+    "SamlFederationProvider",
+    "SamlIssuer",
+    "SamlServiceProviderAssertionConsumerService",
+    "SamlServiceProvider",
+    "SamlTrustedIssuer",
 ]

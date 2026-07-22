@@ -75,6 +75,26 @@ class OktaLookup(LookupManager):
         res = self._find_all_objects(f"""SELECT id FROM {self.schema}.users""")
         return res
 
+    def iter_user_saml_accounts(self):
+        """Stream authoritative Okta account IDs, lifecycle states, and logins."""
+
+        cursor = self.client.execute(
+            f"""
+            SELECT id, status, json_extract_string(profile, '$.login') AS login
+            FROM {self.schema}.users
+            ORDER BY id
+            """
+        )
+        while rows := cursor.fetchmany(1000):
+            yield from rows
+
+    @lru_cache
+    def user_status(self, user_id: str) -> str | None:
+        return self._find_single_object(
+            f"""SELECT status FROM {self.schema}.users WHERE id = ?""",
+            [user_id],
+        )
+
     @lru_cache
     def non_admin_users(self):
         res = self._find_all_objects(f"""SELECT id FROM {self.schema}.non_admin_users""")

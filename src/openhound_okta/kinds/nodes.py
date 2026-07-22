@@ -17,6 +17,15 @@ REALM = "Okta_Realm"
 USER = "Okta_User"
 RESOURCE_SET = "Okta_ResourceSet"
 
+# Normalized OpenGraph-SAML nodes
+SAML_ASSERTION_CONSUMER_SERVICE = "SAML_AssertionConsumerService"
+SAML_ACCOUNT_RESOLUTION_FIELD = "SAML_AccountResolutionField"
+SAML_ACCOUNT_RESOLUTION_RULE = "SAML_AccountResolutionRule"
+SAML_CLAIM_MAPPING = "SAML_ClaimMapping"
+SAML_FEDERATION_PROVIDER = "SAML_FederationProvider"
+SAML_ISSUER = "SAML_Issuer"
+SAML_SERVICE_PROVIDER = "SAML_ServiceProvider"
+
 # Still misssing
 ROLE_ASSIGNMENT = "Okta_RoleAssignment"
 
