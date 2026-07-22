@@ -28,6 +28,7 @@ from .policy_type import PolicyType
 from .realm import Realm
 from .resource import Resource
 from .resource_set import ResourceSet
+from .resource_set_role_assignment import ResourceSetRoleAssignment
 from .user import User
 from .user_role_assignment import UserRoleAssignment
 
@@ -65,4 +66,5 @@ __all__ = [
     "IDPUser",
     "PolicyType",
     "Resource",
+    "ResourceSetRoleAssignment",
 ]

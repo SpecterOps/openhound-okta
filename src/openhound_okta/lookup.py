@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+import duckdb
 from duckdb import DuckDBPyConnection
 from openhound.core.lookup import LookupManager
 
@@ -32,6 +33,14 @@ class OktaLookup(LookupManager):
         return res
 
     @lru_cache
+    def group_by_id(self, group_id: str) -> bool:
+        res = self._find_single_object(
+            f"""SELECT id FROM {self.schema}.groups WHERE id = ?""",
+            [group_id],
+        )
+        return res
+
+    @lru_cache
     def application_settings(self, app_id: str) -> bool:
         res = self._find_single_object(
             f"""SELECT settings FROM {self.schema}.applications WHERE id = ?""",
@@ -55,6 +64,11 @@ class OktaLookup(LookupManager):
         return res
 
     @lru_cache
+    def non_admin_users(self):
+        res = self._find_all_objects(f"""SELECT id FROM {self.schema}.non_admin_users""")
+        return res
+
+    @lru_cache
     def all_api_services(self):
         res = self._find_all_objects(f"""SELECT id FROM {self.schema}.api_services""")
         return res
@@ -65,9 +79,22 @@ class OktaLookup(LookupManager):
         return res
 
     @lru_cache
+    def non_admin_apps(self):
+        res = self._find_all_objects(f"""SELECT id FROM {self.schema}.non_admin_apps""")
+        return res
+
+    @lru_cache
     def application_ids_by_name(self, app_name: str):
         res = self._find_all_objects(
             f"""SELECT id FROM {self.schema}.applications WHERE name = ?""",
+            [app_name],
+        )
+        return res
+
+    @lru_cache
+    def api_service_ids_by_name(self, app_name: str):
+        res = self._find_all_objects(
+            f"""SELECT id FROM {self.schema}.api_services WHERE name = ?""",
             [app_name],
         )
         return res
@@ -87,6 +114,24 @@ class OktaLookup(LookupManager):
         )
 
     @lru_cache
+    def resource_set_non_admin_application_ids(self, resource_set_id: str):
+        resource_set_apps = set(self.resource_set_application_ids(resource_set_id))
+        non_admin_apps = {app_id for (app_id,) in self.non_admin_apps()}
+        return tuple(sorted(resource_set_apps & non_admin_apps))
+
+    @lru_cache
+    def resource_set_user_ids(self, resource_set_id: str):
+        return self._resource_set_resource_ids(
+            resource_set_id, "users", self.all_users()
+        )
+
+    @lru_cache
+    def resource_set_non_admin_user_ids(self, resource_set_id: str):
+        resource_set_users = set(self.resource_set_user_ids(resource_set_id))
+        non_admin_users = {user_id for (user_id,) in self.non_admin_users()}
+        return tuple(sorted(resource_set_users & non_admin_users))
+
+    @lru_cache
     def resource_set_group_ids(self, resource_set_id: str):
         return self._resource_set_resource_ids(
             resource_set_id, "groups", self.all_groups()
@@ -97,6 +142,53 @@ class OktaLookup(LookupManager):
         resource_set_groups = set(self.resource_set_group_ids(resource_set_id))
         non_admin_groups = {group_id for (group_id,) in self.non_admin_groups()}
         return tuple(sorted(resource_set_groups & non_admin_groups))
+
+    @lru_cache
+    def group_user_ids(self, group_ids: tuple[str, ...]):
+        user_ids: set[str] = set()
+        for group_id in group_ids:
+            rows = self._find_all_objects(
+                f"""SELECT id FROM {self.schema}.group_memberships WHERE group_id = ?""",
+                [group_id],
+            )
+            user_ids.update(user_id for (user_id,) in rows)
+        return tuple(sorted(user_ids))
+
+    @lru_cache
+    def role_assignment_exists(self, role_assignment_id: str, assignee_id: str) -> bool:
+        for table in (
+            "user_role_assignments",
+            "group_role_assignments",
+            "client_role_assignments",
+        ):
+            try:
+                result = self._find_single_object(
+                    f"""SELECT id FROM {self.schema}.{table}
+                        WHERE id = ? AND source_id = ?""",
+                    [role_assignment_id, assignee_id],
+                )
+            except duckdb.CatalogException:
+                continue
+
+            if result:
+                return True
+
+        return False
+
+    @lru_cache
+    def role_assignment_resource_set_ids(
+        self, role_assignment_id: str, assignee_id: str
+    ) -> tuple[str, ...]:
+        try:
+            rows = self._find_all_objects(
+                f"""SELECT resource_set_id FROM {self.schema}.resource_set_role_assignments
+                    WHERE id = ? AND assignee_id = ?""",
+                [role_assignment_id, assignee_id],
+            )
+        except duckdb.CatalogException:
+            return ()
+
+        return tuple(sorted({resource_set_id for (resource_set_id,) in rows}))
 
     def _resource_set_resource_ids(
         self, resource_set_id: str, resource_type: str, all_resource_rows

@@ -1,8 +1,10 @@
 import fnmatch
 import logging
 from base64 import b64decode
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Union
+from urllib.parse import urlparse
 
 import dlt
 from dlt.common.configuration import configspec
@@ -43,11 +45,13 @@ from .models import (
     Realm,
     Resource,
     ResourceSet,
+    ResourceSetRoleAssignment,
     User,
     UserRoleAssignment,
 )
 from .models.built_in_role import BUILT_IN_ROLES
 from .models.built_in_role_permission import BUILT_IN_PERMISSIONS
+from .models.role_assignment import DIRECT_ASSIGNMENT_TYPES, GROUP_TARGETED_ROLE_TYPES
 from .utils.auth import OktaAuth
 
 logger = logging.getLogger(__name__)
@@ -83,6 +87,84 @@ API_RATE_LIMIT_ENDPOINTS = [
     "/oauth2/v1/clients*",
     "*",
 ]
+
+
+def _is_direct_active_role_assignment(
+    item: Mapping[str, object], from_resource: str
+) -> bool:
+    return (
+        item.get("status") == "ACTIVE"
+        and item.get("assignmentType") == DIRECT_ASSIGNMENT_TYPES.get(from_resource)
+    )
+
+
+def _last_href_path_segment(href: str | None) -> str | None:
+    if not href:
+        return None
+
+    path = urlparse(href).path.rstrip("/")
+    return path.rsplit("/", 1)[-1] if path else None
+
+
+def _resource_set_binding_assignee_id(member: Mapping[str, object]) -> str | None:
+    links = member.get("_links")
+    if not isinstance(links, Mapping):
+        return None
+
+    link = links.get("self")
+    if isinstance(link, Mapping):
+        return _last_href_path_segment(link.get("href"))
+
+    return None
+
+
+def _role_assignment_base_path(from_resource: str, source_id: str) -> str:
+    if from_resource == "client":
+        return f"/oauth2/v1/clients/{source_id}/roles"
+    return f"/api/v1/{from_resource}s/{source_id}/roles"
+
+
+def _role_assignment_scope(
+    item: Mapping[str, object],
+    from_resource: str,
+    source_id: str,
+    ctx: "SourceContext",
+) -> dict[str, list[object]]:
+    role_type = item.get("type")
+    assignment_id = item.get("id")
+    if not isinstance(assignment_id, str):
+        return {}
+
+    if role_type == "APP_ADMIN":
+        target_path = (
+            f"{_role_assignment_base_path(from_resource, source_id)}"
+            f"/{assignment_id}/targets/catalog/apps"
+        )
+        scope_field = "scope_apps"
+    elif role_type in GROUP_TARGETED_ROLE_TYPES:
+        target_path = (
+            f"{_role_assignment_base_path(from_resource, source_id)}"
+            f"/{assignment_id}/targets/groups"
+        )
+        scope_field = "scope_groups"
+    else:
+        return {}
+
+    targets: list[object] = []
+    try:
+        for page in ctx.pool.paginate(target_path):
+            targets.extend(page)
+    except Exception as e:
+        logger.error(
+            "Error fetching scope for role assignment %s on %s %s: %s",
+            assignment_id,
+            from_resource,
+            source_id,
+            e,
+            extra={"resource": "role_assignment_scope", "phase": "defer"},
+        )
+
+    return {scope_field: targets}
 
 
 @configspec
@@ -367,10 +449,16 @@ def client_applications(ctx: SourceContext):
 def client_role_assignments(client: ClientApplication, ctx: SourceContext):
     if client.application_type == "service":
         for page in ctx.pool.paginate(
-            f"/oauth2/v1/clients/{client.client_id}/roles?expand=targets/catalog/apps&expand=targets/groups"
+            f"/oauth2/v1/clients/{client.client_id}/roles"
         ):
             for item in page:
-                yield {"from_resource": "client", "source_id": client.client_id, **item}
+                if _is_direct_active_role_assignment(item, "client"):
+                    yield {
+                        "from_resource": "client",
+                        "source_id": client.client_id,
+                        **item,
+                        **_role_assignment_scope(item, "client", client.client_id, ctx),
+                    }
 
 
 @app.resource(name="built_in_roles", columns=BuiltInRole, parallelized=True)
@@ -393,11 +481,17 @@ def user_role_assignments(ctx: SourceContext):
     def _assignee_details(user_id: str):
         try:
             user_details = ctx.pool.paginate(
-                f"/api/v1/users/{user_id}/roles?expand=targets/catalog/apps&expand=targets/groups"
+                f"/api/v1/users/{user_id}/roles"
             )
             for roles in user_details:
                 for role in roles:
-                    yield {"from_resource": "user", "source_id": user_id, **role}
+                    if _is_direct_active_role_assignment(role, "user"):
+                        yield {
+                            "from_resource": "user",
+                            "source_id": user_id,
+                            **role,
+                            **_role_assignment_scope(role, "user", user_id, ctx),
+                        }
 
         except Exception as e:
             logger.error(
@@ -417,10 +511,16 @@ def user_role_assignments(ctx: SourceContext):
 def group_role_assignments(group: Group, ctx: SourceContext):
     if group.embedded.stats.has_admin_privilege:
         for page in ctx.pool.paginate(
-            f"/api/v1/groups/{group.id}/roles?expand=targets/catalog/apps&expand=targets/groups"
+            f"/api/v1/groups/{group.id}/roles"
         ):
             for role in page:
-                yield {"from_resource": "group", "source_id": group.id, **role}
+                if _is_direct_active_role_assignment(role, "group"):
+                    yield {
+                        "from_resource": "group",
+                        "source_id": group.id,
+                        **role,
+                        **_role_assignment_scope(role, "group", group.id, ctx),
+                    }
 
 
 @app.transformer(
@@ -611,6 +711,42 @@ def resources(resource_set: ResourceSet, ctx: SourceContext):
             yield {"resource_set_id": resource_set.id, **item}
 
 
+@app.transformer(
+    name="resource_set_role_assignments",
+    columns=ResourceSetRoleAssignment,
+    parallelized=True,
+)
+def resource_set_role_assignments(resource_set: ResourceSet, ctx: SourceContext):
+    for page in ctx.pool.paginate(
+        f"/api/v1/iam/resource-sets/{resource_set.id}/bindings",
+        data_selector="roles",
+    ):
+        for role in page:
+            role_id = role.get("id")
+            if not role_id:
+                continue
+
+            for member_page in ctx.pool.paginate(
+                f"/api/v1/iam/resource-sets/{resource_set.id}/bindings/{role_id}/members",
+                data_selector="members",
+            ):
+                for member in member_page:
+                    assignee_id = _resource_set_binding_assignee_id(member)
+                    if not assignee_id:
+                        logger.warning(
+                            "Skipping resource set role assignment member %s without an assignee link",
+                            member.get("id"),
+                        )
+                        continue
+
+                    yield {
+                        "resource_set_id": resource_set.id,
+                        "role_id": role_id,
+                        "assignee_id": assignee_id,
+                        **member,
+                    }
+
+
 @app.resource(name="api_tokens", columns=ApiToken, parallelized=True)
 def api_tokens(ctx: SourceContext):
     """DLT resource, fetches Okta API tokens via GET /api/v1/api-tokens.
@@ -692,6 +828,7 @@ def source(
         agent_pools_resource | agents(),
         resource_sets_resource,
         resource_sets_resource | resources(ctx),
+        resource_sets_resource | resource_set_role_assignments(ctx),
         custom_roles_resource,
         custom_roles_resource | custom_role_permissions(ctx),
         api_tokens(ctx),
