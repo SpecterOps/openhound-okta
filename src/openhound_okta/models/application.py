@@ -15,6 +15,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from openhound_okta.graph import OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
+from openhound_okta.models.hybrid_auth import (
+    HybridAuthEdgeProperties,
+    hybrid_application_edge_kind,
+    hybrid_target_edge_path,
+    outbound_trust_target,
+)
 
 
 @dataclass
@@ -324,6 +330,55 @@ class Credentials(BaseModel):
             description="Organization contains application",
             traversable=True,
         ),
+        EdgeDef(
+            start=nk.APPLICATION,
+            end=nk.IDP,
+            kind=ek.OUTBOUND_ORG_SSO,
+            description="Application trusts another Okta organization for SSO",
+            traversable=True,
+        ),
+        EdgeDef(
+            start=nk.APPLICATION,
+            end=nk.JAMF_SSO_INTEGRATION,
+            kind=ek.OUTBOUND_ORG_SSO,
+            description="Application trusts a Jamf tenant for SSO",
+            traversable=True,
+        ),
+        EdgeDef(
+            start=nk.APPLICATION,
+            end=nk.JAMF_SSO_INTEGRATION,
+            kind=ek.ORG_SWA,
+            description="Application stores credentials for a Jamf tenant",
+            traversable=False,
+        ),
+        EdgeDef(
+            start=nk.APPLICATION,
+            end=nk.GITHUB_ORGANIZATION,
+            kind=ek.OUTBOUND_ORG_SSO,
+            description="Application trusts a GitHub organization for SSO",
+            traversable=True,
+        ),
+        EdgeDef(
+            start=nk.APPLICATION,
+            end=nk.ONE_PASSWORD_ACCOUNT,
+            kind=ek.OUTBOUND_ORG_SSO,
+            description="Application trusts a 1Password account for SSO",
+            traversable=True,
+        ),
+        EdgeDef(
+            start=nk.APPLICATION,
+            end=nk.SNOWFLAKE_ACCOUNT,
+            kind=ek.OUTBOUND_ORG_SSO,
+            description="Application trusts a Snowflake account for SSO",
+            traversable=True,
+        ),
+        EdgeDef(
+            start=nk.APPLICATION,
+            end=nk.AZ_TENANT,
+            kind=ek.OUTBOUND_ORG_SSO,
+            description="Application trusts an Entra tenant for SSO",
+            traversable=True,
+        ),
     ],
 )
 class Application(BaseAsset):
@@ -347,6 +402,11 @@ class Application(BaseAsset):
     @property
     def _oauth_client_settings(self) -> OauthClientSettings | None:
         return self.settings.oauth_client if self.settings else None
+
+    @property
+    def _is_service_application(self) -> bool:
+        oauth_client = self._oauth_client_settings
+        return oauth_client is not None and oauth_client.application_type == "service"
 
     @property
     def _user_name_mapping(self) -> str | None:
@@ -462,31 +522,29 @@ class Application(BaseAsset):
         )
 
     @property
-    def _outbound_jamf_sso_edge(self):
-        # SAML == SAML_2_0
-        # SWA == SECURE_PASSWORD_STORE, BROWSER_PLUGIN or AUTO_LOGIN
-        if self.name == "jamfsoftwareserver":
-            jamf_domain = self.settings.app.get("domain")
-            if jamf_domain:
-                jamf_domain = jamf_domain.replace('"', "")
-                yield Edge(
-                    kind=ek.OUTBOUND_ORG_SSO,
-                    start=EdgePath(value=self.id, match_by="id"),
-                    end=EdgePath(value=f"{jamf_domain}-SSO", match_by="id"),
-                    properties=EdgeProperties(traversable=True),
-                )
+    def _outbound_trust_edge(self):
+        edge_kind = hybrid_application_edge_kind(
+            self.name,
+            self.sign_on_mode,
+            is_service=self._is_service_application,
+        )
+        if edge_kind is None:
+            return
 
-    # @property
-    # def _outbount_github_sso_edge(self):
-    # TODO: Wait for the Github Enterprise (v.s. org) implementation is finalized
-    #     if self.name == "githubcloud":
-    #         yield Edge(
-    #             kind=ek.OUTBOUND_ORG_SSO,
-    #             start=EdgePath(value=self.id, match_by="id"),
-    #             ....
-    #             properties=EdgeProperties(traversable=True),
-    #         )
-    #
+        app_settings = self.settings.app if self.settings else None
+        target = outbound_trust_target(self.name, app_settings)
+        if target is None:
+            return
+
+        yield Edge(
+            kind=edge_kind,
+            start=EdgePath(value=self.id, match_by="id"),
+            end=hybrid_target_edge_path(target),
+            properties=HybridAuthEdgeProperties(
+                traversable=edge_kind == ek.OUTBOUND_ORG_SSO,
+                mode=self.sign_on_mode,
+            ),
+        )
 
     # @property
     # def _kerberos_sso_edge(self):
@@ -517,4 +575,4 @@ class Application(BaseAsset):
         # Disabled until BHE supports array-based matching
         # yield from self._kerberos_sso_edge
         yield from self._contains_edge
-        yield from self._outbound_jamf_sso_edge
+        yield from self._outbound_trust_edge

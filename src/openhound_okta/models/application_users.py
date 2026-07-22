@@ -6,6 +6,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
+from openhound_okta.models.hybrid_auth import (
+    HybridAuthEdgeProperties,
+    hybrid_target_edge_path,
+    hybrid_user_sign_on_edge_kind,
+    hybrid_user_target,
+)
 from openhound_okta.models.saml import (
     SamlMatchValuesEdgeProperties,
     saml_application_identity_evidence,
@@ -121,6 +127,69 @@ class Profile(BaseModel):
             description="Credentials are synced between okta orgs",
         ),
         EdgeDef(
+            kind=ek.OUTBOUND_SSO,
+            start=nk.USER,
+            end=nk.USER,
+            traversable=True,
+            description="User signs on to another Okta organization",
+        ),
+        EdgeDef(
+            kind=ek.OUTBOUND_SSO,
+            start=nk.USER,
+            end=nk.JAMF_ACCOUNT,
+            traversable=True,
+            description="User signs on to a Jamf account",
+        ),
+        EdgeDef(
+            kind=ek.SWA,
+            start=nk.USER,
+            end=nk.JAMF_ACCOUNT,
+            traversable=False,
+            description="User stores credentials for a Jamf account",
+        ),
+        EdgeDef(
+            kind=ek.OUTBOUND_SSO,
+            start=nk.USER,
+            end=nk.GITHUB_USER,
+            traversable=True,
+            description="User signs on to a GitHub account",
+        ),
+        EdgeDef(
+            kind=ek.OUTBOUND_SSO,
+            start=nk.USER,
+            end=nk.ONE_PASSWORD_USER,
+            traversable=True,
+            description="User signs on to a 1Password account",
+        ),
+        EdgeDef(
+            kind=ek.SWA,
+            start=nk.USER,
+            end=nk.ONE_PASSWORD_USER,
+            traversable=False,
+            description="User stores credentials for a 1Password account",
+        ),
+        EdgeDef(
+            kind=ek.OUTBOUND_SSO,
+            start=nk.USER,
+            end=nk.SNOWFLAKE_USER,
+            traversable=True,
+            description="User signs on to a Snowflake account",
+        ),
+        EdgeDef(
+            kind=ek.OUTBOUND_SSO,
+            start=nk.USER,
+            end=nk.AZ_USER,
+            traversable=True,
+            description="User signs on to an Entra account",
+        ),
+        EdgeDef(
+            kind=ek.SWA,
+            start=nk.USER,
+            end=nk.AZ_USER,
+            traversable=False,
+            description="User stores credentials for an Entra account",
+        ),
+        EdgeDef(
             kind=ek.SAML_ELIGIBLE_FOR,
             start=nk.USER,
             end=nk.SAML_FEDERATION_PROVIDER,
@@ -184,6 +253,35 @@ class ApplicationUser(BaseAsset):
                 end=EdgePath(value=self.app_id, match_by="id"),
                 properties=EdgeProperties(traversable=False),
             )
+
+    @property
+    def _target_user_name(self) -> str | None:
+        return self.credentials.username if self.credentials else None
+
+    @property
+    def _hybrid_sign_on_edges(self):
+        edge_kind = hybrid_user_sign_on_edge_kind(self.app_sign_on_mode)
+        if edge_kind is None:
+            return
+
+        target = hybrid_user_target(
+            self.app_name,
+            self.app_settings,
+            target_user_name=self._target_user_name,
+            external_id=self.external_id,
+        )
+        if target is None:
+            return
+
+        yield Edge(
+            kind=edge_kind,
+            start=EdgePath(value=self.id, match_by="id"),
+            end=hybrid_target_edge_path(target),
+            properties=HybridAuthEdgeProperties(
+                traversable=edge_kind == ek.OUTBOUND_SSO,
+                mode=self.app_sign_on_mode,
+            ),
+        )
 
     @property
     def _inbound_user_sync_enabled(self) -> bool:
@@ -323,4 +421,5 @@ class ApplicationUser(BaseAsset):
         yield from self._user_push_pull_edges
         yield from self._password_sync_edge
         yield from self._okta_org2org_edges
+        yield from self._hybrid_sign_on_edges
         yield from self._saml_eligible_for_edges
