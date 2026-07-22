@@ -6,6 +6,7 @@ from pydantic import ConfigDict, Field
 
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
+from openhound_okta.models.resource_set import resource_set_node_id
 
 
 @app.asset(
@@ -36,6 +37,13 @@ class ResourceSetRoleAssignment(BaseAsset):
         return f"{self.id}_{self.assignee_id}"
 
     @property
+    def resource_set_node_id(self) -> str:
+        return resource_set_node_id(
+            self.resource_set_id,
+            getattr(self, "_extras", {}).get("tenant"),
+        )
+
+    @property
     def as_node(self):
         return None
 
@@ -47,6 +55,6 @@ class ResourceSetRoleAssignment(BaseAsset):
         yield Edge(
             kind=ek.SCOPED_TO,
             start=EdgePath(value=self.role_assignment_node_id, match_by="id"),
-            end=EdgePath(value=self.resource_set_id, match_by="id"),
+            end=EdgePath(value=self.resource_set_node_id, match_by="id"),
             properties=EdgeProperties(traversable=False),
         )

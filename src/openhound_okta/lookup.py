@@ -1,4 +1,6 @@
 from functools import lru_cache
+import re
+from urllib.parse import parse_qs, urlparse
 
 import duckdb
 from duckdb import DuckDBPyConnection
@@ -129,7 +131,7 @@ class OktaLookup(LookupManager):
     @lru_cache
     def api_service_ids_by_name(self, app_name: str):
         res = self._find_all_objects(
-            f"""SELECT id FROM {self.schema}.api_services WHERE name = ?""",
+            f"""SELECT id FROM {self.schema}.api_services WHERE type = ?""",
             [app_name],
         )
         return res
@@ -200,9 +202,7 @@ class OktaLookup(LookupManager):
 
     @lru_cache
     def resource_set_application_ids(self, resource_set_id: str):
-        return self._resource_set_resource_ids(
-            resource_set_id, "apps", self.all_applications()
-        )
+        return self._resource_set_ids_in_table(resource_set_id, "applications")
 
     @lru_cache
     def resource_set_non_admin_application_ids(self, resource_set_id: str):
@@ -212,9 +212,7 @@ class OktaLookup(LookupManager):
 
     @lru_cache
     def resource_set_user_ids(self, resource_set_id: str):
-        return self._resource_set_resource_ids(
-            resource_set_id, "users", self.all_users()
-        )
+        return self._resource_set_ids_in_table(resource_set_id, "users")
 
     @lru_cache
     def resource_set_non_admin_user_ids(self, resource_set_id: str):
@@ -224,9 +222,7 @@ class OktaLookup(LookupManager):
 
     @lru_cache
     def resource_set_group_ids(self, resource_set_id: str):
-        return self._resource_set_resource_ids(
-            resource_set_id, "groups", self.all_groups()
-        )
+        return self._resource_set_ids_in_table(resource_set_id, "groups")
 
     @lru_cache
     def resource_set_non_admin_group_ids(self, resource_set_id: str):
@@ -281,22 +277,189 @@ class OktaLookup(LookupManager):
 
         return tuple(sorted({resource_set_id for (resource_set_id,) in rows}))
 
-    def _resource_set_resource_ids(
-        self, resource_set_id: str, resource_type: str, all_resource_rows
-    ):
-        rows = self._find_all_objects(
-            f"""SELECT orn FROM {self.schema}.resources WHERE resource_set_id = ? AND contains(orn, ?)""",
-            [resource_set_id, f":{resource_type}"],
-        )
+    @lru_cache
+    def resource_set_member_ids(self, resource_set_id: str) -> tuple[str, ...]:
+        try:
+            rows = self._find_all_objects(
+                f"""SELECT json_extract_string(_links, '$.self.href'), orn
+                    FROM {self.schema}.resources
+                    WHERE resource_set_id = ?""",
+                [resource_set_id],
+            )
+        except duckdb.CatalogException:
+            return ()
 
         resource_ids: set[str] = set()
-        for (orn,) in rows:
-            split_orn = orn.split(":")
-            if len(split_orn) == 5 and split_orn[-1] == resource_type:
-                resource_ids.update(resource_id for (resource_id,) in all_resource_rows)
-            elif len(split_orn) == 6 and split_orn[-2] == resource_type:
-                resource_ids.add(split_orn[-1])
+        for resource_url, orn in rows:
+            resolved_ids = (
+                self.resolve_resource_url(resource_url)
+                if resource_url
+                else self.resolve_resource_orn(orn)
+            )
+            resource_ids.update(resolved_ids)
         return tuple(sorted(resource_ids))
+
+    @lru_cache
+    def resolve_resource_url(self, resource_url: str | None) -> tuple[str, ...]:
+        """Resolve an Okta resource set member URL the same way OktaHound does."""
+        if not resource_url:
+            return ()
+
+        parsed_url = urlparse(resource_url)
+        path = parsed_url.path.rstrip("/") or "/"
+
+        if path == "/api/v1/users":
+            return self._all_ids("users")
+        if path.startswith("/api/v1/users/"):
+            return self._existing_ids("users", path.rsplit("/", 1)[-1])
+
+        if path == "/api/v1/groups":
+            return self._all_ids("groups")
+        if path.startswith("/api/v1/groups/") and path.endswith("/users"):
+            group_id = path.split("/")[-2]
+            return self.group_user_ids((group_id,))
+        if path.startswith("/api/v1/groups/"):
+            return self._existing_ids("groups", path.rsplit("/", 1)[-1])
+
+        if path == "/api/v1/apps":
+            if not parsed_url.query:
+                return self._all_apps_and_integrations()
+
+            app_type = self._app_type_from_filter(parsed_url.query)
+            if app_type:
+                return self._apps_and_integrations_by_type(app_type)
+            return ()
+        if path.startswith("/api/v1/apps/"):
+            app_id = path.rsplit("/", 1)[-1]
+            return tuple(
+                sorted(
+                    set(self._existing_ids("applications", app_id))
+                    | set(self._existing_ids("api_services", app_id))
+                )
+            )
+
+        if path == "/api/v1/authorizationServers":
+            return self._all_ids("authorization_servers")
+        if path.startswith("/api/v1/authorizationServers/"):
+            return self._existing_ids(
+                "authorization_servers", path.rsplit("/", 1)[-1]
+            )
+
+        if path == "/api/v1/devices":
+            return self._all_ids("devices")
+
+        if path == "/api/v1/idps":
+            return self._all_ids("identity_providers")
+        if path.startswith("/api/v1/idps/"):
+            return self._existing_ids(
+                "identity_providers", path.rsplit("/", 1)[-1]
+            )
+
+        if path == "/api/v1/policies":
+            return self._all_ids("policies")
+        if path.startswith("/api/v1/policies/"):
+            return self._ids_by_value("policies", "type", path.rsplit("/", 1)[-1])
+
+        return ()
+
+    @lru_cache
+    def resolve_resource_orn(self, orn: str | None) -> tuple[str, ...]:
+        """Fallback for older payloads that do not expose a self URL."""
+        if not orn:
+            return ()
+
+        split_orn = orn.split(":")
+        resource_collections = {
+            "users": self._all_ids("users"),
+            "groups": self._all_ids("groups"),
+            "apps": self._all_apps_and_integrations(),
+            "devices": self._all_ids("devices"),
+            "authorizationServers": self._all_ids("authorization_servers"),
+            "authorization_servers": self._all_ids("authorization_servers"),
+            "idps": self._all_ids("identity_providers"),
+            "policies": self._all_ids("policies"),
+        }
+        if split_orn[-1] in resource_collections:
+            return resource_collections[split_orn[-1]]
+
+        target_id = split_orn[-1]
+        for resource_type, table_names in {
+            "users": ("users",),
+            "groups": ("groups",),
+            "apps": ("applications", "api_services"),
+            "devices": ("devices",),
+            "authorizationServers": ("authorization_servers",),
+            "authorization_servers": ("authorization_servers",),
+            "idps": ("identity_providers",),
+            "policies": ("policies",),
+        }.items():
+            if resource_type not in split_orn[:-1]:
+                continue
+
+            resource_ids: set[str] = set()
+            for table_name in table_names:
+                resource_ids.update(self._existing_ids(table_name, target_id))
+            return tuple(sorted(resource_ids))
+        return ()
+
+    def _resource_set_ids_in_table(
+        self, resource_set_id: str, table_name: str
+    ) -> tuple[str, ...]:
+        member_ids = set(self.resource_set_member_ids(resource_set_id))
+        return tuple(sorted(member_ids & set(self._all_ids(table_name))))
+
+    @lru_cache
+    def _all_ids(self, table_name: str) -> tuple[str, ...]:
+        if not self._table_exists(table_name):
+            return ()
+        rows = self._find_all_objects(f"""SELECT id FROM {self.schema}.{table_name}""")
+        return tuple(sorted({resource_id for (resource_id,) in rows}))
+
+    @lru_cache
+    def _existing_ids(self, table_name: str, resource_id: str) -> tuple[str, ...]:
+        if not self._table_exists(table_name):
+            return ()
+        rows = self._find_all_objects(
+            f"""SELECT id FROM {self.schema}.{table_name} WHERE id = ?""",
+            [resource_id],
+        )
+        return tuple(sorted({row_id for (row_id,) in rows}))
+
+    @lru_cache
+    def _ids_by_value(
+        self, table_name: str, column_name: str, value: str
+    ) -> tuple[str, ...]:
+        if not self._table_exists(table_name):
+            return ()
+        rows = self._find_all_objects(
+            f"""SELECT id FROM {self.schema}.{table_name} WHERE {column_name} = ?""",
+            [value],
+        )
+        return tuple(sorted({resource_id for (resource_id,) in rows}))
+
+    @lru_cache
+    def _all_apps_and_integrations(self) -> tuple[str, ...]:
+        return tuple(
+            sorted(set(self._all_ids("applications")) | set(self._all_ids("api_services")))
+        )
+
+    @lru_cache
+    def _apps_and_integrations_by_type(self, app_type: str) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                set(self._ids_by_value("applications", "name", app_type))
+                | set(self._ids_by_value("api_services", "type", app_type))
+            )
+        )
+
+    @staticmethod
+    def _app_type_from_filter(query: str) -> str | None:
+        filter_value = parse_qs(query).get("filter", [None])[0]
+        if not filter_value:
+            return None
+
+        match = re.fullmatch(r'name eq "([^"]+)"', filter_value)
+        return match.group(1) if match else None
 
     @lru_cache
     def all_policies(self):

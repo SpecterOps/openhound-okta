@@ -279,6 +279,7 @@ class RoleAssignment(BaseAsset):
                 "okta.users.credentials.resetPassword",
                 "okta.users.credentials.manage",
                 "okta.users.credentials.manageTemporaryAccessCode",
+                "okta.users.credentials.expirePassword",
                 "okta.users.manage",
             ]
             has_permission = any(

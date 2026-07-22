@@ -6,6 +6,7 @@ from pydantic import ConfigDict, Field
 
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
+from openhound_okta.models.resource_set import resource_set_node_id
 
 
 @app.asset(
@@ -14,56 +15,56 @@ from openhound_okta.main import app
         EdgeDef(
             start=nk.RESOURCE_SET,
             end=nk.USER,
-            kind=ek.CONTAINS,
+            kind=ek.RESOURCE_SET_CONTAINS,
             description="Resource set contains user",
             traversable=True,
         ),
         EdgeDef(
             start=nk.RESOURCE_SET,
             end=nk.GROUP,
-            kind=ek.CONTAINS,
+            kind=ek.RESOURCE_SET_CONTAINS,
             description="Resource set contains group",
             traversable=True,
         ),
         EdgeDef(
             start=nk.RESOURCE_SET,
             end=nk.APPLICATION,
-            kind=ek.CONTAINS,
+            kind=ek.RESOURCE_SET_CONTAINS,
             description="Resource set contains application",
             traversable=True,
         ),
         EdgeDef(
             start=nk.RESOURCE_SET,
             end=nk.INTEGRATION,
-            kind=ek.CONTAINS,
+            kind=ek.RESOURCE_SET_CONTAINS,
             description="Resource set contains API service integration",
             traversable=True,
         ),
         EdgeDef(
             start=nk.RESOURCE_SET,
             end=nk.DEVICE,
-            kind=ek.CONTAINS,
+            kind=ek.RESOURCE_SET_CONTAINS,
             description="Resource set contains device",
             traversable=True,
         ),
         EdgeDef(
             start=nk.RESOURCE_SET,
             end=nk.AUTH_SERVER,
-            kind=ek.CONTAINS,
+            kind=ek.RESOURCE_SET_CONTAINS,
             description="Resource set contains auth server",
             traversable=True,
         ),
         EdgeDef(
             start=nk.RESOURCE_SET,
             end=nk.IDP,
-            kind=ek.CONTAINS,
+            kind=ek.RESOURCE_SET_CONTAINS,
             description="Resource set contains IDP",
             traversable=True,
         ),
         EdgeDef(
             start=nk.RESOURCE_SET,
             end=nk.POLICY,
-            kind=ek.CONTAINS,
+            kind=ek.RESOURCE_SET_CONTAINS,
             description="Resource set contains policy",
             traversable=True,
         ),
@@ -96,31 +97,35 @@ class Resource(BaseAsset):
     def as_node(self):
         return None
 
+    @property
+    def resource_url(self) -> str | None:
+        if not self.links:
+            return None
+        return self.links.get("self", {}).get("href")
+
+    @property
+    def resource_set_node_id(self) -> str:
+        return resource_set_node_id(
+            self.resource_set_id,
+            getattr(self, "_extras", {}).get("tenant"),
+        )
+
     def _yield_edge(self, target_id: str):
         yield Edge(
             kind=ek.RESOURCE_SET_CONTAINS,
-            start=EdgePath(value=self.resource_set_id, match_by="id"),
+            start=EdgePath(value=self.resource_set_node_id, match_by="id"),
             end=EdgePath(value=target_id, match_by="id"),
             properties=EdgeProperties(traversable=True),
         )
 
     @property
     def edges(self):
-        resource_type = self.resource_type
-        resource_id = self.resource_id
-        if resource_id:
-            yield from self._yield_edge(resource_id)
+        resource_url = self.resource_url
+        target_ids = (
+            self._lookup.resolve_resource_url(resource_url)
+            if resource_url
+            else self._lookup.resolve_resource_orn(self.orn)
+        )
 
-        all_resource = {
-            "users": self._lookup.all_users,
-            "groups": self._lookup.all_groups,
-            "apps": self._lookup.all_applications,
-            "devices": self._lookup.all_devices,
-            "authorizationServers": self._lookup.all_auth_servers,
-            "idps": self._lookup.all_identity_providers,
-            "policies": self._lookup.all_policies,
-        }
-
-        if all_resource.get(resource_type):
-            for (resource_id,) in all_resource[resource_type]():
-                yield from self._yield_edge(resource_id)
+        for target_id in target_ids:
+            yield from self._yield_edge(target_id)

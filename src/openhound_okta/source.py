@@ -43,6 +43,7 @@ from .models import (
     Policy,
     PolicyMapping,
     PolicyType,
+    PrivilegedUser,
     Realm,
     Resource,
     ResourceSet,
@@ -504,36 +505,33 @@ def built_in_roles():
         yield {"type": role}
 
 
-@app.resource(
-    name="user_role_assignments", columns=UserRoleAssignment, parallelized=True
-)
-def user_role_assignments(ctx: SourceContext):
-    @app.defer
-    def _assignee_details(user_id: str):
-        try:
-            user_details = ctx.pool.paginate(
-                f"/api/v1/users/{user_id}/roles"
-            )
-            for roles in user_details:
-                for role in roles:
-                    if _is_direct_active_role_assignment(role, "user"):
-                        yield {
-                            "from_resource": "user",
-                            "source_id": user_id,
-                            **role,
-                            **_role_assignment_scope(role, "user", user_id, ctx),
-                        }
-
-        except Exception as e:
-            logger.error(
-                f"Error in resource 'user_role_assignments' processing assignee_details: {e}",
-                extra={"resource": "user_role_assignments", "phase": "defer"},
-            )
-            return
-
+@app.resource(name="privileged_users", columns=PrivilegedUser, parallelized=True)
+def privileged_users(ctx: SourceContext):
     for page in ctx.pool.paginate("/api/v1/iam/assignees/users"):
         for item in page:
-            yield _assignee_details(item["id"])
+            yield item
+
+
+@app.transformer(
+    name="user_role_assignments", columns=UserRoleAssignment, parallelized=True
+)
+def user_role_assignments(user: PrivilegedUser, ctx: SourceContext):
+    try:
+        for roles in ctx.pool.paginate(f"/api/v1/users/{user.id}/roles"):
+            for role in roles:
+                if _is_direct_active_role_assignment(role, "user"):
+                    yield {
+                        "from_resource": "user",
+                        "source_id": user.id,
+                        **role,
+                        **_role_assignment_scope(role, "user", user.id, ctx),
+                    }
+    except Exception as e:
+        logger.error(
+            f"Error in resource 'user_role_assignments' processing assignee_details: {e}",
+            extra={"resource": "user_role_assignments", "phase": "defer"},
+        )
+        return
 
 
 @app.transformer(
@@ -834,6 +832,7 @@ def source(
     policies_resource = policy_types | policies(ctx)
     resource_sets_resource = resource_sets(ctx)
     users_resource = users(ctx)
+    privileged_users_resource = privileged_users(ctx)
     return (
         organization(ctx),
         users_resource,
@@ -868,5 +867,6 @@ def source(
         api_services(ctx),
         built_in_roles_resource,
         built_in_roles_resource | built_in_role_permissions,
-        user_role_assignments(ctx),
+        privileged_users_resource,
+        privileged_users_resource | user_role_assignments(ctx),
     )

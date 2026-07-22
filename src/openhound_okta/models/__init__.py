@@ -26,6 +26,7 @@ from .organization import Organization
 from .policy import Policy
 from .policy_mappings import PolicyMapping
 from .policy_type import PolicyType
+from .privileged_user import PrivilegedUser
 from .realm import Realm
 from .resource import Resource
 from .resource_set import ResourceSet
@@ -69,6 +70,7 @@ __all__ = [
     "PolicyMapping",
     "IDPUser",
     "PolicyType",
+    "PrivilegedUser",
     "Resource",
     "ResourceSetRoleAssignment",
 ]

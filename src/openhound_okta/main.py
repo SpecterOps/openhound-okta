@@ -55,6 +55,7 @@ def preprocess(ctx: PreProcContext):
         "policies": "policies",
         "resources": "resources",
         "resource_set_role_assignments": "resource_set_role_assignments",
+        "privileged_users": "privileged_users",
         "user_role_assignments": "user_role_assignments",
         "group_role_assignments": "group_role_assignments",
         "client_role_assignments": "client_role_assignments",

@@ -7,6 +7,7 @@ from openhound_okta.main import app
 from openhound_okta.models import (
     ClientRoleAssignment,
     GroupRoleAssignment,
+    PrivilegedUser,
     ResourceSetRoleAssignment,
     UserRoleAssignment,
 )
@@ -17,6 +18,7 @@ from openhound_okta.source import (
 )
 from openhound_okta.transforms import (
     insert_principals_with_admin_roles,
+    non_admin_users,
     principals_with_admin_roles,
 )
 
@@ -87,14 +89,21 @@ class StubLookup:
 
 
 class StubLookupWithBinding(StubLookup):
+    permissions = {"okta.users.credentials.resetPassword"}
+
     def role_assignment_resource_set_ids(self, role_assignment_id, assignee_id):
         return ("resource-set-1",)
 
     def has_role_permission(self, role_id, permission):
-        return permission == "okta.users.credentials.resetPassword"
+        return permission in self.permissions
 
     def resource_set_non_admin_user_ids(self, resource_set_id):
         return ("user-1",)
+
+
+class StubLookupWithPermissions(StubLookupWithBinding):
+    def __init__(self, permissions):
+        self.permissions = set(permissions)
 
 
 class StubLookupWithoutAssignment(StubLookup):
@@ -176,6 +185,10 @@ def test_same_role_assignment_id_is_unique_per_assignee():
     assert first.as_node.id != second.as_node.id
 
 
+def test_privileged_users_are_returned_as_validated_models_for_transformers():
+    assert PrivilegedUser.dlt_config == {"return_validated_models": True}
+
+
 @pytest.mark.parametrize(
     ("model_cls", "from_resource", "direct_type", "indirect_type"),
     [
@@ -229,9 +242,10 @@ def test_collection_filter_keeps_only_direct_active_assignments(
     )
 
 
-def test_admin_principal_transform_ignores_indirect_and_inactive_assignments():
+def test_admin_principal_transform_uses_privileged_user_inventory():
     con = duckdb.connect()
     con.execute("CREATE SCHEMA okta")
+    con.execute("CREATE TABLE okta.privileged_users (id VARCHAR)")
     con.execute(
         "CREATE TABLE okta.user_role_assignments "
         "(source_id VARCHAR, status VARCHAR, assignment_type VARCHAR)"
@@ -243,6 +257,11 @@ def test_admin_principal_transform_ignores_indirect_and_inactive_assignments():
     con.execute(
         "CREATE TABLE okta.client_role_assignments "
         "(source_id VARCHAR, status VARCHAR, assignment_type VARCHAR)"
+    )
+    con.execute(
+        "INSERT INTO okta.privileged_users VALUES "
+        "('direct-user'), "
+        "('inherited-user')"
     )
     con.execute(
         "INSERT INTO okta.user_role_assignments VALUES "
@@ -271,6 +290,32 @@ def test_admin_principal_transform_ignores_indirect_and_inactive_assignments():
         ("direct-client", "client"),
         ("direct-group", "group"),
         ("direct-user", "user"),
+        ("inherited-user", "user"),
+    ]
+
+
+def test_non_admin_users_excludes_inherited_admins_from_privileged_inventory():
+    con = duckdb.connect()
+    con.execute("CREATE SCHEMA okta")
+    con.execute("CREATE TABLE okta.users (id VARCHAR)")
+    con.execute("CREATE TABLE okta.privileged_users (id VARCHAR)")
+    con.execute(
+        "CREATE TABLE okta.user_role_assignments "
+        "(source_id VARCHAR, status VARCHAR, assignment_type VARCHAR)"
+    )
+    con.execute("INSERT INTO okta.users VALUES ('direct-user'), ('inherited-user'), ('plain-user')")
+    con.execute("INSERT INTO okta.privileged_users VALUES ('direct-user'), ('inherited-user')")
+    con.execute(
+        "INSERT INTO okta.user_role_assignments VALUES "
+        "('direct-user', 'ACTIVE', 'USER')"
+    )
+
+    principals_with_admin_roles(con)
+    insert_principals_with_admin_roles(con)
+    non_admin_users(con)
+
+    assert con.execute("SELECT id FROM okta.non_admin_users ORDER BY id").fetchall() == [
+        ("plain-user",)
     ]
 
 
@@ -456,6 +501,33 @@ def test_custom_role_permission_edges_use_collected_binding_scope():
 
     assert assignment.resource_set_ids == ("resource-set-1",)
     assert next(assignment._reset_password_edges).end.value == "user-1"
+
+
+@pytest.mark.parametrize(
+    ("permission", "reset_password", "reset_factors"),
+    [
+        ("okta.users.credentials.resetPassword", True, False),
+        ("okta.users.credentials.manage", True, True),
+        ("okta.users.credentials.manageTemporaryAccessCode", True, False),
+        ("okta.users.credentials.expirePassword", True, False),
+        ("okta.users.credentials.resetFactors", False, True),
+    ],
+)
+def test_custom_role_credential_permissions_emit_expected_edges(
+    permission, reset_password, reset_factors
+):
+    assignment = make_assignment(
+        UserRoleAssignment,
+        from_resource="user",
+        source_id="user-1",
+        assignment_type="USER",
+        role_type="CUSTOM",
+        role="custom-role-1",
+    )
+    assignment._lookup = StubLookupWithPermissions({permission})
+
+    assert bool(list(assignment._reset_password_edges)) is reset_password
+    assert bool(list(assignment._reset_factors_edges)) is reset_factors
 
 
 def test_resource_set_role_assignment_emits_scoped_to_edge_for_collected_assignment():
