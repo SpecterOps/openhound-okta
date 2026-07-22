@@ -12,10 +12,10 @@ from openhound_okta.main import app
     description="Okta application group mappings (push)",
     edges=[
         EdgeDef(
-            start=nk.APPLICATION,
-            end=nk.GROUP,
+            start=nk.GROUP,
+            end=nk.APPLICATION,
             kind=ek.GROUP_PUSH,
-            description="Application pushes group mapping",
+            description="Group is pushed to application",
             traversable=False,
         ),
     ],
@@ -27,6 +27,7 @@ class ApplicationGroupMapping(BaseAsset):
     error_summary: str | None = Field(alias="errorSummary", default=None)
     id: str
     status: str | None = None
+    source_group_id: str = Field(alias="sourceGroupId")
     target_group_id: str = Field(alias="targetGroupId")
     last_push: datetime | None = Field(alias="lastPush", default=None)
     last_updated: datetime | None = Field(alias="lastUpdated", default=None)
@@ -43,7 +44,7 @@ class ApplicationGroupMapping(BaseAsset):
     def edges(self):
         yield Edge(
             kind=ek.GROUP_PUSH,
-            start=EdgePath(value=self.app_id, match_by="id"),
-            end=EdgePath(value=self.target_group_id, match_by="id"),
+            start=EdgePath(value=self.source_group_id, match_by="id"),
+            end=EdgePath(value=self.app_id, match_by="id"),
             properties=EdgeProperties(traversable=False),
         )

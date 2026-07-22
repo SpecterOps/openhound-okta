@@ -17,6 +17,15 @@ SYSTEM_APPS = [
     "ldap_interface"  # LDAP Interface, similar to AD
 ]
 
+IGNORED_OUTBOUND_SYNC_APPS = {
+    "okta_flow_sso",  # Okta Workflows
+    "okta_atspoke_sso",  # Okta Access Requests
+}
+
+ACTIVE_DIRECTORY_APP = "active_directory"
+LDAP_INTERFACE_APP = "ldap_interface"
+OKTA_ORG2ORG_APP = "okta_org2org"
+
 
 class Provider(BaseModel):
     name: str
@@ -160,27 +169,56 @@ class ApplicationUser(BaseAsset):
             )
 
     @property
-    def _user_push_poll_edges(self):
-        if self.sync_state == "SYNCHRONIZED":
-            if self.scope == "USER":
-                yield Edge(
-                    kind=ek.USER_PULL,
-                    start=EdgePath(value=self.app_id, match_by="id"),
-                    end=EdgePath(value=self.id, match_by="id"),
-                    properties=EdgeProperties(traversable=False),
-                )
-            else:
-                yield Edge(
-                    kind=ek.USER_PUSH,
-                    start=EdgePath(value=self.id, match_by="id"),
-                    end=EdgePath(value=self.app_id, match_by="id"),
-                    properties=EdgeProperties(traversable=False),
-                )
+    def _inbound_user_sync_enabled(self) -> bool:
+        return "PROFILE_MASTERING" in self.app_features
+
+    @property
+    def _is_inbound_sync(self) -> bool:
+        if self.app_name == ACTIVE_DIRECTORY_APP:
+            return self.scope == "USER"
+
+        if self.app_name == LDAP_INTERFACE_APP:
+            return True
+
+        if self.scope == "GROUP":
+            return False
+
+        if self.app_name == OKTA_ORG2ORG_APP:
+            return (
+                "initial_status" not in self.profile.model_fields_set
+                and self._inbound_user_sync_enabled
+            )
+
+        return self._inbound_user_sync_enabled
+
+    @property
+    def _user_push_pull_edges(self):
+        if self.sync_state != "SYNCHRONIZED":
+            return
+
+        if self._is_inbound_sync:
+            yield Edge(
+                kind=ek.USER_PULL,
+                start=EdgePath(value=self.app_id, match_by="id"),
+                end=EdgePath(value=self.id, match_by="id"),
+                properties=EdgeProperties(traversable=False),
+            )
+        elif self.app_name not in IGNORED_OUTBOUND_SYNC_APPS:
+            yield Edge(
+                kind=ek.USER_PUSH,
+                start=EdgePath(value=self.id, match_by="id"),
+                end=EdgePath(value=self.app_id, match_by="id"),
+                properties=EdgeProperties(traversable=False),
+            )
 
     @property
     def _password_sync_edge(self):
-        if self.sync_state == "SYNCHRONIZED" and self.app_name == "active_directory" and self.profile.object_sid:
-            if self.scope == "USER":
+        if (
+            self.sync_state == "SYNCHRONIZED"
+            and self.app_name == ACTIVE_DIRECTORY_APP
+            and self.profile.object_sid
+        ):
+            if self._is_inbound_sync:
                 yield Edge(
                     kind=ek.USER_SYNC,
                     start=EdgePath(value=self.profile.object_sid, match_by="id"),
@@ -212,8 +250,8 @@ class ApplicationUser(BaseAsset):
 
     @property
     def _okta_org2org_edges(self):
-        if self.app_name == "okta_org2org":
-            if self.scope == "USER":
+        if self.app_name == OKTA_ORG2ORG_APP:
+            if self._is_inbound_sync:
                 yield Edge(
                     kind=ek.USER_SYNC,
                     start=EdgePath(value=self.external_id, match_by="id"),
@@ -241,6 +279,6 @@ class ApplicationUser(BaseAsset):
     def edges(self):
         yield from self._app_assignment_edge
         yield from self._read_password_updates_edge
-        yield from self._user_push_poll_edges
+        yield from self._user_push_pull_edges
         yield from self._password_sync_edge
         yield from self._okta_org2org_edges
