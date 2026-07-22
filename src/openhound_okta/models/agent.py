@@ -14,6 +14,7 @@ from pydantic import ConfigDict, Field
 from openhound_okta.graph import OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
+from openhound_okta.models.agent_pool import agent_pool_graph_id
 
 
 @dataclass
@@ -116,7 +117,7 @@ class Agent(BaseAsset):
         yield Edge(
             kind=ek.AGENT_MEMBER_OF,
             start=EdgePath(value=self.id, match_by="id"),
-            end=EdgePath(value=self.pool_id, match_by="id"),
+            end=EdgePath(value=agent_pool_graph_id(self.pool_id), match_by="id"),
             properties=EdgeProperties(traversable=True),
         )
 

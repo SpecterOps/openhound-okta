@@ -12,6 +12,15 @@ from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 
 
+def agent_pool_graph_id(agent_pool_id: str) -> str:
+    """Return the graph-safe ID for an agent pool.
+
+    Active Directory agent pools share their Okta IDs with their backing
+    applications, so the graph ID needs its own namespace.
+    """
+    return f"{agent_pool_id}_pool"
+
+
 @dataclass
 class AgentPoolProperties(OktaNodeProperties):
     """Properties for Okta agent pool"""
@@ -60,9 +69,9 @@ class Agent(BaseModel):
         ),
         EdgeDef(
             start=nk.AGENT_POOL,
-            end=nk.AGENT,
+            end=nk.APPLICATION,
             kind=ek.AGENT_POOL_FOR,
-            description="Agent pool for okta agent",
+            description="Agent pool backs an Okta application",
             traversable=True,
         ),
     ],
@@ -81,12 +90,13 @@ class AgentPool(BaseAsset):
 
     @property
     def as_node(self):
+        graph_id = agent_pool_graph_id(self.id)
         return OktaNode(
             kinds=[nk.AGENT_POOL],
             properties=AgentPoolProperties(
                 tenant=self._lookup.org_id(),
                 tenant_domain=self._extras["tenant"],
-                id=self.id,
+                id=graph_id,
                 name=self.name,
                 displayname=self.name,
                 type=self.type,
@@ -97,11 +107,11 @@ class AgentPool(BaseAsset):
 
     @property
     def _agent_pool_for_edges(self):
-        for agent in self.agents:
+        if self.type == "AD":
             yield Edge(
                 kind=ek.AGENT_POOL_FOR,
-                start=EdgePath(value=self.id, match_by="id"),
-                end=EdgePath(value=agent.id, match_by="id"),
+                start=EdgePath(value=agent_pool_graph_id(self.id), match_by="id"),
+                end=EdgePath(value=self.id, match_by="id"),
                 properties=EdgeProperties(traversable=True),
             )
 
@@ -110,7 +120,7 @@ class AgentPool(BaseAsset):
         yield Edge(
             kind=ek.CONTAINS,
             start=EdgePath(value=self._lookup.org_id(), match_by="id"),
-            end=EdgePath(value=self.id, match_by="id"),
+            end=EdgePath(value=agent_pool_graph_id(self.id), match_by="id"),
             properties=EdgeProperties(traversable=True),
         )
 
