@@ -48,6 +48,7 @@ from .models import (
     ResourceSet,
     ResourceSetRoleAssignment,
     User,
+    UserFactor,
     UserRoleAssignment,
 )
 from .models.built_in_role import BUILT_IN_ROLES
@@ -294,11 +295,17 @@ def users(ctx: SourceContext):
             yield user
 
 
-# TODO: Disabled until we find a more efficient way to process factors
-# @app.transformer(name="factors", parallelized=True)
-# def factors(user: User, ctx: SourceContext):
-#     for page in ctx.pool.paginate(f"/api/v1/users/{user.id}/factors"):
-#         yield page
+@app.transformer(
+    name="user_factors",
+    columns=UserFactor,
+    parallelized=True,
+    selected=False,
+)
+def user_factors(user: User, ctx: SourceContext):
+    # Factor enumeration requires one additional API request per user, so keep it opt-in.
+    for page in ctx.pool.paginate(f"/api/v1/users/{user.id}/factors"):
+        for item in page:
+            yield {"user_id": user.id, **item}
 
 
 @app.resource(
@@ -830,6 +837,7 @@ def source(
     return (
         organization(ctx),
         users_resource,
+        users_resource | user_factors(ctx),
         groups_resource,
         groups_resource | group_memberships(ctx),
         groups_resource | group_assigned_apps(ctx),

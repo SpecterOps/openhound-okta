@@ -41,6 +41,7 @@ def preprocess(ctx: PreProcContext):
     return {
         "organization": "organization",
         "users": "users",
+        "user_factors": "user_factors",
         "groups": "groups",
         "group_memberships": "group_memberships",
         "applications": "applications",

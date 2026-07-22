@@ -12,6 +12,16 @@ class OktaLookup(LookupManager):
         self.client = client
 
     @lru_cache
+    def _table_exists(self, table_name: str) -> bool:
+        row = self.client.execute(
+            """SELECT 1 FROM information_schema.tables
+               WHERE table_schema = ? AND table_name = ?
+               LIMIT 1""",
+            [self.schema, table_name],
+        ).fetchone()
+        return row is not None
+
+    @lru_cache
     def org_id(self) -> str | None:
         res = self._find_single_object(f"""SELECT id FROM {self.schema}.organization""")
         return res
@@ -95,6 +105,18 @@ class OktaLookup(LookupManager):
             return False
 
         return bool(res)
+
+    @lru_cache
+    def user_authentication_factors_count(self, user_id: str) -> int:
+        if not self._table_exists("user_factors"):
+            return 0
+
+        row = self.client.execute(
+            f"""SELECT COUNT(*) FROM {self.schema}.user_factors
+                WHERE user_id = ?""",
+            [user_id],
+        ).fetchone()
+        return int(row[0]) if row else 0
 
     @lru_cache
     def application_ids_by_name(self, app_name: str):

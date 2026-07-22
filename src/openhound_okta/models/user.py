@@ -16,9 +16,12 @@ from openhound_okta.main import app
 class UserProperties(OktaNodeProperties):
     """Properties for the Okta_User node"""
 
+    okta_domain: str
     status: str
     created: datetime
     enabled: bool = False
+    has_role_assignments: bool = False
+    authentication_factors: int = 0
     login: str | None = None
     email: str | None = None
     last_login: datetime | None = None
@@ -68,6 +71,7 @@ class Profile(BaseModel):
     manager_id: str | None = Field(default=None, alias="managerId")
     login: str
     state: str | None = None
+    display_name: str | None = Field(default=None, alias="displayName")
 
 
 @app.asset(
@@ -124,6 +128,7 @@ class User(BaseAsset):
 
     @property
     def as_node(self):
+        display_name = self.profile.display_name or self.profile.login or self.id
         return OktaNode(
             kinds=[nk.USER],
             properties=UserProperties(
@@ -131,10 +136,15 @@ class User(BaseAsset):
                 tenant_domain=self._extras["tenant"],
                 id=self.id,
                 name=self.profile.login,
-                displayname=self.profile.login
-                if self.profile and self.profile.login
-                else self.id,
+                displayname=display_name,
+                okta_domain=self._extras["tenant"],
                 enabled=self.enabled,
+                has_role_assignments=self._lookup.has_role_assignments(
+                    self.id, "user"
+                ),
+                authentication_factors=self._lookup.user_authentication_factors_count(
+                    self.id
+                ),
                 login=self.profile.login,
                 email=self.profile.email,
                 first_name=self.profile.first_name,

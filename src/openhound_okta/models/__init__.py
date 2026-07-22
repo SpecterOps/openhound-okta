@@ -31,10 +31,12 @@ from .resource import Resource
 from .resource_set import ResourceSet
 from .resource_set_role_assignment import ResourceSetRoleAssignment
 from .user import User
+from .user_factors import UserFactor
 from .user_role_assignment import UserRoleAssignment
 
 __all__ = [
     "User",
+    "UserFactor",
     "ApplicationGroupMapping",
     "Agent",
     "Group",
