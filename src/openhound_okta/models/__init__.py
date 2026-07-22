@@ -6,7 +6,7 @@ from .application import Application
 from .application_grants import ApplicationGrant
 from .application_group_mappings import ApplicationGroupMapping
 from .application_jwks import ApplicationJWKS
-from .application_secrets import ApplicationSecrets
+from .application_secrets import ApiServiceSecrets, ApplicationSecrets
 from .application_users import ApplicationUser
 from .auth_server import AuthServer
 from .built_in_role import BuiltInRole
@@ -75,6 +75,7 @@ __all__ = [
     "Policy",
     "ApplicationJWKS",
     "ApplicationSecrets",
+    "ApiServiceSecrets",
     "UserRoleAssignment",
     "GroupRoleAssignment",
     "ClientRoleAssignment",

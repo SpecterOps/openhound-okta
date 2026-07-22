@@ -75,6 +75,7 @@ def preprocess(ctx: PreProcContext):
         "saml_trusted_issuers": "saml_trusted_issuers",
         "saml_sp_assertion_consumer_services": "saml_sp_assertion_consumer_services",
         "application_secrets": "application_secrets",
+        "api_service_secrets": "api_service_secrets",
         "devices": "devices",
         "authorization_servers": "authorization_servers",
         "identity_providers": "identity_providers",

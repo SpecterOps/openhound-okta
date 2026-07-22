@@ -20,6 +20,7 @@ from .models import (
     Agent,
     AgentPool,
     ApiService,
+    ApiServiceSecrets,
     ApiToken,
     Application,
     ApplicationGrant,
@@ -587,6 +588,21 @@ def application_secrets(application: Application, ctx: SourceContext):
         ):
             for item in page:
                 yield {"app_id": application.id, "app_name": application.name, **item}
+
+
+@app.transformer(
+    name="api_service_secrets", columns=ApiServiceSecrets, parallelized=True
+)
+def api_service_secrets(api_service: ApiService, ctx: SourceContext):
+    yield from api_service_secret_rows(api_service, ctx)
+
+
+def api_service_secret_rows(api_service: ApiService, ctx: SourceContext):
+    for page in ctx.pool.paginate(
+        f"/integrations/api/v1/api-services/{api_service.id}/credentials/secrets"
+    ):
+        for item in page:
+            yield {"app_id": api_service.id, "app_name": api_service.name, **item}
 
 
 @app.transformer(name="application_users", columns=ApplicationUser, parallelized=True)
@@ -1159,6 +1175,7 @@ def source(
     applications_resource = applications(ctx)
     client_apps_resource = client_applications(ctx)
     agent_pools_resource = agent_pools(ctx)
+    api_services_resource = api_services(ctx)
     identity_providers_resource = identity_providers(ctx)
     policies_resource = policy_types | policies(ctx)
     resource_sets_resource = resource_sets(ctx)
@@ -1204,7 +1221,8 @@ def source(
         custom_roles_resource,
         custom_roles_resource | custom_role_permissions(ctx),
         api_tokens(ctx),
-        api_services(ctx),
+        api_services_resource,
+        api_services_resource | api_service_secrets(ctx),
         built_in_roles_resource,
         built_in_roles_resource | built_in_role_permissions,
         privileged_users_resource,

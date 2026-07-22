@@ -158,11 +158,9 @@ class OktaLookup(LookupManager):
 
     @lru_cache
     def application_secret_ids(self, app_id: str):
-        res = self._find_all_objects(
-            f"""SELECT id FROM {self.schema}.application_secrets WHERE app_id = ?""",
-            [app_id],
-        )
-        return res
+        secret_ids = set(self._ids_by_value("application_secrets", "app_id", app_id))
+        secret_ids.update(self._ids_by_value("api_service_secrets", "app_id", app_id))
+        return tuple((secret_id,) for secret_id in sorted(secret_ids))
 
     @lru_cache
     def application_oauth_scopes(self, app_id: str) -> tuple[str, ...]:

@@ -31,11 +31,11 @@ class SecretProperties(OktaNodeProperties):
 
 
 @app.asset(
-    description="Okta application client secrets",
+    description="Okta client secrets",
     node=NodeDef(
         icon="key",
         kind=nk.CLIENT_SECRET,
-        description="Okta client secret configured for application",
+        description="Okta client secret configured for an application or API service",
         properties=SecretProperties,
     ),
     edges=[
@@ -86,3 +86,25 @@ class ApplicationSecrets(BaseAsset):
             end=EdgePath(value=self.app_id, match_by="id"),
             properties=EdgeProperties(traversable=True),
         )
+
+
+@app.asset(
+    description="Okta API service integration client secrets",
+    node=NodeDef(
+        icon="key",
+        kind=nk.CLIENT_SECRET,
+        description="Okta client secret configured for API service integration",
+        properties=SecretProperties,
+    ),
+    edges=[
+        EdgeDef(
+            start=nk.CLIENT_SECRET,
+            end=nk.INTEGRATION,
+            kind=ek.SECRET_OF,
+            description="Client secret belongs to API service integration",
+            traversable=True,
+        )
+    ],
+)
+class ApiServiceSecrets(ApplicationSecrets):
+    pass
