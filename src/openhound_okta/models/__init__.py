@@ -3,6 +3,7 @@ from .agent_pool import AgentPool
 from .api_service import ApiService
 from .api_token import ApiToken
 from .application import Application
+from .application_grants import ApplicationGrant
 from .application_group_mappings import ApplicationGroupMapping
 from .application_jwks import ApplicationJWKS
 from .application_secrets import ApplicationSecrets
@@ -39,6 +40,7 @@ __all__ = [
     "Group",
     "Organization",
     "Application",
+    "ApplicationGrant",
     "Device",
     "AuthServer",
     "ResourceSet",

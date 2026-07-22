@@ -20,6 +20,7 @@ from .models import (
     ApiService,
     ApiToken,
     Application,
+    ApplicationGrant,
     ApplicationGroupMapping,
     ApplicationJWKS,
     ApplicationSecrets,
@@ -381,6 +382,29 @@ def application_jwks(application: Application, ctx: SourceContext):
                 "app_name": application.name,
                 **key.model_dump(),
             }
+
+
+@app.transformer(name="application_grants", columns=ApplicationGrant)
+def application_grants(application: Application, ctx: SourceContext):
+    oauth_client = application.settings.oauth_client if application.settings else None
+    if application.sign_on_mode != "OPENID_CONNECT" and not (
+        oauth_client and oauth_client.application_type == "service"
+    ):
+        return
+
+    try:
+        for page in ctx.pool.paginate(f"/api/v1/apps/{application.id}/grants"):
+            for item in page:
+                yield {"app_id": application.id, **item}
+    except Exception as e:
+        status_code = getattr(getattr(e, "response", None), "status_code", None)
+        if status_code != 404:
+            logger.error(
+                "Error fetching application grants for %s: %s",
+                application.id,
+                e,
+                extra={"resource": "application_grants", "phase": "defer"},
+            )
 
 
 @app.transformer(
@@ -813,6 +837,7 @@ def source(
         client_apps_resource,
         client_apps_resource | client_role_assignments(ctx),
         applications_resource,
+        applications_resource | application_grants(ctx),
         applications_resource | application_users(ctx),
         applications_resource | application_jwks(ctx),
         applications_resource | application_secrets(ctx),

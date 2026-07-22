@@ -84,6 +84,19 @@ class OktaLookup(LookupManager):
         return res
 
     @lru_cache
+    def has_role_assignments(self, principal_id: str, principal_type: str) -> bool:
+        try:
+            res = self._find_single_object(
+                f"""SELECT id FROM {self.schema}.principals_with_admin_roles
+                    WHERE id = ? AND principal_type = ?""",
+                [principal_id, principal_type],
+            )
+        except duckdb.CatalogException:
+            return False
+
+        return bool(res)
+
+    @lru_cache
     def application_ids_by_name(self, app_name: str):
         res = self._find_all_objects(
             f"""SELECT id FROM {self.schema}.applications WHERE name = ?""",
@@ -106,6 +119,62 @@ class OktaLookup(LookupManager):
             [app_id],
         )
         return res
+
+    @lru_cache
+    def application_oauth_scopes(self, app_id: str) -> tuple[str, ...]:
+        try:
+            rows = self._find_all_objects(
+                f"""SELECT scope_id FROM {self.schema}.application_grants
+                    WHERE app_id = ?
+                      AND scope_id IS NOT NULL
+                      AND TRIM(scope_id) <> ''""",
+                [app_id],
+            )
+        except duckdb.CatalogException:
+            return ()
+
+        return tuple(scope_id for (scope_id,) in rows)
+
+    @lru_cache
+    def application_domain_sid(self, app_id: str) -> str | None:
+        sid_queries = (
+            f"""SELECT COALESCE(
+                    json_extract_string(profile, '$.objectSid'),
+                    json_extract_string(profile, '$.object_sid')
+                )
+                FROM {self.schema}.application_users
+                WHERE app_id = ?
+                  AND sync_state = 'SYNCHRONIZED'
+                  AND COALESCE(
+                    json_extract_string(profile, '$.objectSid'),
+                    json_extract_string(profile, '$.object_sid')
+                  ) IS NOT NULL
+                LIMIT 1""",
+            f"""SELECT COALESCE(
+                    json_extract_string(profile, '$.objectSid'),
+                    json_extract_string(profile, '$.object_sid')
+                )
+                FROM {self.schema}.groups
+                WHERE COALESCE(
+                    json_extract_string(source, '$.id'),
+                    json_extract_string(source, '$.source_id')
+                  ) = ?
+                  AND COALESCE(
+                    json_extract_string(profile, '$.objectSid'),
+                    json_extract_string(profile, '$.object_sid')
+                  ) IS NOT NULL
+                LIMIT 1""",
+        )
+        for query in sid_queries:
+            try:
+                object_sid = self._find_single_object(query, [app_id])
+            except duckdb.CatalogException:
+                continue
+
+            if object_sid and "-" in object_sid:
+                return object_sid.rsplit("-", 1)[0]
+
+        return None
 
     @lru_cache
     def resource_set_application_ids(self, resource_set_id: str):

@@ -44,6 +44,8 @@ def preprocess(ctx: PreProcContext):
         "groups": "groups",
         "group_memberships": "group_memberships",
         "applications": "applications",
+        "application_grants": "application_grants",
+        "application_users": "application_users",
         "api_services": "api_services",
         "application_secrets": "application_secrets",
         "devices": "devices",
