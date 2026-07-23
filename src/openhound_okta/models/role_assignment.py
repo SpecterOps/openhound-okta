@@ -6,6 +6,10 @@ from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperti
 from pydantic import BaseModel, ConfigDict, Field
 
 from openhound_okta.kinds import edges as ek
+from openhound_okta.models.built_in_role import (
+    SUPPORTED_ROLE_ASSIGNMENT_TYPES,
+    built_in_role_graph_id,
+)
 
 DIRECT_ASSIGNMENT_TYPES = {
     "user": "USER",
@@ -25,9 +29,6 @@ GROUP_TARGETED_ROLE_TYPES = {
 }
 
 RESOURCE_SET_SCOPED_BUILT_IN_ROLE_TYPES = {
-    "ACCESS_CERTIFICATIONS_ADMIN",
-    "ACCESS_REQUEST_ADMIN",
-    "ACCESS_REQUESTS_ADMIN",
     "WORKFLOWS_ADMIN",
 }
 
@@ -79,6 +80,7 @@ class RoleAssignment(BaseAsset):
             self.status == "ACTIVE"
             and expected_assignment_type is not None
             and self.assignment_type == expected_assignment_type
+            and self.type in SUPPORTED_ROLE_ASSIGNMENT_TYPES
         )
 
     @property
@@ -226,7 +228,10 @@ class RoleAssignment(BaseAsset):
             yield Edge(
                 kind=ek.HAS_ROLE,
                 start=EdgePath(value=self.source_id, match_by="id"),
-                end=EdgePath(value=self.type, match_by="id"),
+                end=EdgePath(
+                    value=built_in_role_graph_id(self.type, self._extras["tenant"]),
+                    match_by="id",
+                ),
                 properties=EdgeProperties(traversable=False),
             )
         else:

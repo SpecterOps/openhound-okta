@@ -185,6 +185,20 @@ def test_same_role_assignment_id_is_unique_per_assignee():
     assert first.as_node.id != second.as_node.id
 
 
+def test_built_in_role_assignment_has_role_edge_uses_domain_qualified_role_id():
+    assignment = make_assignment(
+        UserRoleAssignment,
+        from_resource="user",
+        source_id="user-1",
+        assignment_type="USER",
+        role_type="SUPER_ADMIN",
+    )
+
+    has_role = next(edge for edge in assignment.edges if edge.kind == ek.HAS_ROLE)
+
+    assert has_role.end.value == "SUPER_ADMIN@example.okta.com"
+
+
 def test_privileged_users_are_returned_as_validated_models_for_transformers():
     assert PrivilegedUser.dlt_config == {"return_validated_models": True}
 
@@ -220,22 +234,28 @@ def test_inactive_and_indirect_assignments_do_not_emit_graph_entries(
 
 
 @pytest.mark.parametrize(
-    ("from_resource", "assignment_type", "status", "expected"),
+    ("from_resource", "assignment_type", "status", "role_type", "expected"),
     [
-        ("user", "USER", "ACTIVE", True),
-        ("user", "GROUP", "ACTIVE", False),
-        ("group", "GROUP", "ACTIVE", True),
-        ("group", "USER", "ACTIVE", False),
-        ("client", "CLIENT", "ACTIVE", True),
-        ("client", "CLIENT", "INACTIVE", False),
+        ("user", "USER", "ACTIVE", "SUPER_ADMIN", True),
+        ("user", "USER", "ACTIVE", "CUSTOM", True),
+        ("user", "GROUP", "ACTIVE", "SUPER_ADMIN", False),
+        ("group", "GROUP", "ACTIVE", "SUPER_ADMIN", True),
+        ("group", "USER", "ACTIVE", "SUPER_ADMIN", False),
+        ("client", "CLIENT", "ACTIVE", "SUPER_ADMIN", True),
+        ("client", "CLIENT", "INACTIVE", "SUPER_ADMIN", False),
+        ("user", "USER", "ACTIVE", "ACCESS_REQUEST_ADMIN", False),
     ],
 )
 def test_collection_filter_keeps_only_direct_active_assignments(
-    from_resource, assignment_type, status, expected
+    from_resource, assignment_type, status, role_type, expected
 ):
     assert (
         _is_direct_active_role_assignment(
-            {"assignmentType": assignment_type, "status": status},
+            {
+                "assignmentType": assignment_type,
+                "status": status,
+                "type": role_type,
+            },
             from_resource,
         )
         is expected
@@ -400,9 +420,6 @@ def test_group_targeted_standard_role_assignment_is_not_scoped_to_org():
 @pytest.mark.parametrize(
     "role_type",
     [
-        "ACCESS_CERTIFICATIONS_ADMIN",
-        "ACCESS_REQUEST_ADMIN",
-        "ACCESS_REQUESTS_ADMIN",
         "WORKFLOWS_ADMIN",
     ],
 )
@@ -416,6 +433,28 @@ def test_resource_set_scoped_built_in_roles_do_not_fall_back_to_org(role_type):
     )
 
     assert list(assignment._scoped_to_org_edge) == []
+
+
+@pytest.mark.parametrize(
+    "role_type",
+    [
+        "API_ADMIN",
+        "ACCESS_CERTIFICATIONS_ADMIN",
+        "ACCESS_REQUEST_ADMIN",
+        "ACCESS_REQUESTS_ADMIN",
+    ],
+)
+def test_unsupported_built_in_role_assignments_do_not_emit_graph_content(role_type):
+    assignment = make_assignment(
+        UserRoleAssignment,
+        from_resource="user",
+        source_id="user-1",
+        assignment_type="USER",
+        role_type=role_type,
+    )
+
+    assert assignment.as_node is None
+    assert list(assignment.edges) == []
 
 
 def test_group_and_client_assignments_emit_app_scope_edges():

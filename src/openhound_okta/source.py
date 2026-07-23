@@ -75,7 +75,11 @@ from .models.saml import (
     saml_sp_acs_rows,
     saml_trusted_issuer_row,
 )
-from .models.built_in_role import BUILT_IN_ROLES
+from .models.built_in_role import (
+    BUILT_IN_ROLES,
+    SUPPORTED_ROLE_ASSIGNMENT_TYPES,
+    UNSUPPORTED_BUILT_IN_ROLES,
+)
 from .models.built_in_role_permission import BUILT_IN_PERMISSIONS
 from .models.role_assignment import DIRECT_ASSIGNMENT_TYPES, GROUP_TARGETED_ROLE_TYPES
 from .utils.auth import OktaAuth
@@ -129,6 +133,7 @@ def _is_direct_active_role_assignment(
     return (
         item.get("status") == "ACTIVE"
         and item.get("assignmentType") == DIRECT_ASSIGNMENT_TYPES.get(from_resource)
+        and item.get("type") in SUPPORTED_ROLE_ASSIGNMENT_TYPES
     )
 
 
@@ -972,6 +977,8 @@ def custom_roles(ctx: SourceContext):
     for page in ctx.pool.paginate("/api/v1/iam/roles"):
         for item in page:
             # For whatever reason the WORKFLOWS_ADMIN also shows up in the custom roles endpoint
+            if item["id"] in UNSUPPORTED_BUILT_IN_ROLES:
+                continue
             if item["id"] not in BUILT_IN_PERMISSIONS:
                 yield item
 
