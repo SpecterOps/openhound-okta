@@ -21,6 +21,10 @@ class StubLookup:
         assert app_id == "app-1"
         return '{"app":{"baseUrl":"https://source.example.okta.com"}}'
 
+    def application_name(self, app_id):
+        assert app_id == "app-1"
+        return "okta_org2org"
+
 
 def make_group(*, has_role_assignments: bool = False, **overrides):
     group = Group.model_validate(
@@ -96,7 +100,7 @@ def test_group_node_emits_active_directory_profile_properties():
     assert properties.object_guid == "54cce1ad-7278-4ca3-b146-19ec6f90d34a"
 
 
-def test_group_membership_sync_matcher_uses_okta_group_type_property():
+def test_group_membership_sync_matcher_uses_oktahound_name_and_domain_name():
     group = make_group(
         type="APP_GROUP",
         source={"id": "app-1"},
@@ -105,5 +109,7 @@ def test_group_membership_sync_matcher_uses_okta_group_type_property():
     edge = next(edge for edge in group.edges if edge.kind == ek.MEMBERSHIP_SYNC)
     matchers = {matcher.key: matcher.value for matcher in edge.start.property_matchers}
 
-    assert matchers["okta_group_type"] == "OKTA_GROUP"
-    assert "type" not in matchers
+    assert matchers == {
+        "name": "Engineering",
+        "domainName": "source.example.okta.com",
+    }

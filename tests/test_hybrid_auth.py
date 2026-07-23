@@ -4,6 +4,7 @@ from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.models.hybrid_auth import (
     HybridAuthEdgeProperties,
     hybrid_application_edge_kind,
+    hybrid_group_target,
     hybrid_user_sign_on_edge_kind,
     hybrid_user_target,
     okta_org2org_domain,
@@ -219,6 +220,53 @@ def test_hybrid_user_targets_keep_external_schema_match_properties():
     )
 
 
+@pytest.mark.parametrize(
+    ("app_name", "settings", "expected_kind", "expected_matchers"),
+    [
+        (
+            "active_directory",
+            {"namingContext": "corp.example.com"},
+            nk.AD_GROUP,
+            (
+                ("samAccountName", "Engineering"),
+                ("domainFqdn", "corp.example.com"),
+            ),
+        ),
+        (
+            "okta_org2org",
+            {"baseUrl": "https://target.example.okta.com/"},
+            nk.GROUP,
+            (
+                ("name", "Engineering"),
+                ("domainName", "target.example.okta.com"),
+            ),
+        ),
+        (
+            "office365",
+            {"microsoftTenantId": "tenant-id"},
+            nk.AZ_GROUP,
+            (
+                ("displayName", "Engineering"),
+                ("tenantId", "tenant-id"),
+            ),
+        ),
+    ],
+)
+def test_hybrid_group_targets_match_oktahound(
+    app_name, settings, expected_kind, expected_matchers
+):
+    target = hybrid_group_target(
+        app_name,
+        settings,
+        group_name="Engineering",
+    )
+
+    assert target is not None
+    assert target.kind == expected_kind
+    assert target.match_by == "property"
+    assert target.property_matchers == expected_matchers
+
+
 def test_snowflake_user_target_uses_uppercase_composite_object_id():
     target = hybrid_user_target(
         "snowflake",
@@ -258,6 +306,8 @@ def test_missing_or_unsupported_hybrid_targets_are_not_emitted():
         )
         is None
     )
+    assert hybrid_group_target("unsupported_app", {}, group_name="Engineering") is None
+    assert hybrid_group_target("okta_org2org", {}, group_name="Engineering") is None
 
 
 def test_okta_org2org_and_one_password_helpers_match_oktahound():

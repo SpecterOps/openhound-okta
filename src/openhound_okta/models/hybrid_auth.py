@@ -247,3 +247,40 @@ def hybrid_user_target(
             ),
         )
     return None
+
+
+def hybrid_group_target(
+    app_name: str,
+    app_settings: dict | None,
+    *,
+    group_name: str | None,
+) -> HybridTarget | None:
+    """Build the external group matcher used by OktaHound sync edges."""
+
+    settings = app_settings or {}
+
+    if app_name == ACTIVE_DIRECTORY_APP:
+        return HybridTarget.by_properties(
+            nk.AD_GROUP,
+            (
+                ("samAccountName", group_name),
+                ("domainFqdn", settings.get("namingContext")),
+            ),
+        )
+    if app_name == OKTA_ORG2ORG_APP:
+        return HybridTarget.by_properties(
+            nk.GROUP,
+            (
+                ("name", group_name),
+                ("domainName", okta_org2org_domain(settings.get("baseUrl"))),
+            ),
+        )
+    if app_name == OFFICE365_APP:
+        return HybridTarget.by_properties(
+            nk.AZ_GROUP,
+            (
+                ("displayName", group_name),
+                ("tenantId", settings.get("microsoftTenantId")),
+            ),
+        )
+    return None

@@ -571,7 +571,45 @@ def application_group_push_mappings(application: Application, ctx: SourceContext
             params={"limit": ctx.group_push_mappings_page_size},
         ):
             for item in page:
-                yield {"app_id": application.id, "app_name": application.name, **item}
+                yield application_group_push_mapping_row(application, item, ctx)
+
+
+def application_group_push_mapping_row(
+    application: Application,
+    mapping: Mapping[str, object],
+    ctx: SourceContext,
+) -> dict[str, object]:
+    row = {"app_id": application.id, "app_name": application.name, **mapping}
+    target_group_id = mapping.get("targetGroupId")
+    if not isinstance(target_group_id, str):
+        return row
+
+    try:
+        target_group = ctx.pool.get(f"/api/v1/groups/{target_group_id}").json()
+    except OktaRetryExhaustedError:
+        raise
+    except Exception as e:
+        logger.error(
+            "Error fetching target group %s for group push mapping %s: %s",
+            target_group_id,
+            mapping.get("id"),
+            e,
+            extra={"resource": "application_group_push_mappings", "phase": "defer"},
+        )
+        return row
+
+    if not isinstance(target_group, Mapping):
+        return row
+
+    profile = target_group.get("profile")
+    if not isinstance(profile, Mapping):
+        return row
+
+    target_group_name = profile.get("name")
+    if isinstance(target_group_name, str) and target_group_name:
+        row["target_group_name"] = target_group_name
+
+    return row
 
 
 @app.transformer(

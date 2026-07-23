@@ -14,6 +14,7 @@ from openhound_okta.source import (
     GROUP_PUSH_MAPPINGS_PAGE_SIZE,
     IDENTITY_PROVIDER_USERS_PAGE_SIZE,
     _saml_metadata_fields,
+    application_group_push_mapping_row,
     application_group_push_mappings,
     application_user_rows,
     identity_provider_users,
@@ -415,15 +416,21 @@ def test_successful_rate_header_cooldown_is_clamped():
 
 
 class RecordingPool:
-    def __init__(self, pages=None):
+    def __init__(self, pages=None, responses=None):
         self.pages = pages or []
+        self.responses = responses or {}
         self.path = None
         self.kwargs = None
+        self.get_paths = []
 
     def paginate(self, path, **kwargs):
         self.path = path
         self.kwargs = kwargs
         yield from self.pages
+
+    def get(self, path, **kwargs):
+        self.get_paths.append(path)
+        return SimpleNamespace(json=lambda: self.responses[path])
 
 
 def test_group_push_mappings_request_the_maximum_page_size():
@@ -443,6 +450,31 @@ def test_group_push_mappings_request_the_maximum_page_size():
     assert rows == [{"app_id": "0oa123", "app_name": "example_app", "id": "gpm123"}]
     assert pool.path == "/api/v1/apps/0oa123/group-push/mappings"
     assert pool.kwargs == {"params": {"limit": 1000}}
+
+
+def test_group_push_mapping_rows_fetch_target_group_name():
+    application = SimpleNamespace(id="0oa123", name="okta_org2org")
+    pool = RecordingPool(
+        responses={
+            "/api/v1/groups/00g-target": {
+                "profile": {"name": "Engineering"},
+            }
+        }
+    )
+    ctx = SimpleNamespace(pool=pool)
+
+    row = application_group_push_mapping_row(
+        application,
+        {
+            "id": "gpm123",
+            "sourceGroupId": "00g-source",
+            "targetGroupId": "00g-target",
+        },
+        ctx,
+    )
+
+    assert row["target_group_name"] == "Engineering"
+    assert pool.get_paths == ["/api/v1/groups/00g-target"]
 
 
 def test_identity_provider_users_request_the_maximum_page_size():

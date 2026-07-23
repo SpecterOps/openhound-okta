@@ -61,6 +61,13 @@ class OktaLookup(LookupManager):
         return res
 
     @lru_cache
+    def application_name(self, app_id: str) -> str | None:
+        return self._find_single_object(
+            f"""SELECT name FROM {self.schema}.applications WHERE id = ?""",
+            [app_id],
+        )
+
+    @lru_cache
     def all_groups(self):
         res = self._find_all_objects(f"""SELECT id FROM {self.schema}.groups""")
         return res

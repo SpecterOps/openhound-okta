@@ -4,17 +4,20 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import ClassVar
-from urllib.parse import urlparse
 
 from dlt.common import json
 from dlt.common.libs.pydantic import DltConfig
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
-from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties, ConditionalEdgePath, PropertyMatch
+from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
 from pydantic import BaseModel, ConfigDict, Field
 
 from openhound_okta.graph import OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
+from openhound_okta.models.hybrid_auth import (
+    hybrid_group_target,
+    hybrid_target_edge_path,
+)
 
 
 @dataclass
@@ -227,28 +230,26 @@ class Group(BaseAsset):
             and self.profile
             and self.profile.name
         ):
+            app_name = self._lookup.application_name(self.source.id)
             app_settings = self._lookup.application_settings(self.source.id)
-            if app_settings:
-                app_settings_obj = json.loads(app_settings)
-                source_domain = urlparse(app_settings_obj["app"]["baseUrl"]).netloc
-                yield Edge(
-                    kind=ek.MEMBERSHIP_SYNC,
-                    start=ConditionalEdgePath(
-                        kind=nk.GROUP, property_matchers=[
-                            PropertyMatch(
-                                key="tenant_domain", value=source_domain
-                            ),
-                            PropertyMatch(
-                                key="okta_group_type", value="OKTA_GROUP"
-                            ),
-                            PropertyMatch(
-                                key="name", value=self.profile.name.upper()
-                            )
-                        ]
-                    ),
-                    end=EdgePath(value=self.id, match_by="id"),
-                    properties=EdgeProperties(traversable=True),
-                )
+            if not app_name or not app_settings:
+                return
+
+            app_settings_obj = json.loads(app_settings)
+            target = hybrid_group_target(
+                app_name,
+                app_settings_obj.get("app"),
+                group_name=self.profile.name,
+            )
+            if target is None:
+                return
+
+            yield Edge(
+                kind=ek.MEMBERSHIP_SYNC,
+                start=hybrid_target_edge_path(target),
+                end=EdgePath(value=self.id, match_by="id"),
+                properties=EdgeProperties(traversable=True),
+            )
 
     @property
     def edges(self):
