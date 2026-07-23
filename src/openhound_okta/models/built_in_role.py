@@ -100,6 +100,9 @@ class BuiltInRole(BaseAsset):
 
     @property
     def as_node(self):
+        if self.type not in BUILT_IN_ROLE_METADATA:
+            return None
+
         tenant_domain = self._extras["tenant"]
         role_metadata = BUILT_IN_ROLE_METADATA[self.type]
         role_label = role_metadata["label"]
@@ -120,6 +123,9 @@ class BuiltInRole(BaseAsset):
 
     @property
     def edges(self):
+        if self.type not in BUILT_IN_ROLE_METADATA:
+            return
+
         role_id = built_in_role_graph_id(self.type, self._extras["tenant"])
         yield Edge(
             kind=ek.CONTAINS,

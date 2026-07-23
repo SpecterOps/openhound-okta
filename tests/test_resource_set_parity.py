@@ -165,3 +165,27 @@ def test_workflows_resource_set_ids_are_tenant_qualified_across_graph_edges():
     edge = next(resource.edges)
     assert edge.kind == ek.RESOURCE_SET_CONTAINS
     assert edge.start.value == "WORKFLOWS_IAM_POLICY@example.okta.com"
+
+
+def test_resource_set_node_emits_oktahound_equivalent_properties():
+    lookup = make_lookup()
+    resource_set = ResourceSet.model_validate(
+        {
+            "id": "resource-set-1",
+            "label": "Help Desk Users",
+            "description": "Scoped help desk users",
+            "created": "2026-01-01T00:00:00Z",
+            "lastUpdated": "2026-01-02T00:00:00Z",
+        }
+    )
+    resource_set._lookup = lookup
+    resource_set._extras = {"tenant": "example.okta.com"}
+
+    properties = resource_set.as_node.properties
+
+    assert properties.id == "resource-set-1"
+    assert properties.name == "Help Desk Users"
+    assert properties.displayname == "Help Desk Users"
+    assert properties.okta_domain == "example.okta.com"
+    assert properties.description == "Scoped help desk users"
+    assert not hasattr(properties, "label")

@@ -25,7 +25,7 @@ def resource_set_node_id(resource_set_id: str, tenant_domain: str | None) -> str
 class ResourceSetProperties(OktaNodeProperties):
     """Properties for the Okta_ResourceSet node"""
 
-    label: str
+    okta_domain: str
     created: datetime
     description: str | None = None
     last_updated: datetime | None = None
@@ -76,7 +76,7 @@ class ResourceSet(BaseAsset):
                 id=self.node_id,
                 name=self.label,
                 displayname=self.label,
-                label=self.label,
+                okta_domain=self._extras["tenant"],
                 created=self.created,
                 description=self.description,
                 last_updated=self.last_updated,

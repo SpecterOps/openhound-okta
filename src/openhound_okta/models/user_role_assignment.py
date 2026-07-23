@@ -15,6 +15,7 @@ from openhound_okta.models.role_assignment import RoleAssignment
 @dataclass
 class UserRoleAssignmentProperties(OktaNodeProperties):
     id: str
+    okta_domain: str
     assignment_type: str
     type: str
     status: str
@@ -69,6 +70,13 @@ class Embedded(BaseModel):
         properties=UserRoleAssignmentProperties,
     ),
     edges=[
+        EdgeDef(
+            start=nk.ORG,
+            end=nk.ROLE_ASSIGNMENT,
+            kind=ek.CONTAINS,
+            description="Organization contains role assignment",
+            traversable=True,
+        ),
         EdgeDef(
             start=nk.USER,
             end=nk.ROLE_ASSIGNMENT,
@@ -442,6 +450,7 @@ class UserRoleAssignment(RoleAssignment):
                 id=self.node_id,
                 name=self.label,
                 displayname=self.label,
+                okta_domain=self._extras["tenant"],
                 status=self.status,
                 created=self.created,
                 last_updated=self.last_updated,
@@ -556,6 +565,7 @@ class UserRoleAssignment(RoleAssignment):
         if not self.is_direct_active_assignment:
             return
 
+        yield from self._contains_edge
         yield from self._has_role_assignment_edges
         yield from self._has_role_edges
         yield from self._app_admin_edges

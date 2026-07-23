@@ -223,6 +223,15 @@ class RoleAssignment(BaseAsset):
         )
 
     @property
+    def _contains_edge(self):
+        yield Edge(
+            kind=ek.CONTAINS,
+            start=EdgePath(value=self._lookup.org_id(), match_by="id"),
+            end=EdgePath(value=self.node_id, match_by="id"),
+            properties=EdgeProperties(traversable=True),
+        )
+
+    @property
     def _has_role_edges(self):
         if self.type != "CUSTOM":
             yield Edge(

@@ -60,3 +60,10 @@ def test_built_in_role_contains_edge_uses_domain_qualified_id():
 
     assert edge.kind == ek.CONTAINS
     assert edge.end.value == built_in_role_graph_id("SUPER_ADMIN", "example.okta.com")
+
+
+def test_unsupported_stale_built_in_roles_are_skipped_during_convert():
+    role = make_role("API_ADMIN")
+
+    assert role.as_node is None
+    assert list(role.edges) == []

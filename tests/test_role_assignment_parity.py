@@ -159,11 +159,16 @@ def test_role_assignment_nodes_use_oktahound_composite_ids(
 
     assert assignment.node_id == f"role-assignment-1_{source_id}"
     assert assignment.as_node.id == assignment.node_id
+    assert assignment.as_node.properties.okta_domain == "example.okta.com"
 
     has_role_assignment = next(
         edge for edge in assignment.edges if edge.kind == ek.HAS_ROLE_ASSIGNMENT
     )
     assert has_role_assignment.end.value == assignment.node_id
+
+    contains = next(edge for edge in assignment.edges if edge.kind == ek.CONTAINS)
+    assert contains.start.value == "org-1"
+    assert contains.end.value == assignment.node_id
 
 
 def test_same_role_assignment_id_is_unique_per_assignee():

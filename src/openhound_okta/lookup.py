@@ -37,6 +37,18 @@ class OktaLookup(LookupManager):
         return res
 
     @lru_cache
+    def custom_role_permissions(self, role_id: str) -> tuple[str, ...]:
+        if not self._table_exists("custom_role_permissions"):
+            return ()
+
+        rows = self._find_all_objects(
+            f"""SELECT label FROM {self.schema}.custom_role_permissions
+                WHERE role_id = ?""",
+            [role_id],
+        )
+        return tuple(label for (label,) in rows)
+
+    @lru_cache
     def application_by_id(self, app_id: str) -> bool:
         res = self._find_single_object(
             f"""SELECT id FROM {self.schema}.applications WHERE id = ?""",
