@@ -50,7 +50,10 @@ def convert(ctx: ConvertContext):
     """
     from openhound_okta.source import source as okta_source
 
-    return okta_source(), {"tenant": _tenant_domain_from_config()}
+    tenant_domain = _tenant_domain_from_config()
+    if ctx.lookup:
+        ctx.lookup.tenant_domain = tenant_domain
+    return okta_source(), {"tenant": tenant_domain}
 
 
 @app.preproc(transformer=transforms)

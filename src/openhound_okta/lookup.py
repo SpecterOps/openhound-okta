@@ -12,6 +12,7 @@ class OktaLookup(LookupManager):
         super().__init__(client, schema)
         self.schema = schema
         self.client = client
+        self.tenant_domain: str | None = None
 
     @lru_cache
     def _table_exists(self, table_name: str) -> bool:
@@ -20,6 +21,16 @@ class OktaLookup(LookupManager):
                WHERE table_schema = ? AND table_name = ?
                LIMIT 1""",
             [self.schema, table_name],
+        ).fetchone()
+        return row is not None
+
+    @lru_cache
+    def _column_exists(self, table_name: str, column_name: str) -> bool:
+        row = self.client.execute(
+            """SELECT 1 FROM information_schema.columns
+               WHERE table_schema = ? AND table_name = ? AND column_name = ?
+               LIMIT 1""",
+            [self.schema, table_name, column_name],
         ).fetchone()
         return row is not None
 
@@ -384,6 +395,8 @@ class OktaLookup(LookupManager):
 
         if path == "/api/v1/devices":
             return self._all_ids("devices")
+        if path.startswith("/api/v1/devices/"):
+            return self._existing_ids("devices", path.rsplit("/", 1)[-1])
 
         if path == "/api/v1/idps":
             return self._all_ids("identity_providers")
@@ -449,6 +462,8 @@ class OktaLookup(LookupManager):
     def _all_ids(self, table_name: str) -> tuple[str, ...]:
         if not self._table_exists(table_name):
             return ()
+        if table_name == "devices":
+            return self._device_graph_ids()
         rows = self._find_all_objects(f"""SELECT id FROM {self.schema}.{table_name}""")
         return tuple(sorted({resource_id for (resource_id,) in rows}))
 
@@ -456,6 +471,9 @@ class OktaLookup(LookupManager):
     def _existing_ids(self, table_name: str, resource_id: str) -> tuple[str, ...]:
         if not self._table_exists(table_name):
             return ()
+        if table_name == "devices":
+            graph_id = self.device_graph_id_by_okta_id(resource_id)
+            return (graph_id,) if graph_id else ()
         rows = self._find_all_objects(
             f"""SELECT id FROM {self.schema}.{table_name} WHERE id = ?""",
             [resource_id],
@@ -519,8 +537,54 @@ class OktaLookup(LookupManager):
 
     @lru_cache
     def all_devices(self):
-        res = self._find_all_objects(f"""SELECT id FROM {self.schema}.devices""")
-        return res
+        return tuple((device_id,) for device_id in self._device_graph_ids())
+
+    @lru_cache
+    def _device_graph_ids(self) -> tuple[str, ...]:
+        if not self._table_exists("devices"):
+            return ()
+
+        profile_expr = (
+            "json_extract_string(profile, '$.udid')"
+            if self._column_exists("devices", "profile")
+            else "NULL"
+        )
+        rows = self._find_all_objects(
+            f"""SELECT id, {profile_expr} FROM {self.schema}.devices"""
+        )
+        return tuple(
+            sorted(
+                {
+                    self._device_graph_id(okta_device_id, udid)
+                    for okta_device_id, udid in rows
+                }
+            )
+        )
+
+    @lru_cache
+    def device_graph_id_by_okta_id(self, okta_device_id: str) -> str | None:
+        if not self._table_exists("devices"):
+            return None
+
+        profile_expr = (
+            "json_extract_string(profile, '$.udid')"
+            if self._column_exists("devices", "profile")
+            else "NULL"
+        )
+        rows = self._find_all_objects(
+            f"""SELECT id, {profile_expr} FROM {self.schema}.devices WHERE id = ?""",
+            [okta_device_id],
+        )
+        if not rows:
+            return None
+
+        device_id, udid = rows[0]
+        return self._device_graph_id(device_id, udid)
+
+    def _device_graph_id(self, okta_device_id: str, udid: str | None) -> str:
+        from openhound_okta.models.device import device_graph_id
+
+        return device_graph_id(okta_device_id, udid, self.tenant_domain)
 
     @lru_cache
     def manager_id(self, manager_login: str):
