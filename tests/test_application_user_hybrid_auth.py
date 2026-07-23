@@ -159,7 +159,7 @@ def test_application_user_emits_id_based_hybrid_sign_on_edges(
             "alice@example.com",
             ek.OUTBOUND_SSO,
             nk.AZ_USER,
-            [("userPrincipalName", "alice@example.com"), ("tenantId", "tenant-id")],
+            [("userprincipalname", "alice@example.com"), ("tenantid", "tenant-id")],
         ),
     ],
 )

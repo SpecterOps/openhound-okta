@@ -242,8 +242,8 @@ def hybrid_user_target(
         return HybridTarget.by_properties(
             nk.AZ_USER,
             (
-                ("userPrincipalName", target_user_name),
-                ("tenantId", settings.get("microsoftTenantId")),
+                ("userprincipalname", target_user_name),
+                ("tenantid", settings.get("microsoftTenantId")),
             ),
         )
     return None
@@ -263,8 +263,8 @@ def hybrid_group_target(
         return HybridTarget.by_properties(
             nk.AD_GROUP,
             (
-                ("samAccountName", group_name),
-                ("domainFqdn", settings.get("namingContext")),
+                ("samaccountname", group_name),
+                ("domain", settings.get("namingContext")),
             ),
         )
     if app_name == OKTA_ORG2ORG_APP:
@@ -279,8 +279,8 @@ def hybrid_group_target(
         return HybridTarget.by_properties(
             nk.AZ_GROUP,
             (
-                ("displayName", group_name),
-                ("tenantId", settings.get("microsoftTenantId")),
+                ("displayname", group_name),
+                ("tenantid", settings.get("microsoftTenantId")),
             ),
         )
     return None

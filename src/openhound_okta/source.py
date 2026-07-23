@@ -451,7 +451,73 @@ def applications(ctx: SourceContext):
         for item in page:
             if item.get("signOnMode") == "SAML_2_0":
                 item = {**item, **_saml_metadata_fields(ctx, item)}
+            item = _office365_tenant_id_fields(item)
             yield item
+
+
+def _office365_tenant_id_fields(
+    application: dict[str, Any],
+    get: Callable[..., requests.Response] = requests.get,
+) -> dict[str, Any]:
+    if application.get("name") != "office365" or application.get("signOnMode") != "SAML_1_1":
+        return application
+
+    settings = application.get("settings")
+    if not isinstance(settings, Mapping):
+        return application
+
+    app_settings = settings.get("app")
+    if not isinstance(app_settings, Mapping):
+        return application
+
+    if app_settings.get("microsoftTenantId"):
+        return application
+
+    msft_tenant = app_settings.get("msftTenant")
+    if not isinstance(msft_tenant, str) or not msft_tenant.strip():
+        return application
+
+    tenant_id = _microsoft_tenant_id_from_onmicrosoft_domain(msft_tenant, get=get)
+    if tenant_id is None:
+        return application
+
+    enriched_app_settings = {**app_settings, "microsoftTenantId": tenant_id}
+    enriched_settings = {**settings, "app": enriched_app_settings}
+    return {**application, "settings": enriched_settings}
+
+
+def _microsoft_tenant_id_from_onmicrosoft_domain(
+    onmicrosoft_domain: str,
+    *,
+    get: Callable[..., requests.Response] = requests.get,
+) -> str | None:
+    domain_name = f"{onmicrosoft_domain}.onmicrosoft.com"
+    config_url = (
+        f"https://login.microsoftonline.com/{domain_name}/"
+        ".well-known/openid-configuration"
+    )
+
+    try:
+        response = get(config_url, timeout=30)
+        response.raise_for_status()
+        config = response.json()
+    except (requests.RequestException, ValueError):
+        logger.warning(
+            "Unable to resolve Microsoft tenant ID for %s",
+            domain_name,
+            exc_info=True,
+        )
+        return None
+
+    if not isinstance(config, Mapping):
+        return None
+
+    token_endpoint = config.get("token_endpoint")
+    if not isinstance(token_endpoint, str):
+        return None
+
+    path_segments = [segment for segment in urlparse(token_endpoint).path.split("/") if segment]
+    return path_segments[0] if path_segments else None
 
 
 def _saml_metadata_fields(

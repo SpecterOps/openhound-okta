@@ -215,8 +215,8 @@ def test_hybrid_user_targets_keep_external_schema_match_properties():
     )
     assert office365 is not None
     assert office365.property_matchers == (
-        ("userPrincipalName", "alice@example.com"),
-        ("tenantId", "tenant-id"),
+        ("userprincipalname", "alice@example.com"),
+        ("tenantid", "tenant-id"),
     )
 
 
@@ -228,8 +228,8 @@ def test_hybrid_user_targets_keep_external_schema_match_properties():
             {"namingContext": "corp.example.com"},
             nk.AD_GROUP,
             (
-                ("samAccountName", "Engineering"),
-                ("domainFqdn", "corp.example.com"),
+                ("samaccountname", "Engineering"),
+                ("domain", "corp.example.com"),
             ),
         ),
         (
@@ -246,13 +246,13 @@ def test_hybrid_user_targets_keep_external_schema_match_properties():
             {"microsoftTenantId": "tenant-id"},
             nk.AZ_GROUP,
             (
-                ("displayName", "Engineering"),
-                ("tenantId", "tenant-id"),
+                ("displayname", "Engineering"),
+                ("tenantid", "tenant-id"),
             ),
         ),
     ],
 )
-def test_hybrid_group_targets_match_oktahound(
+def test_hybrid_group_targets_match_bloodhound_properties(
     app_name, settings, expected_kind, expected_matchers
 ):
     target = hybrid_group_target(
