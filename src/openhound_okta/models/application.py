@@ -25,7 +25,17 @@ from openhound_okta.models.hybrid_auth import (
 
 @dataclass
 class ApplicationProperties(OktaNodeProperties):
-    """Properties for the Okta_ApplicationNode node"""
+    """Properties for the Okta_ApplicationNode node.
+
+    Attributes:
+        label: Human-readable application label.
+        status: Okta application lifecycle status.
+        created: Timestamp when the application was created.
+        last_updated: Timestamp when the application was last updated.
+        sign_on_mode: Authentication mode configured for the application.
+        orn: Okta Resource Name for the application.
+        idp_id: Native inbound identity-provider ID referenced by the application.
+    """
 
     app_type: str
     okta_domain: str
@@ -517,6 +527,7 @@ class Application(BaseAsset):
                 if self.name == "active_directory"
                 else None,
                 orn=self.orn,
+                idp_id=app_setting_properties.pop("idp_id", None),
                 environmentid=self._lookup.org_id(),
                 **app_setting_properties,
             ),

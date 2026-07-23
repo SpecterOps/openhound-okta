@@ -56,7 +56,7 @@ class Credentials(BaseModel):
 
 
 class Profile(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
     email: str | None = None
     first_name: str | None = Field(default=None, alias="firstName")
     last_name: str | None = Field(default=None, alias="lastName")
@@ -197,10 +197,7 @@ class User(BaseAsset):
 
     @property
     def _manager_of_edges(self):
-        if (
-                self.profile
-                and self.profile.manager_id
-        ):
+        if self.profile and self.profile.manager_id:
             manager_id = self._lookup.manager_id(self.profile.manager_id)
             if manager_id:
                 yield Edge(
