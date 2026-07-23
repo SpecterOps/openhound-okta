@@ -511,6 +511,7 @@ def test_custom_role_permission_edges_use_collected_binding_scope():
         ("okta.users.credentials.manageTemporaryAccessCode", True, False),
         ("okta.users.credentials.expirePassword", True, False),
         ("okta.users.credentials.resetFactors", False, True),
+        ("okta.users.manage", True, True),
     ],
 )
 def test_custom_role_credential_permissions_emit_expected_edges(

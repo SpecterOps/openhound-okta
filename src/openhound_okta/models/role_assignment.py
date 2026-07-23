@@ -258,6 +258,7 @@ class RoleAssignment(BaseAsset):
             required_permissions = [
                 "okta.users.credentials.resetFactors",
                 "okta.users.credentials.manage",
+                "okta.users.manage",
             ]
             has_permission = any(
                 self._lookup.has_role_permission(self.role, permission)
