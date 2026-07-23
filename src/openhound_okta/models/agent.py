@@ -22,9 +22,14 @@ class AgentProperties(OktaNodeProperties):
     """Properties for Okta agent"""
 
     name: str
+    okta_domain: str
     operational_status: str
     type: str
     version: str
+    pool_id: str
+    pool_name: str | None = None
+    update_status: str | None = None
+    last_connection: datetime | None = None
 
 
 @app.asset(
@@ -72,6 +77,7 @@ class Agent(BaseAsset):
     last_connection: datetime | None = Field(alias="lastConnection", default=None)
     operational_status: str | None = Field(alias="operationalStatus", default=None)
     pool_id: str = Field(alias="poolId")
+    update_status: str | None = Field(alias="updateStatus", default=None)
     update_message: str | None = Field(alias="updateMessage", default=None)
 
     # Additional
@@ -88,9 +94,14 @@ class Agent(BaseAsset):
                 id=self.id,
                 name=self.name,
                 displayname=self.name,
+                okta_domain=self._extras["tenant"],
                 type=self.agent_type,
                 operational_status=self.operational_status,
                 version=self.version,
+                pool_id=self.pool_id,
+                pool_name=self.agent_pool_name,
+                update_status=self.update_status,
+                last_connection=self.last_connection,
                 environmentid=self._lookup.org_id(),
             ),
         )

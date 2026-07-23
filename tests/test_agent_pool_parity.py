@@ -26,6 +26,7 @@ def test_agent_pool_ids_are_namespaced_away_from_backing_app_ids():
     agent_pool = make_agent_pool()
 
     assert agent_pool.as_node.id == "app-or-pool-1_pool"
+    assert agent_pool.as_node.properties.okta_domain == "example.okta.com"
 
     contains_edge = next(
         edge for edge in agent_pool.edges if edge.kind == ek.CONTAINS
@@ -66,3 +67,30 @@ def test_agent_member_of_edges_target_namespaced_pool_ids():
     assert edge.kind == ek.AGENT_MEMBER_OF
     assert edge.start.value == "agent-1"
     assert edge.end.value == "app-or-pool-1_pool"
+
+
+def test_agent_node_emits_oktahound_equivalent_properties():
+    agent = Agent.model_validate(
+        {
+            "id": "agent-1",
+            "name": "WIN-corp-dc",
+            "version": "1.0.0",
+            "operationalStatus": "OPERATIONAL",
+            "poolId": "app-or-pool-1",
+            "lastConnection": "2026-01-01T00:00:00Z",
+            "updateStatus": "CURRENT",
+            "agent_pool_name": "corp.example.com",
+            "agent_type": "AD",
+        }
+    )
+    agent._lookup = StubLookup()
+    agent._extras = {"tenant": "example.okta.com"}
+
+    properties = agent.as_node.properties
+
+    assert properties.okta_domain == "example.okta.com"
+    assert properties.pool_id == "app-or-pool-1"
+    assert properties.pool_name == "corp.example.com"
+    assert properties.operational_status == "OPERATIONAL"
+    assert properties.update_status == "CURRENT"
+    assert properties.last_connection.isoformat() == "2026-01-01T00:00:00+00:00"
