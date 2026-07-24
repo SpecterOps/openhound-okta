@@ -85,8 +85,8 @@ class ApiToken(BaseAsset):
     token_window: str | None = Field(alias="tokenWindow", default=None)
     network: dict[str, object] | None = None
     id: str
-    client_name: str = Field(alias="clientName")
-    expires_at: datetime = Field(alias="expiresAt")
+    client_name: str | None = Field(default=None, alias="clientName")
+    expires_at: datetime | None = Field(default=None, alias="expiresAt")
     created: datetime
     last_updated: datetime | None = Field(default=None, alias="lastUpdated")
 

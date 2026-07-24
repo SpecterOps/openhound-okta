@@ -106,6 +106,24 @@ def test_api_token_emits_native_properties_and_normalized_token_window():
     assert properties.expires_at.isoformat() == "2026-02-01T00:00:00+00:00"
 
 
+def test_api_token_allows_missing_nullable_client_fields():
+    token = attach_context(
+        ApiToken.model_validate(
+            {
+                "id": "token-1",
+                "name": "My API Token",
+                "userId": "user-1",
+                "created": "2026-01-01T00:00:00Z",
+            }
+        )
+    )
+
+    properties = token.as_node.properties
+
+    assert properties.client_name is None
+    assert properties.expires_at is None
+
+
 def test_token_window_timespan_matches_dotnet_style_duration_strings():
     assert token_window_timespan("P30D") == "30.00:00:00"
     assert token_window_timespan("PT5M") == "00:05:00"
