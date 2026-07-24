@@ -367,10 +367,24 @@ class Credentials(BaseModel):
         ),
         EdgeDef(
             start=nk.APPLICATION,
+            end=nk.GITHUB_ORGANIZATION,
+            kind=ek.ORG_SWA,
+            description="Application stores credentials for a GitHub organization",
+            traversable=False,
+        ),
+        EdgeDef(
+            start=nk.APPLICATION,
             end=nk.ONE_PASSWORD_ACCOUNT,
             kind=ek.OUTBOUND_ORG_SSO,
             description="Application trusts a 1Password account for SSO",
             traversable=True,
+        ),
+        EdgeDef(
+            start=nk.APPLICATION,
+            end=nk.ONE_PASSWORD_ACCOUNT,
+            kind=ek.ORG_SWA,
+            description="Application stores credentials for a 1Password account",
+            traversable=False,
         ),
         EdgeDef(
             start=nk.APPLICATION,
@@ -381,10 +395,24 @@ class Credentials(BaseModel):
         ),
         EdgeDef(
             start=nk.APPLICATION,
+            end=nk.SNOWFLAKE_ACCOUNT,
+            kind=ek.ORG_SWA,
+            description="Application stores credentials for a Snowflake account",
+            traversable=False,
+        ),
+        EdgeDef(
+            start=nk.APPLICATION,
             end=nk.AZ_TENANT,
             kind=ek.OUTBOUND_ORG_SSO,
             description="Application trusts an Entra tenant for SSO",
             traversable=True,
+        ),
+        EdgeDef(
+            start=nk.APPLICATION,
+            end=nk.AZ_TENANT,
+            kind=ek.ORG_SWA,
+            description="Application stores credentials for an Entra tenant",
+            traversable=False,
         ),
     ],
 )

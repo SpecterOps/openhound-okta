@@ -156,6 +156,13 @@ class Profile(BaseModel):
             description="User signs on to a GitHub account",
         ),
         EdgeDef(
+            kind=ek.SWA,
+            start=nk.USER,
+            end=nk.GITHUB_USER,
+            traversable=False,
+            description="User stores credentials for a GitHub account",
+        ),
+        EdgeDef(
             kind=ek.OUTBOUND_SSO,
             start=nk.USER,
             end=nk.ONE_PASSWORD_USER,
@@ -175,6 +182,13 @@ class Profile(BaseModel):
             end=nk.SNOWFLAKE_USER,
             traversable=True,
             description="User signs on to a Snowflake account",
+        ),
+        EdgeDef(
+            kind=ek.SWA,
+            start=nk.USER,
+            end=nk.SNOWFLAKE_USER,
+            traversable=False,
+            description="User stores credentials for a Snowflake account",
         ),
         EdgeDef(
             kind=ek.OUTBOUND_SSO,

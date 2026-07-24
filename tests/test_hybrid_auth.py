@@ -322,3 +322,21 @@ def test_hybrid_auth_edge_properties_preserve_mode():
 
     assert properties.traversable is True
     assert properties.mode == "SAML_2_0"
+
+
+def test_hybrid_swa_edge_definitions_cover_supported_external_targets():
+    import openhound_okta.source  # noqa: F401
+    from openhound_okta.main import app
+
+    declared_edges = {
+        (edge.kind, edge.start, edge.end, edge.traversable) for edge in app.edges
+    }
+
+    assert {
+        (ek.ORG_SWA, nk.APPLICATION, nk.GITHUB_ORGANIZATION, False),
+        (ek.ORG_SWA, nk.APPLICATION, nk.ONE_PASSWORD_ACCOUNT, False),
+        (ek.ORG_SWA, nk.APPLICATION, nk.SNOWFLAKE_ACCOUNT, False),
+        (ek.ORG_SWA, nk.APPLICATION, nk.AZ_TENANT, False),
+        (ek.SWA, nk.USER, nk.GITHUB_USER, False),
+        (ek.SWA, nk.USER, nk.SNOWFLAKE_USER, False),
+    } <= declared_edges
