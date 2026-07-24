@@ -111,6 +111,11 @@ class StubLookupWithoutAssignment(StubLookup):
         return False
 
 
+class StubLookupWithSecrets(StubLookup):
+    def application_secret_ids(self, app_id):
+        return [(f"secret-{app_id}",)]
+
+
 def make_assignment(
     model_cls,
     *,
@@ -506,6 +511,49 @@ def test_catalog_app_target_resolves_applications_and_integrations():
     )
 
     assert assignment.scoped_app_ids == ("app-2", "integration-1")
+
+
+@pytest.mark.parametrize(
+    "scope_apps",
+    [
+        [
+            {
+                "id": "missing-app",
+                "name": "missing",
+                "displayName": "Missing",
+                "status": "ACTIVE",
+                "category": "example",
+            }
+        ],
+        [
+            {
+                "id": "app-1",
+                "name": "example",
+                "displayName": "Example",
+                "status": "INACTIVE",
+                "category": "example",
+            }
+        ],
+    ],
+)
+def test_configured_app_scope_without_resolved_targets_does_not_fall_back_to_org(
+    scope_apps,
+):
+    assignment = make_assignment(
+        UserRoleAssignment,
+        from_resource="user",
+        source_id="user-1",
+        assignment_type="USER",
+        role_type="APP_ADMIN",
+        scope_apps=scope_apps,
+    )
+    assignment._lookup = StubLookupWithSecrets()
+
+    assert assignment.scoped_app_ids == ()
+    assert assignment._permission_app_ids == ()
+    assert list(assignment._scoped_to_org_edge) == []
+    assert list(assignment._app_admin_edges) == []
+    assert list(assignment.read_client_secret_edges) == []
 
 
 def test_custom_role_assignment_does_not_use_resource_set_link_for_scope():

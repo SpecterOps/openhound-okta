@@ -152,10 +152,10 @@ class RoleAssignment(BaseAsset):
             return None
 
         target_app_ids = (
-            scoped_app_ids
-            if scoped_app_ids
-            else self._ids(self._lookup.all_applications())
+            self._ids(self._lookup.all_applications())
             + self._ids(self._lookup.all_api_services())
+            if not self.scope_apps
+            else scoped_app_ids
         )
         allowed_target_ids = set(self._ids(self._lookup.non_admin_apps()))
         allowed_target_ids.update(self._ids(self._lookup.all_api_services()))
@@ -320,8 +320,7 @@ class RoleAssignment(BaseAsset):
             return
 
         if self.type == "APP_ADMIN":
-            scoped_app_ids = self.scoped_app_ids
-            if scoped_app_ids is None or scoped_app_ids:
+            if self.scope_apps is None or self.scope_apps:
                 return
 
         if self.type in GROUP_TARGETED_ROLE_TYPES:
@@ -487,10 +486,10 @@ class RoleAssignment(BaseAsset):
             if scoped_app_ids is None:
                 return
 
-            if scoped_app_ids:
-                app_ids = scoped_app_ids
-            else:
+            if not self.scope_apps:
                 app_ids = [app_id for (app_id,) in self._lookup.all_applications()]
+            else:
+                app_ids = scoped_app_ids
 
             for app_id in app_ids:
                 for (secret_id,) in self._lookup.application_secret_ids(app_id):
