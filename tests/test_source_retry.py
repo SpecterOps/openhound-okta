@@ -627,7 +627,7 @@ def test_inbound_idp_metadata_preserves_entity_and_all_acs_routes():
     class MetadataPool:
         def get_saml_metadata(self, path):
             assert path == "/api/v1/idps/0oa123/metadata.xml"
-            return SimpleNamespace(text=metadata)
+            return SimpleNamespace(content=metadata.encode())
 
     identity_provider = {
         "id": "0oa123",
@@ -660,6 +660,29 @@ def test_inbound_idp_metadata_preserves_entity_and_all_acs_routes():
             },
         ],
     }
+
+
+def test_saml_metadata_rejects_entity_declarations():
+    metadata = b"""\
+<!DOCTYPE EntityDescriptor [
+  <!ENTITY xxe "unexpected">
+]>
+<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata"
+                     entityID="&xxe;">
+</md:EntityDescriptor>
+"""
+
+    class MetadataPool:
+        def get_saml_metadata(self, path):
+            assert path == "/api/v1/apps/0oa123/sso/saml/metadata"
+            return SimpleNamespace(content=metadata)
+
+    application = {
+        "id": "0oa123",
+        "_links": {"metadata": {"href": "https://example.okta.test/metadata"}},
+    }
+
+    assert _saml_metadata_fields(SimpleNamespace(pool=MetadataPool()), application) == {}
 
 
 def test_inbound_idp_metadata_retry_exhaustion_is_not_silently_discarded():

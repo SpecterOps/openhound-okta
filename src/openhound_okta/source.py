@@ -1,14 +1,16 @@
 import fnmatch
 import logging
-import xml.etree.ElementTree as ET
 from base64 import b64decode
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable, Union
 from urllib.parse import urlparse
+from xml.etree.ElementTree import Element
 
 import dlt
 import requests
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 from dlt.common.configuration import configspec
 from dlt.common.configuration.specs import CredentialsConfiguration
 from dlt.sources.helpers.rest_client.auth import APIKeyAuth
@@ -593,10 +595,10 @@ def _saml_metadata_root(
     path: str,
     object_kind: str,
     object_id: str,
-) -> ET.Element | None:
+) -> Element | None:
     try:
         response = ctx.pool.get_saml_metadata(path)
-        return ET.fromstring(response.text)
+        return ET.fromstring(response.content)
     except OktaRetryExhaustedError:
         logger.error(
             "Required SAML metadata request exhausted retries for Okta %s %s",
@@ -616,7 +618,7 @@ def _saml_metadata_root(
             status_code,
         )
         return None
-    except ET.ParseError:
+    except (ET.ParseError, DefusedXmlException):
         logger.warning(
             "Okta returned invalid SAML metadata XML for %s %s",
             object_kind,
