@@ -54,7 +54,7 @@ class HybridTarget:
 
     @classmethod
     def by_name(cls, kind: str, value: str | None) -> "HybridTarget | None":
-        if value is None:
+        if _is_missing_match_value(value):
             return None
         return cls(kind=kind, match_by="name", value=value)
 
@@ -62,7 +62,7 @@ class HybridTarget:
     def by_properties(
         cls, kind: str, property_matchers: tuple[tuple[str, str | None], ...]
     ) -> "HybridTarget | None":
-        if any(value is None for _, value in property_matchers):
+        if any(_is_missing_match_value(value) for _, value in property_matchers):
             return None
         return cls(
             kind=kind,
@@ -71,6 +71,11 @@ class HybridTarget:
                 (key, value) for key, value in property_matchers if value is not None
             ),
         )
+
+
+def _is_missing_match_value(value: str | None) -> bool:
+    return value is None or not value.strip()
+
 
 @dataclass
 class HybridAuthEdgeProperties(EdgeProperties):

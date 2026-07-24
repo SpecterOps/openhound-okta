@@ -281,11 +281,29 @@ def test_snowflake_user_target_uses_uppercase_composite_object_id():
 
 def test_missing_or_unsupported_hybrid_targets_are_not_emitted():
     assert outbound_trust_target("githubcloud", {}) is None
+    assert outbound_trust_target("githubcloud", {"githubOrg": ""}) is None
+    assert outbound_trust_target("githubcloud", {"githubOrg": "   "}) is None
     assert outbound_trust_target("unsupported_app", {"domain": "example.com"}) is None
     assert (
         hybrid_user_target(
             "office365",
             {},
+            target_user_name="alice@example.com",
+        )
+        is None
+    )
+    assert (
+        hybrid_user_target(
+            "githubcloud",
+            {"githubOrg": "example-org"},
+            target_user_name="   ",
+        )
+        is None
+    )
+    assert (
+        hybrid_user_target(
+            "office365",
+            {"microsoftTenantId": "   "},
             target_user_name="alice@example.com",
         )
         is None
