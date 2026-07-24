@@ -501,7 +501,7 @@ class OktaLookup(LookupManager):
         if path == "/api/v1/policies":
             return self._all_ids("policies")
         if path.startswith("/api/v1/policies/"):
-            return self._ids_by_value("policies", "type", path.rsplit("/", 1)[-1])
+            return self._existing_ids("policies", path.rsplit("/", 1)[-1])
 
         return ()
 

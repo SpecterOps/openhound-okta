@@ -123,6 +123,16 @@ def test_present_but_unresolved_resource_urls_do_not_fall_back_to_orns():
     assert list(resource.edges) == []
 
 
+def test_policy_member_resource_set_urls_resolve_policy_ids():
+    lookup = make_lookup()
+    lookup.client.execute(
+        "INSERT INTO okta.policies VALUES ('policy-1', 'PASSWORD')"
+    )
+    resource_url = "https://example.okta.com/api/v1/policies/policy-1"
+
+    assert lookup.resolve_resource_url(resource_url) == ("policy-1",)
+
+
 def test_workflows_resource_set_ids_are_tenant_qualified_across_graph_edges():
     lookup = make_lookup()
     lookup.client.execute("INSERT INTO okta.users VALUES ('user-1')")
