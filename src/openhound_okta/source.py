@@ -597,14 +597,64 @@ def _user_name_template_value(user_name_template: object) -> str | None:
 
 @app.transformer(name="application_jwks", columns=ApplicationJWKS, parallelized=True)
 def application_jwks(application: Application, ctx: SourceContext):
-    oauth_client = application.settings.oauth_client
-    if oauth_client and oauth_client.jwks:
-        for key in oauth_client.jwks.keys:
-            yield {
-                "app_id": application.id,
-                "app_name": application.name,
-                **key.model_dump(),
-            }
+    yield from application_jwk_rows(application, ctx)
+
+
+def _embedded_application_jwk_rows(application: Application):
+    oauth_client = application.settings.oauth_client if application.settings else None
+    if not oauth_client or not oauth_client.jwks:
+        return
+
+    for key in oauth_client.jwks.keys:
+        yield {
+            "app_id": application.id,
+            "app_name": application.name,
+            **key.model_dump(),
+        }
+
+
+def _jwk_page_items(page: object):
+    if isinstance(page, Mapping):
+        keys = page.get("keys")
+        if isinstance(keys, list):
+            return keys
+        jwks = page.get("jwks")
+        if isinstance(jwks, Mapping) and isinstance(jwks.get("keys"), list):
+            return jwks["keys"]
+        return []
+    return page
+
+
+def application_jwk_rows(application: Application, ctx: SourceContext):
+    embedded_rows = list(_embedded_application_jwk_rows(application))
+    if not embedded_rows:
+        return
+
+    try:
+        rows = []
+        for page in ctx.pool.paginate(
+            f"/api/v1/apps/{application.id}/credentials/jwks"
+        ):
+            for item in _jwk_page_items(page):
+                if isinstance(item, Mapping):
+                    rows.append(
+                        {
+                            "app_id": application.id,
+                            "app_name": application.name,
+                            **item,
+                        }
+                    )
+        yield from rows or embedded_rows
+    except Exception as e:
+        status_code = getattr(getattr(e, "response", None), "status_code", None)
+        if status_code != 404:
+            logger.error(
+                "Error fetching application JWKs for %s: %s",
+                application.id,
+                e,
+                extra={"resource": "application_jwks", "phase": "defer"},
+            )
+        yield from embedded_rows
 
 
 @app.transformer(name="application_grants", columns=ApplicationGrant)
@@ -1023,7 +1073,6 @@ def policy_types():
         "PROFILE_ENROLLMENT",
         "POST_AUTH_SESSION",
         "ENTITY_RISK",
-        "CLIENT_UPDATE",
     ]
     for policy_type in okta_policies:
         yield {"policy_type": policy_type}
@@ -1212,7 +1261,8 @@ def api_services(ctx: SourceContext):
         api_service (ApiService): API service records.
     """
     for page in ctx.pool.paginate("/integrations/api/v1/api-services"):
-        yield page
+        for item in page:
+            yield item
 
 
 @app.source(name="okta", max_table_nesting=0)

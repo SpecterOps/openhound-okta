@@ -15,6 +15,7 @@ class AuthServerProperties(OktaNodeProperties):
     """Properties for the Okta_AuthorizationServer node"""
 
     name: str
+    okta_domain: str
     status: str
     created: datetime
     description: str | None = None
@@ -67,6 +68,7 @@ class AuthServer(BaseAsset):
                 id=self.id,
                 name=self.name,
                 displayname=self.name,
+                okta_domain=self._extras["tenant"],
                 status=self.status,
                 created=self.created,
                 description=self.description,

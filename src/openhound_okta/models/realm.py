@@ -14,9 +14,10 @@ from openhound_okta.main import app
 class RealmProperties(OktaNodeProperties):
     """Properties for the Okta_Realm node"""
 
+    okta_domain: str
     created: datetime
     is_default: bool = False
-    realm_type: str | None = None
+    type: str | None = None
     domains: list[str] | None = None
     last_updated: datetime | None = None
 
@@ -65,9 +66,10 @@ class Realm(BaseAsset):
                 id=self.id,
                 name=self.profile.name,
                 displayname=self.profile.name,
+                okta_domain=self._extras["tenant"],
                 created=self.created,
                 is_default=self.is_default,
-                realm_type=self.profile.realm_type,
+                type=self.profile.realm_type,
                 domains=self.profile.domains,
                 last_updated=self.last_updated,
                 environmentid=self._lookup.org_id(),

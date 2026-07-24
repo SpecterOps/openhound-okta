@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import ClassVar
 
@@ -17,13 +17,15 @@ class IdentityProviderProperties(OktaNodeProperties):
     """Properties for the Okta_IdentityProvider node"""
 
     type: str
-    name: str
-    status: str
     created: datetime
-    last_updated: datetime
-    issuer_mode: str | None = None
-    url: str | None = None
+    okta_domain: str
+    enabled: bool
     auto_user_provisioning: bool = False
+    issuer_mode: str | None = None
+    governed_group_ids: list[str] = field(default_factory=list)
+    protocol_type: str | None = None
+    url: str | None = None
+    entra_tenant_id: str | None = None
 
 
 class SSO(BaseModel):
@@ -146,6 +148,7 @@ class IdentityProvider(BaseAsset):
     status: str
     created: datetime
     last_updated: datetime = Field(alias="lastUpdated")
+    issuer_mode: str | None = Field(default=None, alias="issuerMode")
     protocol: Protocol
     policy: Policy | None = None
     links: dict | None = Field(default=None, alias="_links")
@@ -175,6 +178,23 @@ class IdentityProvider(BaseAsset):
         return url
 
     @property
+    def governed_group_ids(self) -> list[str]:
+        if self.policy and self.policy.provisioning and self.policy.provisioning.groups:
+            return self.policy.provisioning.groups.assignments
+        return []
+
+    @property
+    def entra_tenant_id(self) -> str | None:
+        uri = self.idp_url
+        if self.protocol.type != "SAML2" or not uri or "microsoftonline.com" not in uri:
+            return None
+
+        path_parts = uri.rstrip("/").split("/")
+        if len(path_parts) < 2:
+            return None
+        return path_parts[-2]
+
+    @property
     def as_node(self):
 
         return OktaNode(
@@ -186,28 +206,30 @@ class IdentityProvider(BaseAsset):
                 name=self.name,
                 displayname=self.name,
                 type=self.type,
-                status=self.status,
                 created=self.created,
-                last_updated=self.last_updated,
-                # issuer_mode=self.issuermode <-- check where this is available,
+                okta_domain=self._extras["tenant"],
+                enabled=self.status == "ACTIVE",
+                issuer_mode=self.issuer_mode,
+                governed_group_ids=self.governed_group_ids,
+                protocol_type=self.protocol.type,
                 environmentid=self._lookup.org_id(),
                 url=self.idp_url,
                 auto_user_provisioning=self.policy.provisioning.action == "AUTO"
                 if self.policy and self.policy.provisioning
                 else False,
+                entra_tenant_id=self.entra_tenant_id,
             ),
         )
 
     @property
     def _group_assignment_edges(self):
-        if self.policy and self.policy.provisioning and self.policy.provisioning.groups:
-            for group in self.policy.provisioning.groups.assignments:
-                yield Edge(
-                    kind=ek.IDP_GROUP_ASSIGNMENT,
-                    start=EdgePath(value=self.id, match_by="id"),
-                    end=EdgePath(value=group, match_by="id"),
-                    properties=EdgeProperties(traversable=False),
-                )
+        for group in self.governed_group_ids:
+            yield Edge(
+                kind=ek.IDP_GROUP_ASSIGNMENT,
+                start=EdgePath(value=self.id, match_by="id"),
+                end=EdgePath(value=group, match_by="id"),
+                properties=EdgeProperties(traversable=False),
+            )
 
     @property
     def _contains_edge(self):
@@ -220,12 +242,10 @@ class IdentityProvider(BaseAsset):
 
     @property
     def _inbound_org_sso_edge(self):
-        uri = self.idp_url
-        if self.type == "SAML2" and uri and "microsoftonline.com" in uri:
-            tenant_id = uri.split("/")[-2]
+        if self.type == "SAML2" and self.entra_tenant_id:
             yield Edge(
                 kind=ek.INBOUND_ORG_SSO,
-                start=EdgePath(value=tenant_id, match_by="id"),
+                start=EdgePath(value=self.entra_tenant_id, match_by="id"),
                 end=EdgePath(value=self.id, match_by="id"),
                 properties=EdgeProperties(traversable=True),
             )

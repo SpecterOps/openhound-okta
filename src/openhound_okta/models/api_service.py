@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from datetime import datetime
+from typing import ClassVar
 
+from dlt.common.libs.pydantic import DltConfig
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
 from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
 from pydantic import ConfigDict, Field
@@ -14,6 +16,7 @@ from openhound_okta.main import app
 class ApiServiceProperties(OktaNodeProperties):
     """Properties for the Okta_ApiServiceIntegration node"""
 
+    okta_domain: str
     app_type: str
     created_at: datetime
     oauth_scopes: list[str] | None = None
@@ -46,6 +49,7 @@ class ApiServiceProperties(OktaNodeProperties):
 )
 class ApiService(BaseAsset):
     model_config = ConfigDict(populate_by_name=True)
+    dlt_config: ClassVar[DltConfig] = {"return_validated_models": True}
 
     id: str
     type: str
@@ -65,6 +69,7 @@ class ApiService(BaseAsset):
                 id=self.id,
                 name=self.name,
                 displayname=self.name,
+                okta_domain=self._extras["tenant"],
                 app_type=self.type,
                 created_at=self.created_at,
                 oauth_scopes=self.granted_scopes,

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
@@ -9,19 +9,20 @@ from openhound_okta.graph import OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 
-from dataclasses import field
-
-
 @dataclass
 class JWKProperties(OktaNodeProperties):
     """Properties for the Okta_JWK node"""
 
+    okta_domain: str
     id: str = field(
         metadata={"description": "The unique identifier for the JSON Web Key"}
     )
     status: str = field(
         metadata={"description": "The active/inactive state of the JSON Web Key"}
     )
+    kid: str | None = None
+    kty: str | None = None
+    use: str | None = None
     last_updated: datetime | None = field(
         default=None,
         metadata={"description": "The last time the JSON Web Key was updated"},
@@ -54,6 +55,7 @@ class ApplicationJWKS(BaseAsset):
 
     id: str
     kid: str | None = None
+    kty: str | None = None
     use: str | None = None
     n: str | None = None
     status: str
@@ -66,7 +68,7 @@ class ApplicationJWKS(BaseAsset):
 
     @property
     def display_name(self) -> str:
-        return f"JWK_{self.app_name}_{self.id}"
+        return self.kid or self.id
 
     @property
     def as_node(self):
@@ -78,6 +80,10 @@ class ApplicationJWKS(BaseAsset):
                 name=self.display_name,
                 displayname=self.display_name,
                 id=self.id,
+                okta_domain=self._extras["tenant"],
+                kid=self.kid,
+                kty=self.kty,
+                use=self.use,
                 status=self.status,
                 last_updated=self.last_updated,
                 created=self.created,

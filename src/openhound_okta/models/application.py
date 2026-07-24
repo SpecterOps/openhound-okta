@@ -195,6 +195,7 @@ class JWK(BaseModel):
     id: str
     kid: str | None = None
     alf: str | None = None
+    kty: str | None = None
     use: str | None = None
     n: str | None = None
     status: str

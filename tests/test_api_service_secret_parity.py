@@ -8,6 +8,7 @@ from openhound_okta.models import ApiService, ApiServiceSecrets, ApplicationSecr
 from openhound_okta.source import (
     api_service_secret_rows,
     api_service_secrets,
+    api_services,
     application_secrets,
 )
 
@@ -59,6 +60,34 @@ def test_api_service_secret_rows_use_the_integration_credentials_endpoint():
             "status": "ACTIVE",
         }
     ]
+
+
+def test_api_service_resources_return_models_for_secret_transformers():
+    assert ApiService.dlt_config == {"return_validated_models": True}
+
+
+def test_api_services_flatten_pages_for_secret_transformers():
+    class ApiServicePool:
+        def paginate(self, path: str):
+            assert path == "/integrations/api/v1/api-services"
+            return [
+                [
+                    {
+                        "id": "integration-1",
+                        "type": "my_app_cie",
+                        "name": "My App Cloud Identity Engine",
+                        "createdAt": "2026-01-01T00:00:00Z",
+                        "createdBy": "user-1",
+                        "grantedScopes": ["okta.users.read"],
+                    }
+                ]
+            ]
+
+    rows = list(api_services(SimpleNamespace(pool=ApiServicePool())))
+
+    assert len(rows) == 1
+    assert isinstance(rows[0], ApiService)
+    assert rows[0].id == "integration-1"
 
 
 def test_api_service_secrets_emit_secret_of_edges_to_the_integration():

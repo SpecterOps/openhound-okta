@@ -17,7 +17,8 @@ class PolicyProperties(OktaNodeProperties):
     """Properties for the Okta_Policy node"""
 
     name: str
-    policy_type: str
+    okta_domain: str
+    type: str
     created: datetime
     priority: int | None = None
     system: bool = False
@@ -65,7 +66,8 @@ class Policy(BaseAsset):
                 id=self.id,
                 name=self.name,
                 displayname=self.name,
-                policy_type=self.type,
+                okta_domain=self._extras["tenant"],
+                type=self.type,
                 created=self.created,
                 priority=self.priority,
                 system=self.system or False,

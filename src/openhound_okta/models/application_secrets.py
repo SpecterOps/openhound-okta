@@ -15,6 +15,7 @@ from openhound_okta.main import app
 class SecretProperties(OktaNodeProperties):
     """Properties for Okta_ClientSecret node"""
 
+    okta_domain: str
     id: str = field(
         metadata={"description": "The unique identifier for the JSON Web Key"}
     )
@@ -71,6 +72,7 @@ class ApplicationSecrets(BaseAsset):
                 name=self.secret_hash,
                 displayname=self.secret_hash,
                 id=self.id,
+                okta_domain=self._extras["tenant"],
                 status=self.status,
                 last_updated=self.last_updated,
                 created=self.created,
