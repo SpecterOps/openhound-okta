@@ -730,6 +730,8 @@ def application_jwk_rows(application: Application, ctx: SourceContext):
                         }
                     )
         yield from rows or embedded_rows
+    except OktaRetryExhaustedError:
+        raise
     except Exception as e:
         status_code = getattr(getattr(e, "response", None), "status_code", None)
         if status_code != 404:
@@ -754,6 +756,8 @@ def application_grants(application: Application, ctx: SourceContext):
         for page in ctx.pool.paginate(f"/api/v1/apps/{application.id}/grants"):
             for item in page:
                 yield {"app_id": application.id, **item}
+    except OktaRetryExhaustedError:
+        raise
     except Exception as e:
         status_code = getattr(getattr(e, "response", None), "status_code", None)
         if status_code != 404:

@@ -1,3 +1,4 @@
+import inspect
 from threading import Event, Thread
 from types import SimpleNamespace
 
@@ -17,8 +18,10 @@ from openhound_okta.source import (
     _office365_tenant_id_fields,
     _saml_idp_metadata_fields,
     _saml_metadata_fields,
+    application_grants,
     application_group_push_mapping_row,
     application_group_push_mappings,
+    application_jwk_rows,
     application_user_rows,
     identity_provider_users,
     user_role_assignment_rows,
@@ -694,6 +697,76 @@ def test_user_role_retry_exhaustion_is_not_silently_discarded():
 
     with pytest.raises(OktaRetryExhaustedError) as exc:
         next(user_role_assignment_rows("00u123", ctx))
+
+    assert exc.value is error
+
+
+def test_application_jwk_retry_exhaustion_is_not_silently_discarded():
+    error = OktaRetryExhaustedError(
+        OktaRetryContext(
+            endpoint_family="/api/v1/apps*",
+            url="https://example.okta.test/api/v1/apps/0oa123/credentials/jwks",
+            status_code=429,
+            attempts=4,
+        )
+    )
+
+    class FailingJwkPool:
+        def paginate(self, path):
+            raise error
+            yield
+
+    application = SimpleNamespace(
+        id="0oa123",
+        name="example-app",
+        settings=SimpleNamespace(
+            oauth_client=SimpleNamespace(
+                jwks=SimpleNamespace(
+                    keys=[
+                        SimpleNamespace(
+                            model_dump=lambda: {
+                                "id": "jwk-1",
+                                "kid": "k1",
+                                "status": "ACTIVE",
+                            }
+                        )
+                    ]
+                )
+            )
+        ),
+    )
+    ctx = SimpleNamespace(pool=FailingJwkPool())
+
+    with pytest.raises(OktaRetryExhaustedError) as exc:
+        next(application_jwk_rows(application, ctx))
+
+    assert exc.value is error
+
+
+def test_application_grants_retry_exhaustion_is_not_silently_discarded():
+    error = OktaRetryExhaustedError(
+        OktaRetryContext(
+            endpoint_family="/api/v1/apps*",
+            url="https://example.okta.test/api/v1/apps/0oa123/grants",
+            status_code=429,
+            attempts=4,
+        )
+    )
+
+    class FailingGrantPool:
+        def paginate(self, path):
+            raise error
+            yield
+
+    application = SimpleNamespace(
+        id="0oa123",
+        sign_on_mode="OPENID_CONNECT",
+        settings=None,
+    )
+    ctx = SimpleNamespace(pool=FailingGrantPool())
+
+    with pytest.raises(OktaRetryExhaustedError) as exc:
+        next(inspect.unwrap(application_grants)(application, ctx))
 
     assert exc.value is error
 
