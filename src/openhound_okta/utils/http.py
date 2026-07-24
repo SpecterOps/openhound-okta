@@ -199,7 +199,11 @@ class OktaRESTClient(RESTClient):
             raise ValueError("rate_limit_max_elapsed_seconds must be positive")
         self.endpoint_family = endpoint_family
         self._throttle = throttle
-        self._max_attempts = max_attempts or self._config.request_max_attempts
+        self._max_attempts = (
+            max_attempts
+            if max_attempts is not None
+            else self._config.request_max_attempts
+        )
         self._rate_limit_max_elapsed_seconds = rate_limit_max_elapsed_seconds
         self._max_retry_delay_seconds = (
             max_retry_delay_seconds

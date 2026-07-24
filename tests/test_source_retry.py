@@ -98,6 +98,16 @@ def _client(
     ), fake_clock
 
 
+def test_explicit_zero_max_attempts_is_rejected():
+    with pytest.raises(ValueError, match="max_attempts must be at least 1"):
+        OktaRESTClient(
+            base_url="https://example.okta.test",
+            endpoint_family="/api/v1/apps*",
+            throttle=EndpointThrottle(),
+            max_attempts=0,
+        )
+
+
 class SequencedAdapter(BaseAdapter):
     def __init__(self, responses):
         self.responses = list(responses)
