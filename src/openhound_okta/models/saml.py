@@ -2,6 +2,7 @@ from dataclasses import dataclass, field as dc_field, replace
 import json
 import re
 from typing import Any
+from urllib.parse import quote, urlsplit, urlunsplit
 from uuid import UUID
 
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
@@ -1019,6 +1020,59 @@ def _idp_acs_url(identity_provider) -> str | None:
     return _clean(getattr(acs, "href", None))
 
 
+def _idp_acs_endpoint(identity_provider) -> Any:
+    protocol = getattr(identity_provider, "protocol", None)
+    endpoints = getattr(protocol, "endpoints", None)
+    return getattr(endpoints, "acs", None)
+
+
+def _okta_org_trust_specific_acs_url(
+    identity_provider,
+    metadata_urls: set[str],
+) -> str | None:
+    """Derive Okta's exact trust route from a source-proven shared ACS."""
+
+    if getattr(identity_provider, "status", None) != "ACTIVE":
+        return None
+
+    acs_endpoint = _idp_acs_endpoint(identity_provider)
+    if _clean(getattr(acs_endpoint, "type", None)) != "ORG":
+        return None
+
+    shared_url = _idp_acs_url(identity_provider)
+    if not shared_url:
+        return None
+    if metadata_urls and shared_url not in metadata_urls:
+        return None
+
+    parsed = urlsplit(shared_url)
+    if (
+        parsed.scheme.casefold() != "https"
+        or not parsed.netloc
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path != "/sso/saml2"
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+
+    idp_id = _clean(getattr(identity_provider, "id", None))
+    if not idp_id or quote(idp_id, safe="") != idp_id:
+        return None
+
+    return urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            f"{parsed.path}/{idp_id}",
+            "",
+            "",
+        )
+    )
+
+
 def saml_federation_provider_row(application) -> dict[str, Any] | None:
     sign_on = _sign_on(application)
     if not is_saml_application(application):
@@ -1290,7 +1344,7 @@ def saml_sp_acs_rows(identity_provider) -> list[dict[str, Any]]:
         )
 
     if metadata_routes:
-        return [
+        rows = [
             {
                 "id": saml_sp_acs_id(identity_provider.id, row_index),
                 "app_id": identity_provider.id,
@@ -1299,11 +1353,7 @@ def saml_sp_acs_rows(identity_provider) -> list[dict[str, Any]]:
                 "source_object_kind": nk.IDP,
                 "acs_url": route["acs_url"],
                 "sp_entity_id": sp_entity_id,
-                "index": (
-                    route["index"]
-                    if route["index"] is not None
-                    else row_index
-                ),
+                "index": (route["index"] if route["index"] is not None else row_index),
                 "binding": route["binding"],
                 "is_default": route["is_default"],
                 "route_source": "identity_provider_metadata",
@@ -1315,31 +1365,65 @@ def saml_sp_acs_rows(identity_provider) -> list[dict[str, Any]]:
             }
             for row_index, route in enumerate(metadata_routes)
         ]
+    else:
+        acs_url = _idp_acs_url(identity_provider)
+        if not acs_url:
+            return []
+        seen_urls.add(acs_url)
+        rows = [
+            {
+                "id": saml_sp_acs_id(identity_provider.id, 0),
+                "app_id": identity_provider.id,
+                "app_name": identity_provider.name,
+                "app_label": identity_provider.name,
+                "source_object_kind": nk.IDP,
+                "acs_url": acs_url,
+                "sp_entity_id": sp_entity_id,
+                "index": 0,
+                "binding": _clean(
+                    getattr(_idp_acs_endpoint(identity_provider), "binding", None)
+                ),
+                "is_default": True,
+            }
+        ]
 
-    acs_url = _idp_acs_url(identity_provider)
-    if not acs_url:
-        return []
+    trust_specific_url = _okta_org_trust_specific_acs_url(
+        identity_provider,
+        seen_urls,
+    )
+    if not trust_specific_url or trust_specific_url in seen_urls:
+        return rows
 
-    return [
+    used_indexes = {row["index"] for row in rows if isinstance(row.get("index"), int)}
+    alias_index = max(used_indexes, default=-1) + 1
+    rows.append(
         {
-            "id": saml_sp_acs_id(identity_provider.id, 0),
+            "id": saml_sp_acs_id(identity_provider.id, len(rows)),
             "app_id": identity_provider.id,
             "app_name": identity_provider.name,
             "app_label": identity_provider.name,
             "source_object_kind": nk.IDP,
-            "acs_url": acs_url,
+            "acs_url": trust_specific_url,
             "sp_entity_id": sp_entity_id,
-            "index": 0,
+            "index": alias_index,
             "binding": _clean(
-                getattr(
-                    getattr(identity_provider.protocol.endpoints, "acs", None),
-                    "binding",
-                    None,
-                )
+                getattr(_idp_acs_endpoint(identity_provider), "binding", None)
             ),
-            "is_default": True,
+            "is_default": False,
+            "target_product_family": "okta_inbound_saml",
+            "route_source": ("identity_provider_api+documented_okta_trust_route"),
+            "extraction_mode": "allowlisted_deterministic_route",
+            "acs_source_field": (
+                "_links.acs.href+protocol.endpoints.acs.type+identity_provider.id"
+            ),
+            "sp_entity_source_field": (
+                "metadata.EntityDescriptor.entityID"
+                if _clean(getattr(identity_provider, "saml_metadata_entity_id", None))
+                else "protocol.credentials.trust.audience"
+            ),
         }
-    ]
+    )
+    return rows
 
 
 def saml_match_values(*values: str | None) -> list[str]:

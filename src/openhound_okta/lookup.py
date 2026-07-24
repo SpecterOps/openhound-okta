@@ -112,15 +112,19 @@ class OktaLookup(LookupManager):
     def iter_user_saml_accounts(self):
         """Stream authoritative Okta account IDs, lifecycle states, and logins."""
 
-        cursor = self.client.execute(
-            f"""
-            SELECT id, status, json_extract_string(profile, '$.login') AS login
-            FROM {self.schema}.users
-            ORDER BY id
-            """
-        )
-        while rows := cursor.fetchmany(1000):
-            yield from rows
+        cursor = self.client.cursor()
+        try:
+            cursor.execute(
+                f"""
+                SELECT id, status, json_extract_string(profile, '$.login') AS login
+                FROM {self.schema}.users
+                ORDER BY id
+                """
+            )
+            while rows := cursor.fetchmany(1000):
+                yield from rows
+        finally:
+            cursor.close()
 
     @lru_cache
     def directly_linked_saml_account_ids(self, idp_id: str) -> frozenset[str]:

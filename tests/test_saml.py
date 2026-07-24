@@ -1,4 +1,5 @@
 from dataclasses import asdict
+from itertools import islice
 import json
 
 import duckdb
@@ -318,6 +319,36 @@ def test_saml_lookup_reads_source_profile_and_ordered_claim_mappings() -> None:
     assert missing_mapping_lookup.user_status("00u_saml_user") is None
     assert missing_mapping_lookup.user_profile("00u_saml_user") is None
     assert missing_mapping_lookup.saml_claim_mappings("0oa_saml") == ()
+
+
+def test_saml_account_iterators_keep_independent_results_across_fetch_batches() -> None:
+    connection = duckdb.connect(":memory:")
+    connection.execute("CREATE SCHEMA okta")
+    connection.execute(
+        "CREATE TABLE okta.users (id VARCHAR, status VARCHAR, profile JSON)"
+    )
+    connection.executemany(
+        "INSERT INTO okta.users VALUES (?, 'ACTIVE', ?)",
+        [
+            (
+                f"00u{index:04d}",
+                json.dumps({"login": f"user{index:04d}@example.test"}),
+            )
+            for index in range(1501)
+        ],
+    )
+    lookup = OktaLookup(connection)
+
+    first_accounts = lookup.iter_user_saml_accounts()
+    first_batch = list(islice(first_accounts, 1000))
+    second_accounts = list(lookup.iter_user_saml_accounts())
+    first_remainder = list(first_accounts)
+
+    assert len(first_batch) == 1000
+    assert len(first_remainder) == 501
+    assert len(second_accounts) == 1501
+    assert first_batch[0][0] == second_accounts[0][0] == "00u0000"
+    assert first_remainder[-1][0] == second_accounts[-1][0] == "00u1500"
 
 
 def test_saml_provider_is_emitted_when_route_metadata_is_partial():
@@ -1259,9 +1290,242 @@ def test_saml_service_provider_prefers_inbound_idp_metadata_routes():
     ]
     assert [row["index"] for row in acs_rows] == [0, 2]
     assert [row["is_default"] for row in acs_rows] == [True, False]
-    assert {row["route_source"] for row in acs_rows} == {
-        "identity_provider_metadata"
+    assert {row["route_source"] for row in acs_rows} == {"identity_provider_metadata"}
+
+
+def test_org_shared_inbound_idp_adds_exact_trust_specific_acs_alias():
+    idp = _identity_provider(
+        id="0oaOrgTarget123",
+        protocol={
+            "type": "SAML2",
+            "endpoints": {
+                "sso": {
+                    "url": "https://source.example.test/saml/sso",
+                    "binding": "HTTP-POST",
+                },
+                "acs": {"binding": "HTTP-POST", "type": "ORG"},
+            },
+            "credentials": {
+                "trust": {
+                    "issuer": "http://www.okta.com/exkOrgSource123",
+                    "audience": "https://www.okta.com/saml2/service-provider",
+                }
+            },
+        },
+        _links={
+            "acs": {
+                "href": "https://target.example.test/sso/saml2",
+                "type": "application/xml",
+            }
+        },
+        saml_metadata_entity_id="https://www.okta.com/saml2/service-provider",
+        saml_metadata_acs_endpoints=[
+            {
+                "url": "https://target.example.test/sso/saml2",
+                "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
+                "index": 0,
+                "is_default": True,
+            }
+        ],
+    )
+
+    rows = saml_sp_acs_rows(idp)
+
+    assert [row["acs_url"] for row in rows] == [
+        "https://target.example.test/sso/saml2",
+        "https://target.example.test/sso/saml2/0oaOrgTarget123",
+    ]
+    assert rows[0]["route_source"] == "identity_provider_metadata"
+    assert rows[0]["extraction_mode"] == "explicit_metadata"
+    assert rows[1] == {
+        "id": "okta:saml:sp-acs:0oaOrgTarget123:1",
+        "app_id": "0oaOrgTarget123",
+        "app_name": "Example inbound SAML",
+        "app_label": "Example inbound SAML",
+        "source_object_kind": "Okta_IdentityProvider",
+        "acs_url": ("https://target.example.test/sso/saml2/0oaOrgTarget123"),
+        "sp_entity_id": "https://www.okta.com/saml2/service-provider",
+        "index": 1,
+        "binding": "HTTP-POST",
+        "is_default": False,
+        "target_product_family": "okta_inbound_saml",
+        "route_source": "identity_provider_api+documented_okta_trust_route",
+        "extraction_mode": "allowlisted_deterministic_route",
+        "acs_source_field": (
+            "_links.acs.href+protocol.endpoints.acs.type+identity_provider.id"
+        ),
+        "sp_entity_source_field": "metadata.EntityDescriptor.entityID",
     }
+    service_provider = saml_service_provider_row(idp)
+    assert service_provider is not None
+    assert service_provider["acs_ids"] == [row["id"] for row in rows]
+
+
+def test_org2org_app_pairs_with_org_mode_idp_trust_specific_alias():
+    source_app = _application(
+        id="0oaSourceOrg2Org",
+        name="okta_org2org",
+        settings={
+            "app": {
+                "acsUrl": ("https://target.example.test/sso/saml2/0oaOrgTarget123"),
+                "audRestriction": "https://www.okta.com/saml2/service-provider",
+                "baseUrl": "https://target.example.test/",
+            },
+            "signOn": {"idpIssuer": "http://www.okta.com/exkSourceOrg2Org"},
+        },
+    )
+    target_idp = _identity_provider(
+        id="0oaOrgTarget123",
+        protocol={
+            "type": "SAML2",
+            "endpoints": {
+                "sso": {
+                    "url": "https://source.example.test/saml/sso",
+                    "binding": "HTTP-POST",
+                },
+                "acs": {"binding": "HTTP-POST", "type": "ORG"},
+            },
+            "credentials": {
+                "trust": {
+                    "issuer": "http://www.okta.com/exkSourceOrg2Org",
+                    "audience": "https://www.okta.com/saml2/service-provider",
+                }
+            },
+        },
+        _links={
+            "acs": {
+                "href": "https://target.example.test/sso/saml2",
+                "type": "application/xml",
+            }
+        },
+        saml_metadata_entity_id="https://www.okta.com/saml2/service-provider",
+        saml_metadata_acs_endpoints=[
+            {
+                "url": "https://target.example.test/sso/saml2",
+                "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
+                "index": 0,
+                "is_default": True,
+            }
+        ],
+    )
+
+    source_route = saml_acs_rows(source_app)[0]
+    paired_routes = [
+        row
+        for row in saml_sp_acs_rows(target_idp)
+        if (row["acs_url"], row["sp_entity_id"])
+        == (source_route["acs_url"], source_route["sp_entity_id"])
+    ]
+
+    assert len(paired_routes) == 1
+    assert paired_routes[0]["route_source"] == (
+        "identity_provider_api+documented_okta_trust_route"
+    )
+
+
+def test_org_shared_inbound_idp_alias_derivation_fails_closed():
+    cases = [
+        {
+            "status": "INACTIVE",
+            "protocol": {
+                "type": "SAML2",
+                "endpoints": {
+                    "sso": {
+                        "url": "https://source.example.test/saml/sso",
+                        "binding": "HTTP-POST",
+                    },
+                    "acs": {"binding": "HTTP-POST", "type": "ORG"},
+                },
+                "credentials": {
+                    "trust": {
+                        "issuer": "http://www.okta.com/exkOrgSource123",
+                        "audience": ("https://www.okta.com/saml2/service-provider"),
+                    }
+                },
+            },
+        },
+        {
+            "protocol": {
+                "type": "SAML2",
+                "endpoints": {
+                    "sso": {
+                        "url": "https://source.example.test/saml/sso",
+                        "binding": "HTTP-POST",
+                    },
+                    "acs": {"binding": "HTTP-POST", "type": "UNKNOWN"},
+                },
+                "credentials": {
+                    "trust": {
+                        "issuer": "http://www.okta.com/exkOrgSource123",
+                        "audience": ("https://www.okta.com/saml2/service-provider"),
+                    }
+                },
+            },
+        },
+        {
+            "_links": {
+                "acs": {
+                    "href": "https://target.example.test/sso/saml2/",
+                    "type": "application/xml",
+                }
+            }
+        },
+        {
+            "saml_metadata_acs_endpoints": [
+                {
+                    "url": "https://other.example.test/sso/saml2",
+                    "binding": ("urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"),
+                    "index": 0,
+                    "is_default": True,
+                }
+            ]
+        },
+    ]
+
+    for overrides in cases:
+        idp_data = {
+            "id": "0oaOrgTarget123",
+            "protocol": {
+                "type": "SAML2",
+                "endpoints": {
+                    "sso": {
+                        "url": "https://source.example.test/saml/sso",
+                        "binding": "HTTP-POST",
+                    },
+                    "acs": {"binding": "HTTP-POST", "type": "ORG"},
+                },
+                "credentials": {
+                    "trust": {
+                        "issuer": "http://www.okta.com/exkOrgSource123",
+                        "audience": ("https://www.okta.com/saml2/service-provider"),
+                    }
+                },
+            },
+            "_links": {
+                "acs": {
+                    "href": "https://target.example.test/sso/saml2",
+                    "type": "application/xml",
+                }
+            },
+            "saml_metadata_entity_id": ("https://www.okta.com/saml2/service-provider"),
+            "saml_metadata_acs_endpoints": [
+                {
+                    "url": "https://target.example.test/sso/saml2",
+                    "binding": ("urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"),
+                    "index": 0,
+                    "is_default": True,
+                }
+            ],
+        }
+        idp_data.update(overrides)
+        idp = _identity_provider(**idp_data)
+
+        rows = saml_sp_acs_rows(idp)
+
+        assert all(
+            row["acs_url"] != "https://target.example.test/sso/saml2/0oaOrgTarget123"
+            for row in rows
+        )
 
 
 def test_saml_service_provider_is_emitted_when_route_metadata_is_partial():
