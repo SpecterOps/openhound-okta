@@ -115,7 +115,6 @@ class ApplicationProperties(OktaNodeProperties):
 
 
 APP_SETTING_PROPERTY_NAMES = {
-    "access_key",
     "account_id",
     "acs_url",
     "activation_email",
@@ -151,7 +150,6 @@ APP_SETTING_PROPERTY_NAMES = {
     "office365_flexible_provisioning_mode",
     "office365_provisioning_type",
     "override_acs_url",
-    "password",
     "password_field",
     "redirect_uri",
     "redirect_url",
@@ -162,8 +160,6 @@ APP_SETTING_PROPERTY_NAMES = {
     "rp_id",
     "scan_rate",
     "search_org_unit",
-    "secret_key",
-    "secret_key_enc",
     "service_domain",
     "session_duration",
     "site_url",

@@ -144,6 +144,29 @@ def test_application_node_emits_primitive_app_settings_in_snake_case():
     assert not hasattr(properties, "occ_settings")
 
 
+def test_application_node_does_not_emit_credential_bearing_app_settings():
+    application = make_application(
+        signOnMode="SAML_2_0",
+        settings={
+            "app": {
+                "accessKey": "access-key-value",
+                "password": "password-value",
+                "secretKey": "secret-key-value",
+                "secretKeyEnc": "encrypted-secret-key-value",
+                "passwordField": "password",
+            }
+        },
+    )
+
+    properties = application.as_node.properties
+
+    assert properties.access_key is None
+    assert properties.password is None
+    assert properties.secret_key is None
+    assert properties.secret_key_enc is None
+    assert properties.password_field == "password"
+
+
 def test_application_node_limits_active_directory_settings_to_oktahound_fields():
     application = make_application(
         name="active_directory",
