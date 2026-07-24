@@ -1,4 +1,5 @@
 from datetime import datetime
+from collections.abc import Mapping
 
 from openhound.core.asset import BaseAsset, EdgeDef
 from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
@@ -101,7 +102,13 @@ class Resource(BaseAsset):
     def resource_url(self) -> str | None:
         if not self.links:
             return None
-        return self.links.get("self", {}).get("href")
+
+        self_link = self.links.get("self")
+        if not isinstance(self_link, Mapping):
+            return None
+
+        href = self_link.get("href")
+        return href if isinstance(href, str) and href else None
 
     @property
     def resource_set_node_id(self) -> str:

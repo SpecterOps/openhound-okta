@@ -123,6 +123,25 @@ def test_present_but_unresolved_resource_urls_do_not_fall_back_to_orns():
     assert list(resource.edges) == []
 
 
+def test_invalid_self_links_fall_back_to_orn_resolution():
+    lookup = make_lookup()
+    lookup.client.execute("INSERT INTO okta.users VALUES ('user-1')")
+
+    for self_link in (None, "not-a-link", [], {"href": None}):
+        resource = Resource.model_validate(
+            {
+                "resource_set_id": "resource-set-1",
+                "orn": "orn:okta:directory:org-1:users:user-1",
+                "_links": {"self": self_link},
+            }
+        )
+        resource._lookup = lookup
+        resource._extras = {"tenant": "example.okta.com"}
+
+        assert resource.resource_url is None
+        assert [edge.end.value for edge in resource.edges] == ["user-1"]
+
+
 def test_policy_member_resource_set_urls_resolve_policy_ids():
     lookup = make_lookup()
     lookup.client.execute(
