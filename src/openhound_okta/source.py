@@ -190,10 +190,12 @@ def _role_assignment_scope(
     else:
         return {}
 
-    targets: list[object] = []
     try:
-        for page in ctx.pool.paginate(target_path):
-            targets.extend(page)
+        targets = [
+            target
+            for page in ctx.pool.paginate(target_path)
+            for target in page
+        ]
     except OktaRetryExhaustedError:
         raise
     except Exception as e:
@@ -205,6 +207,7 @@ def _role_assignment_scope(
             e,
             extra={"resource": "role_assignment_scope", "phase": "defer"},
         )
+        return {}
 
     return {scope_field: targets}
 

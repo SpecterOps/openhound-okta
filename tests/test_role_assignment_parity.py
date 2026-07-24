@@ -675,6 +675,26 @@ def test_role_assignment_scope_uses_dedicated_target_endpoints(
     assert result == {scope_field: [{"id": "target-1"}]}
 
 
+def test_role_assignment_scope_does_not_publish_partial_targets_after_failure():
+    class StubPool:
+        def paginate(self, path):
+            yield [{"id": "target-1"}]
+            raise RuntimeError("second page failed")
+
+    class StubContext:
+        def __init__(self):
+            self.pool = StubPool()
+
+    result = _role_assignment_scope(
+        {"id": "role-assignment-1", "type": "APP_ADMIN"},
+        "user",
+        "user-1",
+        StubContext(),
+    )
+
+    assert result == {}
+
+
 def test_scoped_to_edge_definitions_start_from_role_assignment_nodes():
     scoped_to_edges = [edge for edge in app.edges if edge.kind == ek.SCOPED_TO]
 
