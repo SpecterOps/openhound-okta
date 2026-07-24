@@ -55,6 +55,29 @@ def test_identity_provider_emits_oktahound_derived_properties():
     assert not hasattr(properties, "last_updated")
 
 
+def test_identity_provider_does_not_derive_entra_tenant_id_from_hostname():
+    idp = attach_context(
+        IdentityProvider.model_validate(
+            {
+                "id": "idp-1",
+                "type": "SAML2",
+                "name": "Malformed Entra SAML",
+                "status": "ACTIVE",
+                "created": "2026-01-01T00:00:00Z",
+                "lastUpdated": "2026-01-02T00:00:00Z",
+                "protocol": {
+                    "type": "SAML2",
+                    "endpoints": {
+                        "sso": {"url": "https://login.microsoftonline.com/saml2"}
+                    },
+                },
+            }
+        )
+    )
+
+    assert idp.entra_tenant_id is None
+
+
 def test_authorization_server_policy_and_realm_emit_native_property_names():
     auth_server = attach_context(
         AuthServer.model_validate(

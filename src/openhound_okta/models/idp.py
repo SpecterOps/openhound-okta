@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import ClassVar
+from urllib.parse import urlsplit
 
 from dlt.common.libs.pydantic import DltConfig
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
@@ -200,7 +201,7 @@ class IdentityProvider(BaseAsset):
         if self.protocol.type != "SAML2" or not uri or "microsoftonline.com" not in uri:
             return None
 
-        path_parts = uri.rstrip("/").split("/")
+        path_parts = [part for part in urlsplit(uri).path.split("/") if part]
         if len(path_parts) < 2:
             return None
         return path_parts[-2]
