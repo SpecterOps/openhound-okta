@@ -388,30 +388,32 @@ class ApplicationUser(BaseAsset):
 
     @property
     def _okta_org2org_edges(self):
-        if self.app_name == OKTA_ORG2ORG_APP:
-            if self._is_inbound_sync:
-                yield Edge(
-                    kind=ek.USER_SYNC,
-                    start=EdgePath(value=self.external_id, match_by="id"),
-                    end=EdgePath(value=self.id, match_by="id"),
-                    properties=EdgeProperties(traversable=False),
-                )
+        if self.app_name != OKTA_ORG2ORG_APP or not self.external_id:
+            return
 
-            else:
+        if self._is_inbound_sync:
+            yield Edge(
+                kind=ek.USER_SYNC,
+                start=EdgePath(value=self.external_id, match_by="id"),
+                end=EdgePath(value=self.id, match_by="id"),
+                properties=EdgeProperties(traversable=False),
+            )
+
+        else:
+            yield Edge(
+                kind=ek.USER_SYNC,
+                start=EdgePath(value=self.id, match_by="id"),
+                end=EdgePath(value=self.external_id, match_by="id"),
+                properties=EdgeProperties(traversable=False),
+            )
+
+            if "PUSH_PASSWORD_UPDATES" in self.app_features:
                 yield Edge(
-                    kind=ek.USER_SYNC,
+                    kind=ek.PASSWORD_SYNC,
                     start=EdgePath(value=self.id, match_by="id"),
                     end=EdgePath(value=self.external_id, match_by="id"),
-                    properties=EdgeProperties(traversable=False),
+                    properties=EdgeProperties(traversable=True),
                 )
-
-                if "PUSH_PASSWORD_UPDATES" in self.app_features:
-                    yield Edge(
-                        kind=ek.PASSWORD_SYNC,
-                        start=EdgePath(value=self.id, match_by="id"),
-                        end=EdgePath(value=self.external_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
-                    )
 
     @property
     def _saml_assertion_edges(self):

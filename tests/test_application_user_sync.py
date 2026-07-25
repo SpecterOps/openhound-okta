@@ -1,4 +1,7 @@
+from dataclasses import asdict
+
 import pytest
+from openhound.sources.opengraph.entries import GraphContent
 
 from openhound_okta.kinds import edges as ek
 from openhound_okta.models import ApplicationUser
@@ -11,6 +14,7 @@ def make_application_user(
     app_features: list[str] | None = None,
     profile: dict | None = None,
     sync_state: str = "SYNCHRONIZED",
+    external_id: str | None = None,
 ):
     return ApplicationUser.model_validate(
         {
@@ -24,6 +28,7 @@ def make_application_user(
             "app_features": app_features or [],
             "scope": scope,
             "syncState": sync_state,
+            "externalId": external_id,
         }
     )
 
@@ -96,3 +101,37 @@ def test_unsynchronized_app_users_do_not_emit_user_push_or_pull_edges():
     )
 
     assert sync_edges(app_user) == []
+
+
+@pytest.mark.parametrize(
+    ("app_features", "profile"),
+    [
+        (["PROFILE_MASTERING"], {}),
+        (["PUSH_PASSWORD_UPDATES"], {"initialStatus": "ACTIVE"}),
+    ],
+)
+def test_org2org_missing_external_id_skips_direct_sync_edges(
+    app_features, profile
+):
+    app_user = make_application_user(
+        app_name="okta_org2org",
+        scope="USER",
+        app_features=app_features,
+        profile=profile,
+    )
+
+    direct_sync_edges = [
+        edge
+        for edge in app_user.edges
+        if edge.kind in {ek.USER_SYNC, ek.PASSWORD_SYNC}
+    ]
+
+    assert direct_sync_edges == []
+
+    payload = {
+        "graph": {
+            "entity_type": "edge",
+            "content": [asdict(edge) for edge in app_user.edges],
+        }
+    }
+    GraphContent.model_validate(payload)
