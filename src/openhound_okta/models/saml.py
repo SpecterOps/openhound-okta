@@ -1673,7 +1673,7 @@ class SamlResolutionValueEdgeProperties(EdgeProperties):
 
 @app.asset(
     node=NodeDef(
-        icon="id-card",
+        icon="id-badge",
         kind=nk.SAML_FEDERATION_PROVIDER,
         description="Normalized SAML federation provider implemented by an Okta SAML app",
         properties=SamlFederationProviderProperties,
@@ -1777,7 +1777,7 @@ class SamlFederationProvider(BaseAsset):
 
 @app.asset(
     node=NodeDef(
-        icon="split",
+        icon="list",
         kind=nk.SAML_CLAIM_MAPPING,
         description="Normalized SAML claim mapping for an Okta SAML app",
         properties=SamlClaimMappingProperties,
@@ -1851,7 +1851,7 @@ class SamlClaimMapping(BaseAsset):
 
 @app.asset(
     node=NodeDef(
-        icon="key-round",
+        icon="stamp",
         kind=nk.SAML_ISSUER,
         description="Normalized SAML issuer entity ID for an Okta SAML app",
         properties=SamlIssuerProperties,
@@ -1894,7 +1894,7 @@ class SamlIssuer(BaseAsset):
 
 @app.asset(
     node=NodeDef(
-        icon="key-round",
+        icon="stamp",
         kind=nk.SAML_ISSUER,
         description="Normalized SAML issuer trusted by an Okta inbound IdP",
         properties=SamlIssuerProperties,
@@ -1911,7 +1911,7 @@ class SamlTrustedIssuer(SamlIssuer):
 
 @app.asset(
     node=NodeDef(
-        icon="route",
+        icon="right-to-bracket",
         kind=nk.SAML_ASSERTION_CONSUMER_SERVICE,
         description="Normalized SAML ACS route for an Okta SAML app",
         properties=SamlAssertionConsumerServiceProperties,
@@ -1978,7 +1978,7 @@ class SamlAssertionConsumerService(BaseAsset):
 
 @app.asset(
     node=NodeDef(
-        icon="route",
+        icon="right-to-bracket",
         kind=nk.SAML_ASSERTION_CONSUMER_SERVICE,
         description="Normalized SAML ACS route owned by an Okta inbound IdP",
         properties=SamlAssertionConsumerServiceProperties,
