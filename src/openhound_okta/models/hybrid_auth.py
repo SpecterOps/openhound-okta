@@ -48,7 +48,7 @@ class HybridTarget:
 
     @classmethod
     def by_id(cls, kind: str, value: str | None) -> "HybridTarget | None":
-        if value is None:
+        if _is_missing_match_value(value):
             return None
         return cls(kind=kind, match_by="id", value=value)
 
@@ -174,9 +174,11 @@ def outbound_trust_target(
         return HybridTarget.by_id(nk.IDP, settings.get("idpId"))
     if app_name in {JAMF_SAML_APP, JAMF_SWA_APP}:
         domain = settings.get("domain")
+        if _is_missing_match_value(domain):
+            return None
         return HybridTarget.by_id(
             nk.JAMF_SSO_INTEGRATION,
-            f"{domain}-SSO" if domain is not None else None,
+            f"{domain}-SSO",
         )
     if app_name == GITHUB_CLOUD_APP:
         return HybridTarget.by_name(nk.GITHUB_ORGANIZATION, settings.get("githubOrg"))
@@ -277,7 +279,7 @@ def hybrid_group_target(
             nk.GROUP,
             (
                 ("name", group_name),
-                ("domainName", okta_org2org_domain(settings.get("baseUrl"))),
+                ("okta_domain", okta_org2org_domain(settings.get("baseUrl"))),
             ),
         )
     if app_name == OFFICE365_APP:

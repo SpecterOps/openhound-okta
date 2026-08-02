@@ -238,7 +238,7 @@ def test_hybrid_user_targets_keep_external_schema_match_properties():
             nk.GROUP,
             (
                 ("name", "Engineering"),
-                ("domainName", "target.example.okta.com"),
+                ("okta_domain", "target.example.okta.com"),
             ),
         ),
         (
@@ -280,6 +280,10 @@ def test_snowflake_user_target_uses_uppercase_composite_object_id():
 
 
 def test_missing_or_unsupported_hybrid_targets_are_not_emitted():
+    assert outbound_trust_target("okta_org2org", {"idpId": ""}) is None
+    assert outbound_trust_target("okta_org2org", {"idpId": "   "}) is None
+    assert outbound_trust_target("jamfsoftwareserver", {"domain": ""}) is None
+    assert outbound_trust_target("jamfsoftwareserver", {"domain": "   "}) is None
     assert outbound_trust_target("githubcloud", {}) is None
     assert outbound_trust_target("githubcloud", {"githubOrg": ""}) is None
     assert outbound_trust_target("githubcloud", {"githubOrg": "   "}) is None
