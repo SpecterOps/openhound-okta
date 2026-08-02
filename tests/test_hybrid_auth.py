@@ -97,7 +97,7 @@ def test_hybrid_application_edge_kind_matches_oktahound(
             {"microsoftTenantId": "31537af4-6d77-4bb9-a681-d2394888ea26"},
             nk.AZ_TENANT,
             "id",
-            "31537af4-6d77-4bb9-a681-d2394888ea26",
+            "31537AF4-6D77-4BB9-A681-D2394888EA26",
         ),
     ],
 )
@@ -216,7 +216,7 @@ def test_hybrid_user_targets_keep_external_schema_match_properties():
     assert office365 is not None
     assert office365.property_matchers == (
         ("userprincipalname", "alice@example.com"),
-        ("tenantid", "tenant-id"),
+        ("tenantid", "TENANT-ID"),
     )
 
 
@@ -247,7 +247,7 @@ def test_hybrid_user_targets_keep_external_schema_match_properties():
             nk.AZ_GROUP,
             (
                 ("displayname", "Engineering"),
-                ("tenantid", "tenant-id"),
+                ("tenantid", "TENANT-ID"),
             ),
         ),
     ],

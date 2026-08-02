@@ -99,7 +99,7 @@ def outbound_edges(application: Application):
             "OPENID_CONNECT",
             {"microsoftTenantId": "31537af4-6d77-4bb9-a681-d2394888ea26"},
             ek.OUTBOUND_ORG_SSO,
-            "31537af4-6d77-4bb9-a681-d2394888ea26",
+            "31537AF4-6D77-4BB9-A681-D2394888EA26",
         ),
     ],
 )

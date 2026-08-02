@@ -77,6 +77,10 @@ def _is_missing_match_value(value: str | None) -> bool:
     return value is None or not value.strip()
 
 
+def _uppercase_match_value(value: str | None) -> str | None:
+    return value.upper() if value is not None else None
+
+
 @dataclass
 class HybridAuthEdgeProperties(EdgeProperties):
     """OktaHound hybrid auth edges carry the Okta sign-on mode."""
@@ -197,7 +201,10 @@ def outbound_trust_target(
             sub_domain.upper() if sub_domain is not None else None,
         )
     if app_name == OFFICE365_APP:
-        return HybridTarget.by_id(nk.AZ_TENANT, settings.get("microsoftTenantId"))
+        return HybridTarget.by_id(
+            nk.AZ_TENANT,
+            _uppercase_match_value(settings.get("microsoftTenantId")),
+        )
     return None
 
 
@@ -250,7 +257,7 @@ def hybrid_user_target(
             nk.AZ_USER,
             (
                 ("userprincipalname", target_user_name),
-                ("tenantid", settings.get("microsoftTenantId")),
+                ("tenantid", _uppercase_match_value(settings.get("microsoftTenantId"))),
             ),
         )
     return None
@@ -287,7 +294,7 @@ def hybrid_group_target(
             nk.AZ_GROUP,
             (
                 ("displayname", group_name),
-                ("tenantid", settings.get("microsoftTenantId")),
+                ("tenantid", _uppercase_match_value(settings.get("microsoftTenantId"))),
             ),
         )
     return None
