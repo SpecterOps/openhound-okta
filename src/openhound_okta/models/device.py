@@ -10,10 +10,21 @@ from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 
 
+def device_graph_id(
+    okta_device_id: str, udid: str | None, tenant_domain: str | None
+) -> str:
+    """Return the OktaHound-compatible graph ID for a device."""
+    if udid and tenant_domain:
+        return f"{udid}@{tenant_domain}"
+    return okta_device_id
+
+
 @dataclass
 class DeviceProperties(OktaNodeProperties):
     """Properties for the Okta_Device node"""
 
+    okta_domain: str
+    okta_id: str
     status: str
     created: datetime
     platform: str
@@ -23,8 +34,11 @@ class DeviceProperties(OktaNodeProperties):
     model: str | None = None
     os_version: str | None = None
     resource_type: str | None = None
-    resource_id: str | None = None
-    jailbreak: bool | None = None
+    secure_hardware_present: bool | None = None
+    jail_break: bool | None = None
+    udid: str | None = None
+    object_sid: str | None = None
+    serial_number: str | None = None
 
 
 class DisplayName(BaseModel):
@@ -44,6 +58,9 @@ class Profile(BaseModel):
     )
     integrity_jailbreak: bool | None = Field(default=None, alias="integrityJailbreak")
     authenticator_app_key: str | None = Field(default=None, alias="authenticatorAppKey")
+    udid: str | None = None
+    sid: str | None = None
+    serial_number: str | None = Field(default=None, alias="serialNumber")
 
 
 class UserDetails(BaseModel):
@@ -101,15 +118,21 @@ class Device(BaseAsset):
     embedded: Embedded | None = Field(default=None, alias="_embedded")
 
     @property
+    def node_id(self) -> str:
+        return device_graph_id(self.id, self.profile.udid, self._extras["tenant"])
+
+    @property
     def as_node(self):
         return OktaNode(
             kinds=[nk.DEVICE],
             properties=DeviceProperties(
                 tenant=self._lookup.org_id(),
                 tenant_domain=self._extras["tenant"],
-                id=self.id,
+                id=self.node_id,
                 name=self.profile.display_name,
                 displayname=self.profile.display_name,
+                okta_domain=self._extras["tenant"],
+                okta_id=self.id,
                 status=self.status,
                 created=self.created,
                 last_updated=self.last_updated,
@@ -117,10 +140,13 @@ class Device(BaseAsset):
                 manufacturer=self.profile.manufacturer,
                 model=self.profile.model,
                 registered=self.profile.registered,
-                jailbreak=self.profile.integrity_jailbreak,
+                secure_hardware_present=self.profile.secure_hardware_present,
+                jail_break=self.profile.integrity_jailbreak,
+                udid=self.profile.udid,
+                object_sid=self.profile.sid,
+                serial_number=self.profile.serial_number,
                 os_version=self.profile.os_version,
                 resource_type=self.resource_type,
-                resource_id=self.resource_id,
                 environmentid=self._lookup.org_id(),
             ),
         )
@@ -131,7 +157,7 @@ class Device(BaseAsset):
             for user in self.embedded.users:
                 yield Edge(
                     kind=ek.DEVICE_OF,
-                    start=EdgePath(value=self.id, match_by="id"),
+                    start=EdgePath(value=self.node_id, match_by="id"),
                     end=EdgePath(value=user.user.id, match_by="id"),
                     properties=EdgeProperties(traversable=False),
                 )
@@ -141,7 +167,7 @@ class Device(BaseAsset):
         yield Edge(
             kind=ek.CONTAINS,
             start=EdgePath(value=self._lookup.org_id(), match_by="id"),
-            end=EdgePath(value=self.id, match_by="id"),
+            end=EdgePath(value=self.node_id, match_by="id"),
             properties=EdgeProperties(traversable=True),
         )
 

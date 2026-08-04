@@ -15,12 +15,20 @@ logger = logging.getLogger(__name__)
 class OktaAuth:
     """Okta public/private key manager"""
 
-    def __init__(self, private_key_path: str = None, private_key_string: str = None):
-        self.private_key_path = Path(private_key_path)
+    def __init__(
+            self,
+            private_key_path: str | None = None,
+            private_key_string: str | None = None,
+    ):
+        if not private_key_path and not private_key_string:
+            raise ValueError("Either private_key_path or private_key_string must be configured")
+        self.private_key_path = Path(private_key_path) if private_key_path else None
         self.private_key_string = private_key_string
 
     def generate_private_key(self) -> None:
         """Generate a new private key and save it to the specified path."""
+        if self.private_key_path is None:
+            raise ValueError("private_key_path must be configured to generate a key")
         rsa_key = RSAKey.generate_key()
         private_key = rsa_key.as_pem(private=True)
         self.private_key_path.write_bytes(private_key)
@@ -29,6 +37,12 @@ class OktaAuth:
     def private_key(self) -> dict:
         """Load the private key from the specified path."""
 
+        if self.private_key_string:
+            logger.info("Loaded private key from configured string")
+            return json.loads(self.private_key_string)
+
+        if self.private_key_path is None:
+            raise ValueError("private_key_path must be configured")
         logger.info(f"Loaded private key from {self.private_key_path}")
         return json.loads(self.private_key_path.read_text())
 

@@ -1,10 +1,16 @@
 import fnmatch
 import logging
 from base64 import b64decode
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Union
+from typing import Any, Callable, Union
+from urllib.parse import urlparse
+from xml.etree.ElementTree import Element
 
 import dlt
+import requests
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 from dlt.common.configuration import configspec
 from dlt.common.configuration.specs import CredentialsConfiguration
 from dlt.sources.helpers.rest_client.auth import APIKeyAuth
@@ -16,8 +22,10 @@ from .models import (
     Agent,
     AgentPool,
     ApiService,
+    ApiServiceSecrets,
     ApiToken,
     Application,
+    ApplicationGrant,
     ApplicationGroupMapping,
     ApplicationJWKS,
     ApplicationSecrets,
@@ -40,15 +48,51 @@ from .models import (
     Policy,
     PolicyMapping,
     PolicyType,
+    PrivilegedUser,
     Realm,
     Resource,
     ResourceSet,
+    ResourceSetRoleAssignment,
+    SamlAccountResolutionField,
+    SamlAccountResolutionRule,
+    SamlAssertionConsumerService,
+    SamlClaimMapping,
+    SamlFederationProvider,
+    SamlIssuer,
+    SamlServiceProviderAssertionConsumerService,
+    SamlServiceProvider,
+    SamlTrustedIssuer,
     User,
+    UserFactor,
     UserRoleAssignment,
 )
-from .models.built_in_role import BUILT_IN_ROLES
+from .models.saml import (
+    saml_account_resolution_field_row,
+    saml_account_resolution_rule_row,
+    saml_acs_rows,
+    saml_claim_mapping_rows,
+    saml_federation_provider_row,
+    saml_issuer_row,
+    saml_service_provider_row,
+    saml_sp_acs_rows,
+    saml_trusted_issuer_row,
+)
+from .models.built_in_role import (
+    BUILT_IN_ROLES,
+    SUPPORTED_ROLE_ASSIGNMENT_TYPES,
+    UNSUPPORTED_BUILT_IN_ROLES,
+)
 from .models.built_in_role_permission import BUILT_IN_PERMISSIONS
+from .models.role_assignment import DIRECT_ASSIGNMENT_TYPES, GROUP_TARGETED_ROLE_TYPES
 from .utils.auth import OktaAuth
+from .utils.http import (
+    DEFAULT_ENDPOINT_CONCURRENCY,
+    DEFAULT_RATE_LIMIT_MAX_ELAPSED_SECONDS,
+    DEFAULT_RATE_LIMIT_REMAINING_RESERVE,
+    EndpointThrottle,
+    OktaRESTClient,
+    OktaRetryExhaustedError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,11 +122,101 @@ API_RATE_LIMIT_ENDPOINTS = [
     "/api/v1/users*",
     "/api/v1/groups*",
     "/api/v1/apps*",
+    "/api/v1/idps*",
     "/api/v1/iam*",
     "/api/v1/devices*",
     "/oauth2/v1/clients*",
     "*",
 ]
+
+
+def _is_direct_active_role_assignment(
+    item: Mapping[str, object], from_resource: str
+) -> bool:
+    return (
+        item.get("status") == "ACTIVE"
+        and item.get("assignmentType") == DIRECT_ASSIGNMENT_TYPES.get(from_resource)
+        and item.get("type") in SUPPORTED_ROLE_ASSIGNMENT_TYPES
+    )
+
+
+def _last_href_path_segment(href: str | None) -> str | None:
+    if not href:
+        return None
+
+    path = urlparse(href).path.rstrip("/")
+    return path.rsplit("/", 1)[-1] if path else None
+
+
+def _resource_set_binding_assignee_id(member: Mapping[str, object]) -> str | None:
+    links = member.get("_links")
+    if not isinstance(links, Mapping):
+        return None
+
+    link = links.get("self")
+    if isinstance(link, Mapping):
+        return _last_href_path_segment(link.get("href"))
+
+    return None
+
+
+def _role_assignment_base_path(from_resource: str, source_id: str) -> str:
+    if from_resource == "client":
+        return f"/oauth2/v1/clients/{source_id}/roles"
+    return f"/api/v1/{from_resource}s/{source_id}/roles"
+
+
+def _role_assignment_scope(
+    item: Mapping[str, object],
+    from_resource: str,
+    source_id: str,
+    ctx: "SourceContext",
+) -> dict[str, list[object]]:
+    role_type = item.get("type")
+    assignment_id = item.get("id")
+    if not isinstance(assignment_id, str):
+        return {}
+
+    if role_type == "APP_ADMIN":
+        target_path = (
+            f"{_role_assignment_base_path(from_resource, source_id)}"
+            f"/{assignment_id}/targets/catalog/apps"
+        )
+        scope_field = "scope_apps"
+    elif role_type in GROUP_TARGETED_ROLE_TYPES:
+        target_path = (
+            f"{_role_assignment_base_path(from_resource, source_id)}"
+            f"/{assignment_id}/targets/groups"
+        )
+        scope_field = "scope_groups"
+    else:
+        return {}
+
+    try:
+        targets = [
+            target
+            for page in ctx.pool.paginate(target_path)
+            for target in page
+        ]
+    except OktaRetryExhaustedError:
+        raise
+    except Exception as e:
+        logger.error(
+            "Error fetching scope for role assignment %s on %s %s: %s",
+            assignment_id,
+            from_resource,
+            source_id,
+            e,
+            extra={"resource": "role_assignment_scope", "phase": "defer"},
+        )
+        return {}
+
+    return {scope_field: targets}
+
+
+APPLICATION_USERS_PAGE_SIZE = 500
+GROUP_PUSH_MAPPINGS_PAGE_SIZE = 1000
+IDENTITY_PROVIDER_USERS_PAGE_SIZE = 200
 
 
 @configspec
@@ -151,16 +285,53 @@ class OktaTokenCredentials(OktaCredentials):
 
 
 class ClientPool:
-    def __init__(self, base_url: str, auth, paginator):
+    def __init__(
+        self,
+        base_url: str,
+        auth,
+        paginator,
+        throttle_factory: Callable[..., EndpointThrottle] = EndpointThrottle,
+        endpoint_concurrency: int = DEFAULT_ENDPOINT_CONCURRENCY,
+        rate_limit_max_elapsed_seconds: float = DEFAULT_RATE_LIMIT_MAX_ELAPSED_SECONDS,
+        rate_limit_remaining_reserve: int = DEFAULT_RATE_LIMIT_REMAINING_RESERVE,
+    ):
+        throttles = {
+            pattern: throttle_factory(
+                max_concurrency=endpoint_concurrency,
+                remaining_reserve=rate_limit_remaining_reserve,
+            )
+            for pattern in API_RATE_LIMIT_ENDPOINTS
+        }
         self._clients: dict[str, RESTClient] = {
-            pattern: RESTClient(
+            pattern: OktaRESTClient(
                 base_url=base_url,
                 headers={"accept": "application/json"},
                 auth=auth,
                 paginator=paginator,
+                endpoint_family=pattern,
+                throttle=throttles[pattern],
+                rate_limit_max_elapsed_seconds=rate_limit_max_elapsed_seconds,
             )
             for pattern in API_RATE_LIMIT_ENDPOINTS
         }
+        self._saml_metadata_client = OktaRESTClient(
+            base_url=base_url,
+            headers={"accept": "application/xml"},
+            auth=auth,
+            paginator=paginator,
+            endpoint_family="/api/v1/apps*",
+            throttle=throttles["/api/v1/apps*"],
+            rate_limit_max_elapsed_seconds=rate_limit_max_elapsed_seconds,
+        )
+        self._idp_saml_metadata_client = OktaRESTClient(
+            base_url=base_url,
+            headers={"accept": "application/xml"},
+            auth=auth,
+            paginator=paginator,
+            endpoint_family="/api/v1/idps*",
+            throttle=throttles["/api/v1/idps*"],
+            rate_limit_max_elapsed_seconds=rate_limit_max_elapsed_seconds,
+        )
 
     def get_client(self, path: str) -> RESTClient:
         for pattern in self._clients:
@@ -174,12 +345,20 @@ class ClientPool:
     def get(self, path: str, **kwargs):
         return self.get_client(path).get(path, **kwargs)
 
+    def get_saml_metadata(self, path: str):
+        if fnmatch.fnmatch(path, "/api/v1/idps*"):
+            return self._idp_saml_metadata_client.get(path)
+        return self._saml_metadata_client.get(path)
+
 
 @dataclass
 class SourceContext:
     """Context for Okta API operations."""
 
     pool: ClientPool
+    application_users_page_size: int = APPLICATION_USERS_PAGE_SIZE
+    group_push_mappings_page_size: int = GROUP_PUSH_MAPPINGS_PAGE_SIZE
+    identity_provider_users_page_size: int = IDENTITY_PROVIDER_USERS_PAGE_SIZE
 
 
 @app.resource(name="organization", columns=Organization, parallelized=True)
@@ -211,11 +390,17 @@ def users(ctx: SourceContext):
             yield user
 
 
-# TODO: Disabled until we find a more efficient way to process factors
-# @app.transformer(name="factors", parallelized=True)
-# def factors(user: User, ctx: SourceContext):
-#     for page in ctx.pool.paginate(f"/api/v1/users/{user.id}/factors"):
-#         yield page
+@app.transformer(
+    name="user_factors",
+    columns=UserFactor,
+    parallelized=True,
+    selected=False,
+)
+def user_factors(user: User, ctx: SourceContext):
+    # Factor enumeration requires one additional API request per user, so keep it opt-in.
+    for page in ctx.pool.paginate(f"/api/v1/users/{user.id}/factors"):
+        for item in page:
+            yield {"user_id": user.id, **item}
 
 
 @app.resource(
@@ -286,19 +471,304 @@ def applications(ctx: SourceContext):
     """
     for page in ctx.pool.paginate("/api/v1/apps"):
         for item in page:
+            if item.get("signOnMode") == "SAML_2_0":
+                item = {**item, **_saml_metadata_fields(ctx, item)}
+            item = _office365_tenant_id_fields(item)
             yield item
+
+
+def _office365_tenant_id_fields(
+    application: dict[str, Any],
+    get: Callable[..., requests.Response] = requests.get,
+) -> dict[str, Any]:
+    if application.get("name") != "office365" or application.get("signOnMode") != "SAML_1_1":
+        return application
+
+    settings = application.get("settings")
+    if not isinstance(settings, Mapping):
+        return application
+
+    app_settings = settings.get("app")
+    if not isinstance(app_settings, Mapping):
+        return application
+
+    if app_settings.get("microsoftTenantId"):
+        return application
+
+    msft_tenant = app_settings.get("msftTenant")
+    if not isinstance(msft_tenant, str) or not msft_tenant.strip():
+        return application
+
+    tenant_id = _microsoft_tenant_id_from_onmicrosoft_domain(msft_tenant, get=get)
+    if tenant_id is None:
+        return application
+
+    enriched_app_settings = {**app_settings, "microsoftTenantId": tenant_id}
+    enriched_settings = {**settings, "app": enriched_app_settings}
+    return {**application, "settings": enriched_settings}
+
+
+def _microsoft_tenant_id_from_onmicrosoft_domain(
+    onmicrosoft_domain: str,
+    *,
+    get: Callable[..., requests.Response] = requests.get,
+) -> str | None:
+    domain_name = f"{onmicrosoft_domain}.onmicrosoft.com"
+    config_url = (
+        f"https://login.microsoftonline.com/{domain_name}/"
+        ".well-known/openid-configuration"
+    )
+
+    try:
+        response = get(config_url, timeout=30)
+        response.raise_for_status()
+        config = response.json()
+    except (requests.RequestException, ValueError):
+        logger.warning(
+            "Unable to resolve Microsoft tenant ID for %s",
+            domain_name,
+            exc_info=True,
+        )
+        return None
+
+    if not isinstance(config, Mapping):
+        return None
+
+    token_endpoint = config.get("token_endpoint")
+    if not isinstance(token_endpoint, str):
+        return None
+
+    path_segments = [segment for segment in urlparse(token_endpoint).path.split("/") if segment]
+    return path_segments[0] if path_segments else None
+
+
+def _saml_metadata_fields(
+    ctx: SourceContext, application: dict[str, Any]
+) -> dict[str, str]:
+    metadata_link = (application.get("_links") or {}).get("metadata") or {}
+    if not metadata_link.get("href"):
+        return {}
+
+    app_id = application.get("id")
+    if not app_id:
+        return {}
+
+    root = _saml_metadata_root(
+        ctx,
+        f"/api/v1/apps/{app_id}/sso/saml/metadata",
+        "app",
+        app_id,
+    )
+    if root is None:
+        return {}
+
+    namespace = {"md": "urn:oasis:names:tc:SAML:2.0:metadata"}
+    sso_url = None
+    for node in root.findall(".//md:SingleSignOnService", namespace):
+        location = node.attrib.get("Location")
+        binding = node.attrib.get("Binding")
+        # Prefer the HTTP-POST SSO endpoint when metadata exposes multiple bindings.
+        if location and (
+            sso_url is None
+            or binding == "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
+        ):
+            sso_url = location
+
+    result = {}
+    if root.attrib.get("entityID"):
+        result["saml_metadata_entity_id"] = root.attrib["entityID"]
+    if sso_url:
+        result["saml_metadata_sso_url"] = sso_url
+    return result
+
+
+def _user_name_template_value(user_name_template: object) -> str | None:
+    if isinstance(user_name_template, Mapping):
+        value = user_name_template.get("template")
+        return value if isinstance(value, str) else None
+    value = getattr(user_name_template, "template", None)
+    return value if isinstance(value, str) else None
+
+
+def _saml_metadata_root(
+    ctx: SourceContext,
+    path: str,
+    object_kind: str,
+    object_id: str,
+) -> Element | None:
+    try:
+        response = ctx.pool.get_saml_metadata(path)
+        return ET.fromstring(response.content)
+    except OktaRetryExhaustedError:
+        logger.error(
+            "Required SAML metadata request exhausted retries for Okta %s %s",
+            object_kind,
+            object_id,
+            exc_info=True,
+        )
+        raise
+    except requests.HTTPError as exc:
+        status_code = exc.response.status_code if exc.response is not None else None
+        if status_code not in {403, 404}:
+            raise
+        logger.warning(
+            "SAML metadata is unavailable for Okta %s %s status=%s",
+            object_kind,
+            object_id,
+            status_code,
+        )
+        return None
+    except (ET.ParseError, DefusedXmlException):
+        logger.warning(
+            "Okta returned invalid SAML metadata XML for %s %s",
+            object_kind,
+            object_id,
+            exc_info=True,
+        )
+        return None
+
+
+def _saml_idp_metadata_fields(
+    ctx: SourceContext,
+    identity_provider: dict[str, Any],
+) -> dict[str, Any]:
+    metadata_link = (identity_provider.get("_links") or {}).get("metadata") or {}
+    idp_id = identity_provider.get("id")
+    if not metadata_link.get("href") or not idp_id:
+        return {}
+
+    root = _saml_metadata_root(
+        ctx,
+        f"/api/v1/idps/{idp_id}/metadata.xml",
+        "identity provider",
+        idp_id,
+    )
+    if root is None:
+        return {}
+
+    namespace = {"md": "urn:oasis:names:tc:SAML:2.0:metadata"}
+    endpoints = []
+    for node in root.findall(
+        ".//md:SPSSODescriptor/md:AssertionConsumerService",
+        namespace,
+    ):
+        location = node.attrib.get("Location")
+        if not location:
+            continue
+        raw_index = node.attrib.get("index")
+        try:
+            index = int(raw_index) if raw_index is not None else None
+        except ValueError:
+            index = None
+        raw_default = node.attrib.get("isDefault")
+        endpoints.append(
+            {
+                "url": location,
+                "binding": node.attrib.get("Binding"),
+                "index": index,
+                "is_default": (
+                    raw_default.casefold() == "true"
+                    if raw_default is not None
+                    else None
+                ),
+            }
+        )
+
+    result: dict[str, Any] = {}
+    if root.attrib.get("entityID"):
+        result["saml_metadata_entity_id"] = root.attrib["entityID"]
+    if endpoints:
+        result["saml_metadata_acs_endpoints"] = endpoints
+    return result
 
 
 @app.transformer(name="application_jwks", columns=ApplicationJWKS, parallelized=True)
 def application_jwks(application: Application, ctx: SourceContext):
-    oauth_client = application.settings.oauth_client
-    if oauth_client and oauth_client.jwks:
-        for key in oauth_client.jwks.keys:
-            yield {
-                "app_id": application.id,
-                "app_name": application.name,
-                **key.model_dump(),
-            }
+    yield from application_jwk_rows(application, ctx)
+
+
+def _embedded_application_jwk_rows(application: Application):
+    oauth_client = application.settings.oauth_client if application.settings else None
+    if not oauth_client or not oauth_client.jwks:
+        return
+
+    for key in oauth_client.jwks.keys:
+        yield {
+            "app_id": application.id,
+            "app_name": application.name,
+            **key.model_dump(),
+        }
+
+
+def _jwk_page_items(page: object):
+    if isinstance(page, Mapping):
+        keys = page.get("keys")
+        if isinstance(keys, list):
+            return keys
+        jwks = page.get("jwks")
+        if isinstance(jwks, Mapping) and isinstance(jwks.get("keys"), list):
+            return jwks["keys"]
+        return []
+    return page
+
+
+def application_jwk_rows(application: Application, ctx: SourceContext):
+    embedded_rows = list(_embedded_application_jwk_rows(application))
+    if not embedded_rows:
+        return
+
+    try:
+        rows = []
+        for page in ctx.pool.paginate(
+            f"/api/v1/apps/{application.id}/credentials/jwks"
+        ):
+            for item in _jwk_page_items(page):
+                if isinstance(item, Mapping):
+                    rows.append(
+                        {
+                            "app_id": application.id,
+                            "app_name": application.name,
+                            **item,
+                        }
+                    )
+        yield from rows or embedded_rows
+    except OktaRetryExhaustedError:
+        raise
+    except Exception as e:
+        status_code = getattr(getattr(e, "response", None), "status_code", None)
+        if status_code != 404:
+            logger.error(
+                "Error fetching application JWKs for %s: %s",
+                application.id,
+                e,
+                extra={"resource": "application_jwks", "phase": "defer"},
+            )
+        yield from embedded_rows
+
+
+@app.transformer(name="application_grants", columns=ApplicationGrant)
+def application_grants(application: Application, ctx: SourceContext):
+    oauth_client = application.settings.oauth_client if application.settings else None
+    if application.sign_on_mode != "OPENID_CONNECT" and not (
+        oauth_client and oauth_client.application_type == "service"
+    ):
+        return
+
+    try:
+        for page in ctx.pool.paginate(f"/api/v1/apps/{application.id}/grants"):
+            for item in page:
+                yield {"app_id": application.id, **item}
+    except OktaRetryExhaustedError:
+        raise
+    except Exception as e:
+        status_code = getattr(getattr(e, "response", None), "status_code", None)
+        if status_code != 404:
+            logger.error(
+                "Error fetching application grants for %s: %s",
+                application.id,
+                e,
+                extra={"resource": "application_grants", "phase": "defer"},
+            )
 
 
 @app.transformer(
@@ -309,10 +779,49 @@ def application_jwks(application: Application, ctx: SourceContext):
 def application_group_push_mappings(application: Application, ctx: SourceContext):
     if "GROUP_PUSH" in application.features:
         for page in ctx.pool.paginate(
-            f"/api/v1/apps/{application.id}/group-push/mappings"
+            f"/api/v1/apps/{application.id}/group-push/mappings",
+            params={"limit": ctx.group_push_mappings_page_size},
         ):
             for item in page:
-                yield {"app_id": application.id, "app_name": application.name, **item}
+                yield application_group_push_mapping_row(application, item, ctx)
+
+
+def application_group_push_mapping_row(
+    application: Application,
+    mapping: Mapping[str, object],
+    ctx: SourceContext,
+) -> dict[str, object]:
+    row = {"app_id": application.id, "app_name": application.name, **mapping}
+    target_group_id = mapping.get("targetGroupId")
+    if not isinstance(target_group_id, str):
+        return row
+
+    try:
+        target_group = ctx.pool.get(f"/api/v1/groups/{target_group_id}").json()
+    except OktaRetryExhaustedError:
+        raise
+    except Exception as e:
+        logger.error(
+            "Error fetching target group %s for group push mapping %s: %s",
+            target_group_id,
+            mapping.get("id"),
+            e,
+            extra={"resource": "application_group_push_mappings", "phase": "defer"},
+        )
+        return row
+
+    if not isinstance(target_group, Mapping):
+        return row
+
+    profile = target_group.get("profile")
+    if not isinstance(profile, Mapping):
+        return row
+
+    target_group_name = profile.get("name")
+    if isinstance(target_group_name, str) and target_group_name:
+        row["target_group_name"] = target_group_name
+
+    return row
 
 
 @app.transformer(
@@ -331,6 +840,21 @@ def application_secrets(application: Application, ctx: SourceContext):
                 yield {"app_id": application.id, "app_name": application.name, **item}
 
 
+@app.transformer(
+    name="api_service_secrets", columns=ApiServiceSecrets, parallelized=True
+)
+def api_service_secrets(api_service: ApiService, ctx: SourceContext):
+    yield from api_service_secret_rows(api_service, ctx)
+
+
+def api_service_secret_rows(api_service: ApiService, ctx: SourceContext):
+    for page in ctx.pool.paginate(
+        f"/integrations/api/v1/api-services/{api_service.id}/credentials/secrets"
+    ):
+        for item in page:
+            yield {"app_id": api_service.id, "app_name": api_service.name, **item}
+
+
 @app.transformer(name="application_users", columns=ApplicationUser, parallelized=True)
 def application_users(application: Application, ctx: SourceContext):
     """DLT transformer, fetches users assigned to an Okta application via GET /apps/{applicationId}/users.
@@ -342,16 +866,142 @@ def application_users(application: Application, ctx: SourceContext):
     Yields:
         _type_: _description_
     """
-    for page in ctx.pool.paginate(f"/api/v1/apps/{application.id}/users"):
-        for item in page:
-            yield {
-                "app_id": application.id,
-                "app_features": application.features,
-                "app_name": application.name,
-                "app_label": application.label,
-                "app_settings": application.settings.app,
-                **item,
-            }
+    yield from application_user_rows(application, ctx)
+
+
+def application_user_rows(application: Application, ctx: SourceContext):
+    row_count = 0
+    sign_on = application.settings.sign_on if application.settings else None
+    user_name_template = (
+        application.credentials.user_name_template if application.credentials else None
+    )
+    try:
+        for page in ctx.pool.paginate(
+            f"/api/v1/apps/{application.id}/users",
+            params={"limit": ctx.application_users_page_size},
+        ):
+            for item in page:
+                row_count += 1
+                yield {
+                    "app_id": application.id,
+                    "app_features": application.features,
+                    "app_name": application.name,
+                    "app_label": application.label,
+                    "app_status": getattr(application, "status", None),
+                    "app_settings": application.settings.app
+                    if application.settings
+                    else None,
+                    "app_sign_on_mode": application.sign_on_mode,
+                    "app_subject_name_id_template": (
+                        sign_on.subject_name_id_template if sign_on else None
+                    ),
+                    "app_subject_name_id_format": (
+                        sign_on.subject_name_id_format if sign_on else None
+                    ),
+                    "app_user_name_template": _user_name_template_value(
+                        user_name_template
+                    ),
+                    **item,
+                }
+    except Exception:
+        logger.error(
+            "Application user collection failed app_id=%s rows_streamed=%s",
+            application.id,
+            row_count,
+            exc_info=True,
+        )
+        raise
+    logger.info(
+        "Application user collection completed app_id=%s rows=%s",
+        application.id,
+        row_count,
+    )
+
+
+@app.transformer(
+    name="saml_federation_providers",
+    columns=SamlFederationProvider,
+    parallelized=True,
+)
+def saml_federation_providers(application: Application):
+    # Keep SAML row builders pure; DLT transformer boundaries recompute by design.
+    row = saml_federation_provider_row(application)
+    if row:
+        yield row
+
+
+@app.transformer(name="saml_issuers", columns=SamlIssuer, parallelized=True)
+def saml_issuers(application: Application):
+    row = saml_issuer_row(application)
+    if row:
+        yield row
+
+
+@app.transformer(
+    name="saml_assertion_consumer_services",
+    columns=SamlAssertionConsumerService,
+    parallelized=True,
+)
+def saml_assertion_consumer_services(application: Application):
+    yield from saml_acs_rows(application)
+
+
+@app.transformer(
+    name="saml_claim_mappings", columns=SamlClaimMapping, parallelized=True
+)
+def saml_claim_mappings(application: Application):
+    yield from saml_claim_mapping_rows(application)
+
+
+@app.transformer(
+    name="saml_service_providers",
+    columns=SamlServiceProvider,
+    parallelized=True,
+)
+def saml_service_providers(identity_provider: IdentityProvider):
+    row = saml_service_provider_row(identity_provider)
+    if row:
+        yield row
+
+
+@app.transformer(
+    name="saml_account_resolution_rules",
+    columns=SamlAccountResolutionRule,
+    parallelized=True,
+)
+def saml_account_resolution_rules(identity_provider: IdentityProvider):
+    row = saml_account_resolution_rule_row(identity_provider)
+    if row:
+        yield row
+
+
+@app.transformer(
+    name="saml_account_resolution_fields",
+    columns=SamlAccountResolutionField,
+    parallelized=True,
+)
+def saml_account_resolution_fields(identity_provider: IdentityProvider):
+    row = saml_account_resolution_field_row(identity_provider)
+    if row:
+        yield row
+
+
+@app.transformer(
+    name="saml_trusted_issuers", columns=SamlTrustedIssuer, parallelized=True
+)
+def saml_trusted_issuers(identity_provider: IdentityProvider):
+    row = saml_trusted_issuer_row(identity_provider)
+    if row:
+        yield row
+
+
+@app.transformer(
+    name="saml_sp_assertion_consumer_services",
+    columns=SamlServiceProviderAssertionConsumerService,
+    parallelized=True,
+)
+def saml_sp_assertion_consumer_services(identity_provider: IdentityProvider):
+    yield from saml_sp_acs_rows(identity_provider)
 
 
 @app.resource(name="client_applications", columns=ClientApplication, parallelized=True)
@@ -367,10 +1017,16 @@ def client_applications(ctx: SourceContext):
 def client_role_assignments(client: ClientApplication, ctx: SourceContext):
     if client.application_type == "service":
         for page in ctx.pool.paginate(
-            f"/oauth2/v1/clients/{client.client_id}/roles?expand=targets/catalog/apps&expand=targets/groups"
+            f"/oauth2/v1/clients/{client.client_id}/roles"
         ):
             for item in page:
-                yield {"from_resource": "client", "source_id": client.client_id, **item}
+                if _is_direct_active_role_assignment(item, "client"):
+                    yield {
+                        "from_resource": "client",
+                        "source_id": client.client_id,
+                        **item,
+                        **_role_assignment_scope(item, "client", client.client_id, ctx),
+                    }
 
 
 @app.resource(name="built_in_roles", columns=BuiltInRole, parallelized=True)
@@ -385,30 +1041,39 @@ def built_in_roles():
         yield {"type": role}
 
 
-@app.resource(
-    name="user_role_assignments", columns=UserRoleAssignment, parallelized=True
-)
-def user_role_assignments(ctx: SourceContext):
-    @app.defer
-    def _assignee_details(user_id: str):
-        try:
-            user_details = ctx.pool.paginate(
-                f"/api/v1/users/{user_id}/roles?expand=targets/catalog/apps&expand=targets/groups"
-            )
-            for roles in user_details:
-                for role in roles:
-                    yield {"from_resource": "user", "source_id": user_id, **role}
-
-        except Exception as e:
-            logger.error(
-                f"Error in resource 'user_role_assignments' processing assignee_details: {e}",
-                extra={"resource": "user_role_assignments", "phase": "defer"},
-            )
-            return
-
+@app.resource(name="privileged_users", columns=PrivilegedUser, parallelized=True)
+def privileged_users(ctx: SourceContext):
     for page in ctx.pool.paginate("/api/v1/iam/assignees/users"):
         for item in page:
-            yield _assignee_details(item["id"])
+            yield item
+
+
+@app.transformer(
+    name="user_role_assignments", columns=UserRoleAssignment, parallelized=True
+)
+def user_role_assignments(user: PrivilegedUser, ctx: SourceContext):
+    try:
+        yield from user_role_assignment_rows(user.id, ctx)
+    except OktaRetryExhaustedError:
+        raise
+    except Exception as e:
+        logger.error(
+            f"Error in resource 'user_role_assignments' processing assignee_details: {e}",
+            extra={"resource": "user_role_assignments", "phase": "defer"},
+        )
+        return
+
+
+def user_role_assignment_rows(user_id: str, ctx: SourceContext):
+    for roles in ctx.pool.paginate(f"/api/v1/users/{user_id}/roles"):
+        for role in roles:
+            if _is_direct_active_role_assignment(role, "user"):
+                yield {
+                    "from_resource": "user",
+                    "source_id": user_id,
+                    **role,
+                    **_role_assignment_scope(role, "user", user_id, ctx),
+                }
 
 
 @app.transformer(
@@ -417,10 +1082,16 @@ def user_role_assignments(ctx: SourceContext):
 def group_role_assignments(group: Group, ctx: SourceContext):
     if group.embedded.stats.has_admin_privilege:
         for page in ctx.pool.paginate(
-            f"/api/v1/groups/{group.id}/roles?expand=targets/catalog/apps&expand=targets/groups"
+            f"/api/v1/groups/{group.id}/roles"
         ):
             for role in page:
-                yield {"from_resource": "group", "source_id": group.id, **role}
+                if _is_direct_active_role_assignment(role, "group"):
+                    yield {
+                        "from_resource": "group",
+                        "source_id": group.id,
+                        **role,
+                        **_role_assignment_scope(role, "group", group.id, ctx),
+                    }
 
 
 @app.transformer(
@@ -448,6 +1119,8 @@ def custom_roles(ctx: SourceContext):
     for page in ctx.pool.paginate("/api/v1/iam/roles"):
         for item in page:
             # For whatever reason the WORKFLOWS_ADMIN also shows up in the custom roles endpoint
+            if item["id"] in UNSUPPORTED_BUILT_IN_ROLES:
+                continue
             if item["id"] not in BUILT_IN_PERMISSIONS:
                 yield item
 
@@ -492,7 +1165,6 @@ def policy_types():
         "PROFILE_ENROLLMENT",
         "POST_AUTH_SESSION",
         "ENTITY_RISK",
-        "CLIENT_UPDATE",
     ]
     for policy_type in okta_policies:
         yield {"policy_type": policy_type}
@@ -541,18 +1213,38 @@ def identity_providers(ctx: SourceContext):
     """
     for page in ctx.pool.paginate("/api/v1/idps"):
         for item in page:
+            protocol = item.get("protocol") or {}
+            if (
+                item.get("type") == "SAML2"
+                and protocol.get("type") == "SAML2"
+            ):
+                item = {**item, **_saml_idp_metadata_fields(ctx, item)}
             yield item
 
 
 @app.transformer(name="identity_provider_users", columns=IDPUser, parallelized=True)
 def identity_provider_users(idp: IdentityProvider, ctx: SourceContext):
-    for page in ctx.pool.paginate(f"/api/v1/idps/{idp.id}/users"):
+    for page in ctx.pool.paginate(
+        f"/api/v1/idps/{idp.id}/users",
+        params={"limit": ctx.identity_provider_users_page_size},
+    ):
         for item in page:
+            subject = (idp.policy.subject or {}) if idp.policy else {}
+            user_name_template = subject.get("userNameTemplate") or {}
             yield {
                 "idp_id": idp.id,
                 "idp_name": idp.name,
                 "idp_type": idp.type,
+                "idp_protocol_type": getattr(
+                    getattr(idp, "protocol", None),
+                    "type",
+                    None,
+                ),
+                "idp_status": idp.status,
                 "idp_url": idp.idp_url,
+                "idp_subject_user_name_template": user_name_template.get("template"),
+                "idp_subject_match_type": subject.get("matchType"),
+                "idp_subject_filter": subject.get("filter"),
                 **item,
             }
 
@@ -611,6 +1303,42 @@ def resources(resource_set: ResourceSet, ctx: SourceContext):
             yield {"resource_set_id": resource_set.id, **item}
 
 
+@app.transformer(
+    name="resource_set_role_assignments",
+    columns=ResourceSetRoleAssignment,
+    parallelized=True,
+)
+def resource_set_role_assignments(resource_set: ResourceSet, ctx: SourceContext):
+    for page in ctx.pool.paginate(
+        f"/api/v1/iam/resource-sets/{resource_set.id}/bindings",
+        data_selector="roles",
+    ):
+        for role in page:
+            role_id = role.get("id")
+            if not role_id:
+                continue
+
+            for member_page in ctx.pool.paginate(
+                f"/api/v1/iam/resource-sets/{resource_set.id}/bindings/{role_id}/members",
+                data_selector="members",
+            ):
+                for member in member_page:
+                    assignee_id = _resource_set_binding_assignee_id(member)
+                    if not assignee_id:
+                        logger.warning(
+                            "Skipping resource set role assignment member %s without an assignee link",
+                            member.get("id"),
+                        )
+                        continue
+
+                    yield {
+                        "resource_set_id": resource_set.id,
+                        "role_id": role_id,
+                        "assignee_id": assignee_id,
+                        **member,
+                    }
+
+
 @app.resource(name="api_tokens", columns=ApiToken, parallelized=True)
 def api_tokens(ctx: SourceContext):
     """DLT resource, fetches Okta API tokens via GET /api/v1/api-tokens.
@@ -631,7 +1359,8 @@ def api_services(ctx: SourceContext):
         api_service (ApiService): API service records.
     """
     for page in ctx.pool.paginate("/integrations/api/v1/api-services"):
-        yield page
+        for item in page:
+            yield item
 
 
 @app.source(name="okta", max_table_nesting=0)
@@ -639,14 +1368,48 @@ def source(
     credentials: Union[
         OktaAppCredentials, OktaEncodedAppCredentials, OktaTokenCredentials
     ] = dlt.secrets.value,
+    application_users_page_size: int = APPLICATION_USERS_PAGE_SIZE,
+    group_push_mappings_page_size: int = GROUP_PUSH_MAPPINGS_PAGE_SIZE,
+    identity_provider_users_page_size: int = IDENTITY_PROVIDER_USERS_PAGE_SIZE,
+    endpoint_concurrency: int = DEFAULT_ENDPOINT_CONCURRENCY,
+    rate_limit_max_elapsed_seconds: float = DEFAULT_RATE_LIMIT_MAX_ELAPSED_SECONDS,
+    rate_limit_remaining_reserve: int = DEFAULT_RATE_LIMIT_REMAINING_RESERVE,
 ) -> tuple:
     """DLT source, defines Okta collection resources and transformers.
 
     Args:
         credentials: Okta API credentials based on key path, encoded key or SSWS for authentication.
+        application_users_page_size: Users requested per application-users page.
+        group_push_mappings_page_size: Mappings requested per group-push page.
+        identity_provider_users_page_size: Users requested per identity-provider page.
+        endpoint_concurrency: Maximum simultaneous requests for each endpoint family.
+        rate_limit_max_elapsed_seconds: Maximum retry window for an individual 429 request.
+        rate_limit_remaining_reserve: Requests retained as headroom in each observed window.
     Returns:
         Tuple of DLT resources and transformers registered for Okta.
     """
+
+    if not 1 <= application_users_page_size <= APPLICATION_USERS_PAGE_SIZE:
+        raise ValueError(
+            "application_users_page_size must be between 1 and "
+            f"{APPLICATION_USERS_PAGE_SIZE}"
+        )
+    if not 1 <= group_push_mappings_page_size <= GROUP_PUSH_MAPPINGS_PAGE_SIZE:
+        raise ValueError(
+            "group_push_mappings_page_size must be between 1 and "
+            f"{GROUP_PUSH_MAPPINGS_PAGE_SIZE}"
+        )
+    if not 1 <= identity_provider_users_page_size <= IDENTITY_PROVIDER_USERS_PAGE_SIZE:
+        raise ValueError(
+            "identity_provider_users_page_size must be between 1 and "
+            f"{IDENTITY_PROVIDER_USERS_PAGE_SIZE}"
+        )
+    if endpoint_concurrency < 1:
+        raise ValueError("endpoint_concurrency must be at least 1")
+    if rate_limit_max_elapsed_seconds <= 0:
+        raise ValueError("rate_limit_max_elapsed_seconds must be positive")
+    if rate_limit_remaining_reserve < 0:
+        raise ValueError("rate_limit_remaining_reserve cannot be negative")
 
     pool = ClientPool(
         base_url=credentials.base_url,
@@ -654,22 +1417,33 @@ def source(
             name="Authorization", api_key=credentials.header, location="header"
         ),
         paginator=HeaderLinkPaginator(),
+        endpoint_concurrency=endpoint_concurrency,
+        rate_limit_max_elapsed_seconds=rate_limit_max_elapsed_seconds,
+        rate_limit_remaining_reserve=rate_limit_remaining_reserve,
     )
 
-    ctx = SourceContext(pool=pool)
+    ctx = SourceContext(
+        pool=pool,
+        application_users_page_size=application_users_page_size,
+        group_push_mappings_page_size=group_push_mappings_page_size,
+        identity_provider_users_page_size=identity_provider_users_page_size,
+    )
     custom_roles_resource = custom_roles(ctx)
     built_in_roles_resource = built_in_roles()
     groups_resource = groups(ctx)
     applications_resource = applications(ctx)
     client_apps_resource = client_applications(ctx)
     agent_pools_resource = agent_pools(ctx)
+    api_services_resource = api_services(ctx)
     identity_providers_resource = identity_providers(ctx)
     policies_resource = policy_types | policies(ctx)
     resource_sets_resource = resource_sets(ctx)
     users_resource = users(ctx)
+    privileged_users_resource = privileged_users(ctx)
     return (
         organization(ctx),
         users_resource,
+        users_resource | user_factors(ctx),
         groups_resource,
         groups_resource | group_memberships(ctx),
         groups_resource | group_assigned_apps(ctx),
@@ -677,7 +1451,12 @@ def source(
         client_apps_resource,
         client_apps_resource | client_role_assignments(ctx),
         applications_resource,
+        applications_resource | application_grants(ctx),
         applications_resource | application_users(ctx),
+        applications_resource | saml_federation_providers(),
+        applications_resource | saml_issuers(),
+        applications_resource | saml_assertion_consumer_services(),
+        applications_resource | saml_claim_mappings(),
         applications_resource | application_jwks(ctx),
         applications_resource | application_secrets(ctx),
         applications_resource | application_group_push_mappings(ctx),
@@ -686,17 +1465,25 @@ def source(
         policies_resource | policy_mappings(ctx),
         realms(ctx),
         identity_providers_resource,
+        identity_providers_resource | saml_service_providers(),
+        identity_providers_resource | saml_account_resolution_rules(),
+        identity_providers_resource | saml_account_resolution_fields(),
+        identity_providers_resource | saml_trusted_issuers(),
+        identity_providers_resource | saml_sp_assertion_consumer_services(),
         identity_providers_resource | identity_provider_users(ctx),
         authorization_servers(ctx),
         agent_pools_resource,
         agent_pools_resource | agents(),
         resource_sets_resource,
         resource_sets_resource | resources(ctx),
+        resource_sets_resource | resource_set_role_assignments(ctx),
         custom_roles_resource,
         custom_roles_resource | custom_role_permissions(ctx),
         api_tokens(ctx),
-        api_services(ctx),
+        api_services_resource,
+        api_services_resource | api_service_secrets(ctx),
         built_in_roles_resource,
         built_in_roles_resource | built_in_role_permissions,
-        user_role_assignments(ctx),
+        privileged_users_resource,
+        privileged_users_resource | user_role_assignments(ctx),
     )

@@ -11,12 +11,21 @@ from openhound_okta.graph import OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 
+WORKFLOWS_RESOURCE_SET_ID = "WORKFLOWS_IAM_POLICY"
+
+
+def resource_set_node_id(resource_set_id: str, tenant_domain: str | None) -> str:
+    """Return the OktaHound-compatible graph ID for a resource set."""
+    if resource_set_id == WORKFLOWS_RESOURCE_SET_ID and tenant_domain:
+        return f"{resource_set_id}@{tenant_domain}"
+    return resource_set_id
+
 
 @dataclass
 class ResourceSetProperties(OktaNodeProperties):
     """Properties for the Okta_ResourceSet node"""
 
-    label: str
+    okta_domain: str
     created: datetime
     description: str | None = None
     last_updated: datetime | None = None
@@ -52,15 +61,22 @@ class ResourceSet(BaseAsset):
     links: dict | None = Field(default=None, alias="_links")
 
     @property
+    def node_id(self) -> str:
+        return resource_set_node_id(
+            self.id,
+            getattr(self, "_extras", {}).get("tenant"),
+        )
+
+    @property
     def as_node(self):
         return OktaNode(
             kinds=[nk.RESOURCE_SET],
             properties=ResourceSetProperties(
                 tenant=self._lookup.org_id(),
-                id=self.id,
+                id=self.node_id,
                 name=self.label,
                 displayname=self.label,
-                label=self.label,
+                okta_domain=self._extras["tenant"],
                 created=self.created,
                 description=self.description,
                 last_updated=self.last_updated,
@@ -74,6 +90,6 @@ class ResourceSet(BaseAsset):
         yield Edge(
             kind=ek.CONTAINS,
             start=EdgePath(value=self._lookup.org_id(), match_by="id"),
-            end=EdgePath(value=self.id, match_by="id"),
+            end=EdgePath(value=self.node_id, match_by="id"),
             properties=EdgeProperties(traversable=True),
         )

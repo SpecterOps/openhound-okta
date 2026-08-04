@@ -1,3 +1,5 @@
+from urllib.parse import urlparse
+
 import dlt
 from dlt.extract.source import DltSource
 from openhound.core.app import OpenHound
@@ -9,6 +11,22 @@ from openhound_okta.lookup import OktaLookup
 from openhound_okta.transforms import transforms
 
 app = OpenHound("okta", source_kind="Okta", help="OpenGraph collector for Okta")
+
+
+def _tenant_domain_from_config() -> str:
+    # DLT resolves source environment variables under sources.okta, while existing
+    # secrets.toml bundles use sources.source.okta. Check both so a missing value
+    # cannot become b"" and leak DLT's U+F02B bytes marker into tenant_domain.
+    tenant_url: str | None = dlt.secrets.get(
+        "sources.okta.credentials.base_url"
+    ) or dlt.secrets.get("sources.source.okta.credentials.base_url")
+    if not isinstance(tenant_url, str) or not tenant_url.strip():
+        raise ValueError("Okta base URL is unavailable during conversion")
+
+    tenant_domain = urlparse(tenant_url.strip()).netloc
+    if not tenant_domain:
+        raise ValueError("Okta base URL must include a URL scheme and hostname")
+    return tenant_domain
 
 
 @app.collect()
@@ -31,9 +49,11 @@ def convert(ctx: ConvertContext):
         ctx (ConvertContext): Returns DLT pipeline context.
     """
     from openhound_okta.source import source as okta_source
-    from urllib.parse import urlparse
-    tenant_url = dlt.secrets.get("sources.source.okta.credentials.base_url")
-    return okta_source(), {"tenant": urlparse(tenant_url).netloc}
+
+    tenant_domain = _tenant_domain_from_config()
+    if ctx.lookup:
+        ctx.lookup.tenant_domain = tenant_domain
+    return okta_source(), {"tenant": tenant_domain}
 
 
 @app.preproc(transformer=transforms)
@@ -41,14 +61,32 @@ def preprocess(ctx: PreProcContext):
     return {
         "organization": "organization",
         "users": "users",
+        "user_factors": "user_factors",
         "groups": "groups",
+        "group_memberships": "group_memberships",
         "applications": "applications",
+        "application_grants": "application_grants",
+        "application_users": "application_users",
+        "api_services": "api_services",
+        "saml_federation_providers": "saml_federation_providers",
+        "saml_issuers": "saml_issuers",
+        "saml_assertion_consumer_services": "saml_assertion_consumer_services",
+        "saml_claim_mappings": "saml_claim_mappings",
+        "saml_service_providers": "saml_service_providers",
+        "saml_account_resolution_rules": "saml_account_resolution_rules",
+        "saml_account_resolution_fields": "saml_account_resolution_fields",
+        "saml_trusted_issuers": "saml_trusted_issuers",
+        "saml_sp_assertion_consumer_services": "saml_sp_assertion_consumer_services",
         "application_secrets": "application_secrets",
+        "api_service_secrets": "api_service_secrets",
         "devices": "devices",
         "authorization_servers": "authorization_servers",
         "identity_providers": "identity_providers",
+        "identity_provider_users": "identity_provider_users",
         "policies": "policies",
         "resources": "resources",
+        "resource_set_role_assignments": "resource_set_role_assignments",
+        "privileged_users": "privileged_users",
         "user_role_assignments": "user_role_assignments",
         "group_role_assignments": "group_role_assignments",
         "client_role_assignments": "client_role_assignments",

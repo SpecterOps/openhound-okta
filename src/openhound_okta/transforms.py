@@ -15,9 +15,17 @@ def insert_principals_with_admin_roles(
     schema: str = "okta",
 ) -> None:
     principals = [
-        f"SELECT source_id AS id, 'user'   AS principal_type FROM {schema}.user_role_assignments",
-        f"SELECT source_id AS id, 'group'  AS principal_type FROM {schema}.group_role_assignments",
-        f"SELECT source_id AS id, 'client' AS principal_type FROM {schema}.client_role_assignments",
+        f"""SELECT DISTINCT id, 'user' AS principal_type
+            FROM {schema}.privileged_users""",
+        f"""SELECT source_id AS id, 'user' AS principal_type
+            FROM {schema}.user_role_assignments
+            WHERE status = 'ACTIVE' AND assignment_type = 'USER'""",
+        f"""SELECT source_id AS id, 'group' AS principal_type
+            FROM {schema}.group_role_assignments
+            WHERE status = 'ACTIVE' AND assignment_type = 'GROUP'""",
+        f"""SELECT source_id AS id, 'client' AS principal_type
+            FROM {schema}.client_role_assignments
+            WHERE status = 'ACTIVE' AND assignment_type = 'CLIENT'""",
     ]
     for principal in principals:
         try:
@@ -30,6 +38,12 @@ def insert_principals_with_admin_roles(
 
         except Exception as e:
             raise e
+
+    con.execute(f"""
+        CREATE OR REPLACE TABLE {schema}.principals_with_admin_roles AS
+        SELECT DISTINCT id, principal_type
+        FROM {schema}.principals_with_admin_roles
+    """)
 
 
 def non_admin_users(con, schema: str = "okta") -> None:

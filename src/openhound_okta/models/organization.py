@@ -13,12 +13,11 @@ from openhound_okta.main import app
 class OrganizationProperties(OktaNodeProperties):
     """Properties for the Okta_Organization node"""
 
+    okta_domain: str
     subdomain: str
     status: str
     created: datetime
     last_updated: datetime | None = None
-    company_name: str | None = None
-    website: str | None = None
     collected: bool = True
 
 
@@ -45,20 +44,21 @@ class Organization(BaseAsset):
 
     @property
     def as_node(self):
+        okta_domain = self._extras["tenant"]
+        display_name = self.company_name or self.subdomain or okta_domain
         return OktaNode(
             kinds=[nk.ORG],
             properties=OrganizationProperties(
                 tenant=self._lookup.org_id(),
-                tenant_domain=self._extras["tenant"],
+                tenant_domain=okta_domain,
                 id=self.id,
-                name=self.company_name or self.subdomain,
-                displayname=self.company_name or self.subdomain,
+                name=okta_domain,
+                displayname=display_name,
+                okta_domain=okta_domain,
                 subdomain=self.subdomain,
                 status=self.status,
                 created=self.created,
                 last_updated=self.last_updated,
-                company_name=self.company_name,
-                website=self.website,
                 environmentid=self._lookup.org_id(),
             ),
         )

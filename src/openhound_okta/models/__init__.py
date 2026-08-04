@@ -3,9 +3,10 @@ from .agent_pool import AgentPool
 from .api_service import ApiService
 from .api_token import ApiToken
 from .application import Application
+from .application_grants import ApplicationGrant
 from .application_group_mappings import ApplicationGroupMapping
 from .application_jwks import ApplicationJWKS
-from .application_secrets import ApplicationSecrets
+from .application_secrets import ApiServiceSecrets, ApplicationSecrets
 from .application_users import ApplicationUser
 from .auth_server import AuthServer
 from .built_in_role import BuiltInRole
@@ -25,19 +26,35 @@ from .organization import Organization
 from .policy import Policy
 from .policy_mappings import PolicyMapping
 from .policy_type import PolicyType
+from .privileged_user import PrivilegedUser
 from .realm import Realm
 from .resource import Resource
 from .resource_set import ResourceSet
+from .resource_set_role_assignment import ResourceSetRoleAssignment
+from .saml import (
+    SamlAccountResolutionField,
+    SamlAccountResolutionRule,
+    SamlAssertionConsumerService,
+    SamlClaimMapping,
+    SamlFederationProvider,
+    SamlIssuer,
+    SamlServiceProviderAssertionConsumerService,
+    SamlServiceProvider,
+    SamlTrustedIssuer,
+)
 from .user import User
+from .user_factors import UserFactor
 from .user_role_assignment import UserRoleAssignment
 
 __all__ = [
     "User",
+    "UserFactor",
     "ApplicationGroupMapping",
     "Agent",
     "Group",
     "Organization",
     "Application",
+    "ApplicationGrant",
     "Device",
     "AuthServer",
     "ResourceSet",
@@ -58,11 +75,23 @@ __all__ = [
     "Policy",
     "ApplicationJWKS",
     "ApplicationSecrets",
+    "ApiServiceSecrets",
     "UserRoleAssignment",
     "GroupRoleAssignment",
     "ClientRoleAssignment",
     "PolicyMapping",
     "IDPUser",
     "PolicyType",
+    "PrivilegedUser",
     "Resource",
+    "ResourceSetRoleAssignment",
+    "SamlAccountResolutionField",
+    "SamlAccountResolutionRule",
+    "SamlAssertionConsumerService",
+    "SamlClaimMapping",
+    "SamlFederationProvider",
+    "SamlIssuer",
+    "SamlServiceProviderAssertionConsumerService",
+    "SamlServiceProvider",
+    "SamlTrustedIssuer",
 ]

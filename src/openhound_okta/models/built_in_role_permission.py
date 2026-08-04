@@ -1,7 +1,7 @@
 from pydantic import BaseModel, ConfigDict
 
 BUILT_IN_PERMISSIONS = {
-    "API_ACCESS_MGMT_ADMIN": [
+    "API_ACCESS_MANAGEMENT_ADMIN": [
         "okta.authzServers.manage",
         "okta.authzServers.read",
         "okta.profileMappings.manage",
@@ -146,27 +146,6 @@ BUILT_IN_PERMISSIONS = {
         "okta.groups.members.manage",
         "okta.users.groupMembership.manage",
         "okta.groups.manage",
-    ],
-    "API_ADMIN": [
-        "okta.users.apitokens.manage",
-        "okta.users.apitokens.read",
-        "okta.users.apitokens.clear",
-    ],
-    "ACCESS_CERTIFICATIONS_ADMIN": [
-        "okta.governance.accessCertifications.manage",
-        "okta.governance.collections.read",
-        "okta.apps.read",
-        "okta.users.read",
-        "okta.groups.read",
-    ],
-    "ACCESS_REQUEST_ADMIN": [
-        "okta.governance.accessRequests.manage",
-        "okta.apps.assignment.manage",
-        "okta.governance.collections.read",
-        "okta.groups.appAssignment.manage",
-        "okta.apps.manageFirstPartyApps",
-        "okta.apps.manage",
-        "okta.users.appAssignment.manage",
     ],
     "WORKFLOWS_ADMIN": [
         "okta.workflows.flows.invoke",

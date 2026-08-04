@@ -16,9 +16,9 @@ from openhound_okta.main import app
 class CustomRoleProperties(OktaNodeProperties):
     """Properties for the Okta_CustomRole node"""
 
-    label: str
+    okta_domain: str
+    permissions: list[str]
     created: datetime | None = None
-    description: str | None = None
     last_updated: datetime | None = None
 
 
@@ -61,9 +61,9 @@ class CustomRole(BaseAsset):
                 id=self.id,
                 name=self.label,
                 displayname=self.label,
-                label=self.label,
+                okta_domain=self._extras["tenant"],
+                permissions=list(self._lookup.custom_role_permissions(self.id)),
                 created=self.created,
-                description=self.description,
                 last_updated=self.last_updated,
                 environmentid=self._lookup.org_id(),
             ),

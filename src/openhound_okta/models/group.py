@@ -1,30 +1,49 @@
+import base64
+import binascii
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import ClassVar
-from urllib.parse import urlparse
 
 from dlt.common import json
 from dlt.common.libs.pydantic import DltConfig
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
-from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties, ConditionalEdgePath, PropertyMatch
+from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
 from pydantic import BaseModel, ConfigDict, Field
 
 from openhound_okta.graph import OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
+from openhound_okta.models.hybrid_auth import (
+    hybrid_group_target,
+    hybrid_target_edge_path,
+)
 
 
 @dataclass
 class GroupProperties(OktaNodeProperties):
     """Properties for the Okta_Group node"""
 
-    type: str
+    okta_domain: str
+    okta_group_type: str
     created: datetime
+    has_role_assignments: bool = False
     last_updated: datetime | None = None
     last_membership_updated: datetime | None = None
+    object_class: str | None = None
+    description: str | None = None
+    object_sid: str | None = None
+    distinguished_name: str | None = None
+    sam_account_name: str | None = None
+    domain_qualified_name: str | None = None
+    group_scope: str | None = None
+    group_type: str | None = None
+    object_guid: str | None = None
 
 
 class GroupProfile(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     name: str | None = None
     description: str | None = None
 
@@ -36,6 +55,8 @@ class GroupProfile(BaseModel):
     external_id: str | None = Field(default=None, alias="externalId")
     sam_account_name: str | None = Field(default=None, alias="samAccountName")
     object_sid: str | None = Field(default=None, alias="objectSid")
+    group_scope: str | None = Field(default=None, alias="groupScope")
+    group_type: str | None = Field(default=None, alias="groupType")
 
 
 class Stat(BaseModel):
@@ -50,6 +71,16 @@ class Embedded(BaseModel):
 
 class Source(BaseModel):
     id: str
+
+
+def _decode_object_guid(external_id: str | None) -> str | None:
+    if external_id is None:
+        return None
+
+    try:
+        return str(uuid.UUID(bytes_le=base64.b64decode(external_id, validate=True)))
+    except (ValueError, TypeError, binascii.Error):
+        return external_id
 
 
 @app.asset(
@@ -110,6 +141,10 @@ class Group(BaseAsset):
     @property
     def as_node(self):
         profile_name = self.profile.name if self.profile else None
+        object_class = next(iter(self.object_class), None)
+        is_active_directory_group = (
+            "okta:windows_security_principal" in self.object_class
+        )
         return OktaNode(
             kinds=[nk.GROUP],
             properties=GroupProperties(
@@ -118,10 +153,37 @@ class Group(BaseAsset):
                 id=self.id,
                 name=profile_name or self.id,
                 displayname=profile_name or self.id,
-                type=self.type,
+                okta_domain=self._extras["tenant"],
+                okta_group_type=self.type,
                 created=self.created,
+                has_role_assignments=self._lookup.has_role_assignments(
+                    self.id, "group"
+                ),
                 last_updated=self.last_updated,
                 last_membership_updated=self.last_membership_updated,
+                object_class=object_class,
+                description=self.profile.description if self.profile else None,
+                object_sid=self.profile.object_sid
+                if self.profile and is_active_directory_group
+                else None,
+                distinguished_name=self.profile.dn
+                if self.profile and is_active_directory_group
+                else None,
+                sam_account_name=self.profile.sam_account_name
+                if self.profile and is_active_directory_group
+                else None,
+                domain_qualified_name=self.profile.windows_domain_qualified_name
+                if self.profile and is_active_directory_group
+                else None,
+                group_scope=self.profile.group_scope
+                if self.profile and is_active_directory_group
+                else None,
+                group_type=self.profile.group_type
+                if self.profile and is_active_directory_group
+                else None,
+                object_guid=_decode_object_guid(self.profile.external_id)
+                if self.profile and is_active_directory_group
+                else None,
                 environmentid=self._lookup.org_id(),
             ),
         )
@@ -129,8 +191,9 @@ class Group(BaseAsset):
     @property
     def _membership_sync_inbound_ad_edge(self):
         if (
-                "okta:windows_security_principal" in self.object_class
-                and self.profile.object_sid
+            "okta:windows_security_principal" in self.object_class
+            and self.profile
+            and self.profile.object_sid
         ):
             yield Edge(
                 kind=ek.MEMBERSHIP_SYNC,
@@ -160,29 +223,33 @@ class Group(BaseAsset):
 
     @property
     def _membership_sync_inbound_app_edge(self):
-        if self.type == "APP_GROUP" and "okta:user_group" in self.object_class:
+        if (
+            self.type == "APP_GROUP"
+            and "okta:user_group" in self.object_class
+            and self.source
+            and self.profile
+            and self.profile.name
+        ):
+            app_name = self._lookup.application_name(self.source.id)
             app_settings = self._lookup.application_settings(self.source.id)
-            if app_settings:
-                app_settings_obj = json.loads(app_settings)
-                source_domain = urlparse(app_settings_obj["app"]["baseUrl"]).netloc
-                yield Edge(
-                    kind=ek.MEMBERSHIP_SYNC,
-                    start=ConditionalEdgePath(
-                        kind=nk.GROUP, property_matchers=[
-                            PropertyMatch(
-                                key="tenant_domain", value=source_domain
-                            ),
-                            PropertyMatch(
-                                key="type", value="OKTA_GROUP"
-                            ),
-                            PropertyMatch(
-                                key="name", value=self.profile.name.upper()
-                            )
-                        ]
-                    ),
-                    end=EdgePath(value=self.id, match_by="id"),
-                    properties=EdgeProperties(traversable=True),
-                )
+            if not app_name or not app_settings:
+                return
+
+            app_settings_obj = json.loads(app_settings)
+            target = hybrid_group_target(
+                app_name,
+                app_settings_obj.get("app"),
+                group_name=self.profile.name,
+            )
+            if target is None:
+                return
+
+            yield Edge(
+                kind=ek.MEMBERSHIP_SYNC,
+                start=hybrid_target_edge_path(target),
+                end=EdgePath(value=self.id, match_by="id"),
+                properties=EdgeProperties(traversable=True),
+            )
 
     @property
     def edges(self):

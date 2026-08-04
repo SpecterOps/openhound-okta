@@ -15,6 +15,7 @@ from openhound_okta.models.role_assignment import RoleAssignment
 @dataclass
 class ClientRoleAssignmentProperties(OktaNodeProperties):
     id: str
+    okta_domain: str
     assignment_type: str
     type: str
     status: str
@@ -70,6 +71,13 @@ class Embedded(BaseModel):
     ),
     edges=[
         EdgeDef(
+            start=nk.ORG,
+            end=nk.ROLE_ASSIGNMENT,
+            kind=ek.CONTAINS,
+            description="Organization contains role assignment",
+            traversable=True,
+        ),
+        EdgeDef(
             start=nk.APPLICATION,
             end=nk.ROLE_ASSIGNMENT,
             kind=ek.HAS_ROLE_ASSIGNMENT,
@@ -102,6 +110,13 @@ class Embedded(BaseModel):
             end=nk.APPLICATION,
             kind=ek.APP_ADMIN,
             description="Application has app admin role",
+            traversable=True,
+        ),
+        EdgeDef(
+            start=nk.APPLICATION,
+            end=nk.INTEGRATION,
+            kind=ek.APP_ADMIN,
+            description="Application has app admin role for API service integration",
             traversable=True,
         ),
         EdgeDef(
@@ -190,24 +205,31 @@ class Embedded(BaseModel):
         ),
         # Scoped to
         EdgeDef(
-            start=nk.APPLICATION,
+            start=nk.ROLE_ASSIGNMENT,
             end=nk.GROUP,
             kind=ek.SCOPED_TO,
             description="Role assignment is scoped to group",
             traversable=False,
         ),
         EdgeDef(
-            start=nk.APPLICATION,
+            start=nk.ROLE_ASSIGNMENT,
             end=nk.ORG,
             kind=ek.SCOPED_TO,
             description="Role assignment is scoped to org",
             traversable=False,
         ),
         EdgeDef(
-            start=nk.APPLICATION,
+            start=nk.ROLE_ASSIGNMENT,
             end=nk.APPLICATION,
             kind=ek.SCOPED_TO,
             description="Role assignment is scoped to application",
+            traversable=False,
+        ),
+        EdgeDef(
+            start=nk.ROLE_ASSIGNMENT,
+            end=nk.INTEGRATION,
+            kind=ek.SCOPED_TO,
+            description="Role assignment is scoped to API service integration",
             traversable=False,
         ),
     ],
@@ -220,14 +242,18 @@ class ClientRoleAssignment(RoleAssignment):
 
     @property
     def as_node(self):
+        if not self.is_direct_active_assignment:
+            return None
+
         return OktaNode(
             kinds=[nk.ROLE_ASSIGNMENT],
             properties=ClientRoleAssignmentProperties(
                 tenant=self._lookup.org_id(),
                 tenant_domain=self._extras["tenant"],
-                id=self.id,
+                id=self.node_id,
                 name=self.label,
                 displayname=self.label,
+                okta_domain=self._extras["tenant"],
                 status=self.status,
                 created=self.created,
                 last_updated=self.last_updated,
@@ -239,53 +265,15 @@ class ClientRoleAssignment(RoleAssignment):
 
     @property
     def _group_membership_admin_edges(self):
-        if self.type == "GROUP_MEMBERSHIP_ADMIN":
-            for (group_id,) in self._lookup.all_groups():
-                yield Edge(
-                    kind=ek.GROUP_MEMBERSHIP_ADMIN,
-                    start=EdgePath(value=self.source_id, match_by="id"),
-                    end=EdgePath(value=group_id, match_by="id"),
-                    properties=EdgeProperties(traversable=True),
-                )
+        yield from super()._group_membership_admin_edges
 
     @property
     def _app_admin_edges(self):
-        if self.type == "APP_ADMIN":
-            if (
-                    self.embedded
-                    and self.embedded.targets
-                    and self.embedded.targets.catalog
-                    and self.embedded.targets.catalog.apps
-            ):
-                # Emit only to scoped targets
-                for app in self.embedded.targets.catalog.apps:
-                    if app.id:
-                        yield Edge(
-                            kind=ek.APP_ADMIN,
-                            start=EdgePath(value=self.source_id, match_by="id"),
-                            end=EdgePath(value=app.id, match_by="id"),
-                            properties=EdgeProperties(traversable=True),
-                        )
-
-            else:
-                for (app_id,) in self._lookup.all_applications():
-                    yield Edge(
-                        kind=ek.APP_ADMIN,
-                        start=EdgePath(value=self.source_id, match_by="id"),
-                        end=EdgePath(value=app_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
-                    )
+        yield from super()._app_admin_edges
 
     @property
     def _helpdesk_admin_edges(self):
-        if self.type == "HELP_DESK_ADMIN":
-            for (user_id,) in self._lookup.all_users():
-                yield Edge(
-                    kind=ek.HELPDESK_ADMIN,
-                    start=EdgePath(value=self.source_id, match_by="id"),
-                    end=EdgePath(value=user_id, match_by="id"),
-                    properties=EdgeProperties(traversable=True),
-                )
+        yield from super()._helpdesk_admin_edges
 
     @property
     def _org_admin_edges(self):
@@ -322,25 +310,14 @@ class ClientRoleAssignment(RoleAssignment):
 
     @property
     def _user_admin_edges(self):
-        if self.type == "USER_ADMIN":
-            for (user_id,) in self._lookup.all_users():
-                yield Edge(
-                    kind=ek.GROUP_ADMIN,
-                    start=EdgePath(value=self.source_id, match_by="id"),
-                    end=EdgePath(value=user_id, match_by="id"),
-                    properties=EdgeProperties(traversable=True),
-                )
-
-            for (group_id,) in self._lookup.all_groups():
-                yield Edge(
-                    kind=ek.GROUP_ADMIN,
-                    start=EdgePath(value=self.source_id, match_by="id"),
-                    end=EdgePath(value=group_id, match_by="id"),
-                    properties=EdgeProperties(traversable=True),
-                )
+        yield from super()._user_admin_edges
 
     @property
     def edges(self):
+        if not self.is_direct_active_assignment:
+            return
+
+        yield from self._contains_edge
         yield from self._has_role_assignment_edges
         yield from self._has_role_edges
         yield from self._app_admin_edges
@@ -353,6 +330,7 @@ class ClientRoleAssignment(RoleAssignment):
         yield from self._reset_password_edges
         yield from self._reset_factors_edges
         yield from self._manage_app_edges
+        yield from self._scoped_to_app_edges
         yield from self._scoped_to_group_edges
         yield from self._scoped_to_org_edge
         yield from self.read_client_secret_edges

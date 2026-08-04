@@ -15,6 +15,7 @@ from openhound_okta.main import app
 class SecretProperties(OktaNodeProperties):
     """Properties for Okta_ClientSecret node"""
 
+    okta_domain: str
     id: str = field(
         metadata={"description": "The unique identifier for the JSON Web Key"}
     )
@@ -31,11 +32,11 @@ class SecretProperties(OktaNodeProperties):
 
 
 @app.asset(
-    description="Okta application client secrets",
+    description="Okta client secrets",
     node=NodeDef(
         icon="key",
         kind=nk.CLIENT_SECRET,
-        description="Okta client secret configured for application",
+        description="Okta client secret configured for an application or API service",
         properties=SecretProperties,
     ),
     edges=[
@@ -71,6 +72,7 @@ class ApplicationSecrets(BaseAsset):
                 name=self.secret_hash,
                 displayname=self.secret_hash,
                 id=self.id,
+                okta_domain=self._extras["tenant"],
                 status=self.status,
                 last_updated=self.last_updated,
                 created=self.created,
@@ -86,3 +88,25 @@ class ApplicationSecrets(BaseAsset):
             end=EdgePath(value=self.app_id, match_by="id"),
             properties=EdgeProperties(traversable=True),
         )
+
+
+@app.asset(
+    description="Okta API service integration client secrets",
+    node=NodeDef(
+        icon="key",
+        kind=nk.CLIENT_SECRET,
+        description="Okta client secret configured for API service integration",
+        properties=SecretProperties,
+    ),
+    edges=[
+        EdgeDef(
+            start=nk.CLIENT_SECRET,
+            end=nk.INTEGRATION,
+            kind=ek.SECRET_OF,
+            description="Client secret belongs to API service integration",
+            traversable=True,
+        )
+    ],
+)
+class ApiServiceSecrets(ApplicationSecrets):
+    pass
