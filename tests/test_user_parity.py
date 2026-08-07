@@ -62,7 +62,7 @@ def test_user_node_emits_core_oktahound_equivalent_properties():
 
     properties = user.as_node.properties
 
-    assert properties.name == "alice@example.com"
+    assert properties.name == "ALICE@EXAMPLE.COM"
     assert properties.displayname == "Alice Example"
     assert properties.okta_domain == "example.okta.com"
     assert properties.has_role_assignments is True

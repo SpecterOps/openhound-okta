@@ -2,9 +2,10 @@ from datetime import datetime
 from typing import Any
 
 from openhound.core.asset import BaseAsset
-from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from openhound.core.models.entries_dataclass import Edge, EdgeProperties
 from pydantic import BaseModel, ConfigDict, Field
 
+from openhound_okta.graph import OktaOwnedEdgePath
 from openhound_okta.kinds import edges as ek
 from openhound_okta.models.built_in_role import (
     SUPPORTED_ROLE_ASSIGNMENT_TYPES,
@@ -217,8 +218,8 @@ class RoleAssignment(BaseAsset):
     def _has_role_assignment_edges(self):
         yield Edge(
             kind=ek.HAS_ROLE_ASSIGNMENT,
-            start=EdgePath(value=self.source_id, match_by="id"),
-            end=EdgePath(value=self.node_id, match_by="id"),
+            start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+            end=OktaOwnedEdgePath(value=self.node_id, match_by="id"),
             properties=EdgeProperties(traversable=False),
         )
 
@@ -226,8 +227,8 @@ class RoleAssignment(BaseAsset):
     def _contains_edge(self):
         yield Edge(
             kind=ek.CONTAINS,
-            start=EdgePath(value=self._lookup.org_id(), match_by="id"),
-            end=EdgePath(value=self.node_id, match_by="id"),
+            start=OktaOwnedEdgePath(value=self._lookup.org_id(), match_by="id"),
+            end=OktaOwnedEdgePath(value=self.node_id, match_by="id"),
             properties=EdgeProperties(traversable=True),
         )
 
@@ -236,8 +237,8 @@ class RoleAssignment(BaseAsset):
         if self.type != "CUSTOM":
             yield Edge(
                 kind=ek.HAS_ROLE,
-                start=EdgePath(value=self.source_id, match_by="id"),
-                end=EdgePath(
+                start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                end=OktaOwnedEdgePath(
                     value=built_in_role_graph_id(self.type, self._extras["tenant"]),
                     match_by="id",
                 ),
@@ -246,8 +247,8 @@ class RoleAssignment(BaseAsset):
         else:
             yield Edge(
                 kind=ek.HAS_ROLE,
-                start=EdgePath(value=self.source_id, match_by="id"),
-                end=EdgePath(value=self.role, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                end=OktaOwnedEdgePath(value=self.role, match_by="id"),
                 properties=EdgeProperties(traversable=False),
             )
 
@@ -261,8 +262,8 @@ class RoleAssignment(BaseAsset):
                 for app_id in self._bound_resource_set_non_admin_application_ids:
                     yield Edge(
                         kind=ek.MANAGE_APP,
-                        start=EdgePath(value=self.source_id, match_by="id"),
-                        end=EdgePath(value=app_id, match_by="id"),
+                        start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                        end=OktaOwnedEdgePath(value=app_id, match_by="id"),
                         properties=EdgeProperties(traversable=True),
                     )
 
@@ -282,8 +283,8 @@ class RoleAssignment(BaseAsset):
                 for user_id in self._bound_resource_set_non_admin_user_ids:
                     yield Edge(
                         kind=ek.RESET_FACTORS,
-                        start=EdgePath(value=self.source_id, match_by="id"),
-                        end=EdgePath(value=user_id, match_by="id"),
+                        start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                        end=OktaOwnedEdgePath(value=user_id, match_by="id"),
                         properties=EdgeProperties(traversable=True),
                     )
 
@@ -306,8 +307,8 @@ class RoleAssignment(BaseAsset):
                 for user_id in self._bound_resource_set_non_admin_user_ids:
                     yield Edge(
                         kind=ek.RESET_PASSWORD,
-                        start=EdgePath(value=self.source_id, match_by="id"),
-                        end=EdgePath(value=user_id, match_by="id"),
+                        start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                        end=OktaOwnedEdgePath(value=user_id, match_by="id"),
                         properties=EdgeProperties(traversable=True),
                     )
 
@@ -330,8 +331,8 @@ class RoleAssignment(BaseAsset):
 
         yield Edge(
             kind=ek.SCOPED_TO,
-            start=EdgePath(value=self.node_id, match_by="id"),
-            end=EdgePath(value=self._lookup.org_id(), match_by="id"),
+            start=OktaOwnedEdgePath(value=self.node_id, match_by="id"),
+            end=OktaOwnedEdgePath(value=self._lookup.org_id(), match_by="id"),
             properties=EdgeProperties(traversable=False),
         )
 
@@ -340,8 +341,8 @@ class RoleAssignment(BaseAsset):
         for group_id in self.scoped_group_ids or ():
             yield Edge(
                 kind=ek.SCOPED_TO,
-                start=EdgePath(value=self.node_id, match_by="id"),
-                end=EdgePath(value=group_id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.node_id, match_by="id"),
+                end=OktaOwnedEdgePath(value=group_id, match_by="id"),
                 properties=EdgeProperties(traversable=False),
             )
 
@@ -350,8 +351,8 @@ class RoleAssignment(BaseAsset):
         for app_id in self.scoped_app_ids or ():
             yield Edge(
                 kind=ek.SCOPED_TO,
-                start=EdgePath(value=self.node_id, match_by="id"),
-                end=EdgePath(value=app_id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.node_id, match_by="id"),
+                end=OktaOwnedEdgePath(value=app_id, match_by="id"),
                 properties=EdgeProperties(traversable=False),
             )
 
@@ -367,8 +368,8 @@ class RoleAssignment(BaseAsset):
         for group_id in target_group_ids:
             yield Edge(
                 kind=ek.GROUP_MEMBERSHIP_ADMIN,
-                start=EdgePath(value=self.source_id, match_by="id"),
-                end=EdgePath(value=group_id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                end=OktaOwnedEdgePath(value=group_id, match_by="id"),
                 properties=EdgeProperties(traversable=True),
             )
 
@@ -384,8 +385,8 @@ class RoleAssignment(BaseAsset):
         for app_id in target_app_ids:
             yield Edge(
                 kind=ek.APP_ADMIN,
-                start=EdgePath(value=self.source_id, match_by="id"),
-                end=EdgePath(value=app_id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                end=OktaOwnedEdgePath(value=app_id, match_by="id"),
                 properties=EdgeProperties(traversable=True),
             )
 
@@ -401,8 +402,8 @@ class RoleAssignment(BaseAsset):
         for user_id in target_user_ids:
             yield Edge(
                 kind=ek.HELPDESK_ADMIN,
-                start=EdgePath(value=self.source_id, match_by="id"),
-                end=EdgePath(value=user_id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                end=OktaOwnedEdgePath(value=user_id, match_by="id"),
                 properties=EdgeProperties(traversable=True),
             )
 
@@ -419,16 +420,16 @@ class RoleAssignment(BaseAsset):
         for group_id in target_group_ids:
             yield Edge(
                 kind=ek.GROUP_ADMIN,
-                start=EdgePath(value=self.source_id, match_by="id"),
-                end=EdgePath(value=group_id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                end=OktaOwnedEdgePath(value=group_id, match_by="id"),
                 properties=EdgeProperties(traversable=True),
             )
 
         for user_id in target_user_ids:
             yield Edge(
                 kind=ek.GROUP_ADMIN,
-                start=EdgePath(value=self.source_id, match_by="id"),
-                end=EdgePath(value=user_id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                end=OktaOwnedEdgePath(value=user_id, match_by="id"),
                 properties=EdgeProperties(traversable=True),
             )
 
@@ -438,8 +439,8 @@ class RoleAssignment(BaseAsset):
             for (device_id,) in self._lookup.all_devices():
                 yield Edge(
                     kind=ek.MOBILE_ADMIN,
-                    start=EdgePath(value=self.source_id, match_by="id"),
-                    end=EdgePath(value=device_id, match_by="id"),
+                    start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                    end=OktaOwnedEdgePath(value=device_id, match_by="id"),
                     properties=EdgeProperties(traversable=True),
                 )
 
@@ -448,8 +449,8 @@ class RoleAssignment(BaseAsset):
         if self.type == "SUPER_ADMIN":
             yield Edge(
                 kind=ek.SUPER_ADMIN,
-                start=EdgePath(value=self.source_id, match_by="id"),
-                end=EdgePath(value=self._lookup.org_id(), match_by="id"),
+                start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                end=OktaOwnedEdgePath(value=self._lookup.org_id(), match_by="id"),
                 properties=EdgeProperties(traversable=True),
             )
 
@@ -474,8 +475,8 @@ class RoleAssignment(BaseAsset):
         for group_id in self._bound_resource_set_non_admin_group_ids:
             yield Edge(
                 kind=ek.ADD_MEMBER,
-                start=EdgePath(value=self.source_id, match_by="id"),
-                end=EdgePath(value=group_id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                end=OktaOwnedEdgePath(value=group_id, match_by="id"),
                 properties=EdgeProperties(traversable=True),
             )
 
@@ -495,8 +496,8 @@ class RoleAssignment(BaseAsset):
                 for (secret_id,) in self._lookup.application_secret_ids(app_id):
                     yield Edge(
                         kind=ek.READ_CLIENT_SECRET,
-                        start=EdgePath(value=self.source_id, match_by="id"),
-                        end=EdgePath(value=secret_id, match_by="id"),
+                        start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                        end=OktaOwnedEdgePath(value=secret_id, match_by="id"),
                         properties=EdgeProperties(traversable=True),
                     )
 
@@ -505,8 +506,8 @@ class RoleAssignment(BaseAsset):
                 for (secret_id,) in self._lookup.application_secret_ids(app_id):
                     yield Edge(
                         kind=ek.READ_CLIENT_SECRET,
-                        start=EdgePath(value=self.source_id, match_by="id"),
-                        end=EdgePath(value=secret_id, match_by="id"),
+                        start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                        end=OktaOwnedEdgePath(value=secret_id, match_by="id"),
                         properties=EdgeProperties(traversable=True),
                     )
 
@@ -521,7 +522,7 @@ class RoleAssignment(BaseAsset):
                 for (secret_id,) in self._lookup.application_secret_ids(app_id):
                     yield Edge(
                         kind=ek.READ_CLIENT_SECRET,
-                        start=EdgePath(value=self.source_id, match_by="id"),
-                        end=EdgePath(value=secret_id, match_by="id"),
+                        start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                        end=OktaOwnedEdgePath(value=secret_id, match_by="id"),
                         properties=EdgeProperties(traversable=True),
                     )

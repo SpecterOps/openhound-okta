@@ -24,8 +24,8 @@ def test_group_push_edges_start_from_source_group_and_end_at_application():
     edge = next(mapping.edges)
 
     assert edge.kind == ek.GROUP_PUSH
-    assert edge.start.value == "source-group-1"
-    assert edge.end.value == "app-1"
+    assert edge.start.value == "SOURCE-GROUP-1"
+    assert edge.end.value == "APP-1"
 
 
 def test_group_push_mapping_emits_outbound_membership_sync_edge():
@@ -43,7 +43,7 @@ def test_group_push_mapping_emits_outbound_membership_sync_edge():
 
     edge = next(edge for edge in mapping.edges if edge.kind == ek.MEMBERSHIP_SYNC)
 
-    assert edge.start.value == "source-group-1"
+    assert edge.start.value == "SOURCE-GROUP-1"
     assert isinstance(edge.end, ConditionalEdgePath)
     assert {matcher.key: matcher.value for matcher in edge.end.property_matchers} == {
         "name": "Engineering",

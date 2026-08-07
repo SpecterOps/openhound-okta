@@ -40,7 +40,7 @@ def test_built_in_role_node_emits_oktahound_equivalent_properties():
     properties = role.as_node.properties
 
     assert properties.id == "APP_ADMIN@example.okta.com"
-    assert properties.name == "Application Administrator"
+    assert properties.name == "APPLICATION ADMINISTRATOR"
     assert properties.displayname == "Application Administrator"
     assert properties.okta_domain == "example.okta.com"
     assert "okta.apps.manage" in properties.permissions
@@ -59,7 +59,9 @@ def test_built_in_role_contains_edge_uses_domain_qualified_id():
     edge = next(role.edges)
 
     assert edge.kind == ek.CONTAINS
-    assert edge.end.value == built_in_role_graph_id("SUPER_ADMIN", "example.okta.com")
+    assert edge.end.value == built_in_role_graph_id(
+        "SUPER_ADMIN", "example.okta.com"
+    ).upper()
 
 
 def test_unsupported_stale_built_in_roles_are_skipped_during_convert():

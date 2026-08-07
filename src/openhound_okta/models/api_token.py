@@ -3,10 +3,10 @@ from datetime import datetime
 import re
 
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
-from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from openhound.core.models.entries_dataclass import Edge, EdgeProperties
 from pydantic import ConfigDict, Field
 
-from openhound_okta.graph import OktaNode, OktaNodeProperties
+from openhound_okta.graph import OktaOwnedEdgePath, OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 
@@ -119,7 +119,7 @@ class ApiToken(BaseAsset):
     def edges(self):
         yield Edge(
             kind=ek.API_TOKEN_FOR,
-            start=EdgePath(value=self.id, match_by="id"),
-            end=EdgePath(value=self.user_id, match_by="id"),
+            start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+            end=OktaOwnedEdgePath(value=self.user_id, match_by="id"),
             properties=EdgeProperties(traversable=True),
         )

@@ -29,7 +29,7 @@ def test_organization_node_emits_oktahound_equivalent_properties():
 
     properties = organization.as_node.properties
 
-    assert properties.name == "example.okta.com"
+    assert properties.name == "EXAMPLE.OKTA.COM"
     assert properties.displayname == "Example Corp"
     assert properties.okta_domain == "example.okta.com"
     assert properties.subdomain == "example"

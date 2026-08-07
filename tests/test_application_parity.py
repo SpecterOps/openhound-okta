@@ -54,7 +54,7 @@ def test_application_node_uses_label_for_name_and_preserves_raw_app_type():
 
     properties = application.as_node.properties
 
-    assert properties.name == "GitHub Enterprise Cloud"
+    assert properties.name == "GITHUB ENTERPRISE CLOUD"
     assert properties.displayname == "GitHub Enterprise Cloud"
     assert properties.app_type == "githubcloud"
     assert properties.okta_domain == "example.okta.com"
@@ -66,7 +66,7 @@ def test_application_node_falls_back_to_raw_app_type_when_label_is_empty():
 
     properties = application.as_node.properties
 
-    assert properties.name == "active_directory"
+    assert properties.name == "ACTIVE_DIRECTORY"
     assert properties.displayname == "active_directory"
     assert properties.app_type == "active_directory"
 

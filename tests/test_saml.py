@@ -904,8 +904,8 @@ def test_saml_eligible_for_uses_configured_match_value():
     edges = list(app_user.edges)
     eligible = [edge for edge in edges if edge.kind == ek.SAML_ELIGIBLE_FOR]
     assert len(eligible) == 1
-    assert eligible[0].start.value == "00u_saml_user"
-    assert eligible[0].end.value == "okta:saml:provider:0oa_saml"
+    assert eligible[0].start.value == "00U_SAML_USER"
+    assert eligible[0].end.value == "OKTA:SAML:PROVIDER:0OA_SAML"
     assert eligible[0].properties.match_values == ["alice.saml@example.test"]
     assert eligible[0].properties.email_match_values == []
     assert eligible[0].properties.scoped_exact_match_values == [
@@ -1078,17 +1078,17 @@ def test_saml_assignment_materializes_all_resolvable_claim_values() -> None:
         if edge.kind == ek.SAML_HAS_CLAIM_VALUE
     }
     assert claim_edges[
-        "okta:saml:claim-mapping:0oa_saml:3"
+        "OKTA:SAML:CLAIM-MAPPING:0OA_SAML:3"
     ].properties.match_values == ["E-1007"]
     assert claim_edges[
-        "okta:saml:claim-mapping:0oa_saml:3"
+        "OKTA:SAML:CLAIM-MAPPING:0OA_SAML:3"
     ].properties.canonical_match_values == ["E-1007"]
     assert claim_edges[
-        "okta:saml:claim-mapping:0oa_saml:10"
+        "OKTA:SAML:CLAIM-MAPPING:0OA_SAML:10"
     ].properties.match_values == ["APP-1007"]
     for mapping_id in (
-        "okta:saml:claim-mapping:0oa_saml:6",
-        "okta:saml:claim-mapping:0oa_saml:8",
+        "OKTA:SAML:CLAIM-MAPPING:0OA_SAML:6",
+        "OKTA:SAML:CLAIM-MAPPING:0OA_SAML:8",
     ):
         assert claim_edges[mapping_id].properties.match_values == []
         assert claim_edges[mapping_id].properties.canonical_match_values == []
@@ -1569,8 +1569,8 @@ def test_saml_has_account_uses_inbound_idp_subject_template():
     edges = list(idp_user.edges)
     account_edges = [edge for edge in edges if edge.kind == ek.SAML_HAS_ACCOUNT]
     assert len(account_edges) == 1
-    assert account_edges[0].start.value == "okta:saml:service-provider:0oa_idp"
-    assert account_edges[0].end.value == "00u_okta_user"
+    assert account_edges[0].start.value == "OKTA:SAML:SERVICE-PROVIDER:0OA_IDP"
+    assert account_edges[0].end.value == "00U_OKTA_USER"
     assert account_edges[0].properties.match_values == [
         "alice@example.test",
         "external-user-id",
@@ -1667,8 +1667,8 @@ def test_inbound_automatic_username_policy_emits_canonical_rule_and_accounts():
         edge for edge in edges if edge.kind == ek.SAML_HAS_ACCOUNT_RESOLUTION_VALUE
     ]
     assert [edge.end.value for edge in account_edges] == [
-        "00u_enabled",
-        "00u_blocked",
+        "00U_ENABLED",
+        "00U_BLOCKED",
     ]
     assert [edge.properties.account_state for edge in account_edges] == [
         "enabled",
@@ -1714,12 +1714,12 @@ def test_inbound_rule_candidates_do_not_overwrite_direct_account_binding():
 
     assert len(account_edge_keys) == len(set(account_edge_keys))
     assert {edge.end.value for edge in account_edges} == {
-        "00u_okta_user",
-        "00u_unlinked",
-        "00u_blocked",
+        "00U_OKTA_USER",
+        "00U_UNLINKED",
+        "00U_BLOCKED",
     }
     direct_account = next(
-        edge for edge in account_edges if edge.end.value == "00u_okta_user"
+        edge for edge in account_edges if edge.end.value == "00U_OKTA_USER"
     )
     assert direct_account.properties.direct_binding is True
     assert direct_account.properties.direct_binding_source == (
@@ -1729,7 +1729,7 @@ def test_inbound_rule_candidates_do_not_overwrite_direct_account_binding():
         edge.start.value
         for edge in edges
         if edge.kind == ek.SAML_HAS_ACCOUNT_RESOLUTION_VALUE
-    } == {"00u_okta_user", "00u_unlinked", "00u_blocked"}
+    } == {"00U_OKTA_USER", "00U_UNLINKED", "00U_BLOCKED"}
 
 
 def test_inbound_subject_nameid_policy_uses_route_scoped_exact_values():

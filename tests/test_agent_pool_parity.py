@@ -25,13 +25,13 @@ def make_agent_pool(*, pool_type: str = "AD"):
 def test_agent_pool_ids_are_namespaced_away_from_backing_app_ids():
     agent_pool = make_agent_pool()
 
-    assert agent_pool.as_node.id == "app-or-pool-1_pool"
+    assert agent_pool.as_node.id == "APP-OR-POOL-1_POOL"
     assert agent_pool.as_node.properties.okta_domain == "example.okta.com"
 
     contains_edge = next(
         edge for edge in agent_pool.edges if edge.kind == ek.CONTAINS
     )
-    assert contains_edge.end.value == "app-or-pool-1_pool"
+    assert contains_edge.end.value == "APP-OR-POOL-1_POOL"
 
 
 def test_ad_agent_pool_for_edges_target_the_backing_application():
@@ -39,8 +39,8 @@ def test_ad_agent_pool_for_edges_target_the_backing_application():
 
     edge = next(edge for edge in agent_pool.edges if edge.kind == ek.AGENT_POOL_FOR)
 
-    assert edge.start.value == "app-or-pool-1_pool"
-    assert edge.end.value == "app-or-pool-1"
+    assert edge.start.value == "APP-OR-POOL-1_POOL"
+    assert edge.end.value == "APP-OR-POOL-1"
 
 
 def test_non_ad_agent_pools_do_not_emit_agent_pool_for_edges():
@@ -65,8 +65,8 @@ def test_agent_member_of_edges_target_namespaced_pool_ids():
     edge = next(agent._agent_member_of_edge)
 
     assert edge.kind == ek.AGENT_MEMBER_OF
-    assert edge.start.value == "agent-1"
-    assert edge.end.value == "app-or-pool-1_pool"
+    assert edge.start.value == "AGENT-1"
+    assert edge.end.value == "APP-OR-POOL-1_POOL"
 
 
 def test_agent_node_emits_oktahound_equivalent_properties():

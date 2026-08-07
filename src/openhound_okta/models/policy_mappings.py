@@ -1,8 +1,9 @@
 from openhound.core.asset import BaseAsset, EdgeDef
-from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from openhound.core.models.entries_dataclass import Edge, EdgeProperties
 from pydantic import BaseModel, Field
 from pydantic import ConfigDict
 
+from openhound_okta.graph import OktaOwnedEdgePath
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 
@@ -49,7 +50,7 @@ class PolicyMapping(BaseAsset):
         if self.links.application:
             yield Edge(
                 kind=ek.POLICY_MAPPING,
-                start=EdgePath(value=self.policy_id, match_by="id"),
-                end=EdgePath(value=self.app_id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.policy_id, match_by="id"),
+                end=OktaOwnedEdgePath(value=self.app_id, match_by="id"),
                 properties=EdgeProperties(traversable=False),
             )

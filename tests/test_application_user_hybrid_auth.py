@@ -64,7 +64,7 @@ def hybrid_sign_on_edges(application_user: ApplicationUser):
             "ignored",
             "00u-target-user",
             ek.OUTBOUND_SSO,
-            "00u-target-user",
+            "00U-TARGET-USER",
         ),
         (
             "snowflake",

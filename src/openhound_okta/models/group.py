@@ -8,10 +8,10 @@ from typing import ClassVar
 from dlt.common import json
 from dlt.common.libs.pydantic import DltConfig
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
-from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from openhound.core.models.entries_dataclass import Edge, EdgeProperties
 from pydantic import BaseModel, ConfigDict, Field
 
-from openhound_okta.graph import OktaNode, OktaNodeProperties
+from openhound_okta.graph import OktaOwnedEdgePath, OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 from openhound_okta.models.hybrid_auth import (
@@ -197,8 +197,8 @@ class Group(BaseAsset):
         ):
             yield Edge(
                 kind=ek.MEMBERSHIP_SYNC,
-                start=EdgePath(value=self.profile.object_sid, match_by="id"),
-                end=EdgePath(value=self.id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.profile.object_sid, match_by="id"),
+                end=OktaOwnedEdgePath(value=self.id, match_by="id"),
                 properties=EdgeProperties(traversable=True),
             )
 
@@ -207,8 +207,8 @@ class Group(BaseAsset):
         if self.source and self.source.id and self._lookup.application_by_id(self.source.id):
             yield Edge(
                 kind=ek.GROUP_PULL,
-                start=EdgePath(value=self.source.id, match_by="id"),
-                end=EdgePath(value=self.id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.source.id, match_by="id"),
+                end=OktaOwnedEdgePath(value=self.id, match_by="id"),
                 properties=EdgeProperties(traversable=True),
             )
 
@@ -216,8 +216,8 @@ class Group(BaseAsset):
     def _contains_edges(self):
         yield Edge(
             kind=ek.CONTAINS,
-            start=EdgePath(value=self._lookup.org_id(), match_by="id"),
-            end=EdgePath(value=self.id, match_by="id"),
+            start=OktaOwnedEdgePath(value=self._lookup.org_id(), match_by="id"),
+            end=OktaOwnedEdgePath(value=self.id, match_by="id"),
             properties=EdgeProperties(traversable=True),
         )
 
@@ -247,7 +247,7 @@ class Group(BaseAsset):
             yield Edge(
                 kind=ek.MEMBERSHIP_SYNC,
                 start=hybrid_target_edge_path(target),
-                end=EdgePath(value=self.id, match_by="id"),
+                end=OktaOwnedEdgePath(value=self.id, match_by="id"),
                 properties=EdgeProperties(traversable=True),
             )
 

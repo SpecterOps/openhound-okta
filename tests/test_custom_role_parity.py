@@ -35,7 +35,7 @@ def test_custom_role_node_emits_oktahound_equivalent_properties():
     properties = role.as_node.properties
 
     assert properties.id == "custom-role-1"
-    assert properties.name == "Password Reset Operator"
+    assert properties.name == "PASSWORD RESET OPERATOR"
     assert properties.displayname == "Password Reset Operator"
     assert properties.okta_domain == "example.okta.com"
     assert properties.permissions == [
@@ -52,4 +52,4 @@ def test_custom_role_contains_edge_uses_role_id():
     edge = next(role.edges)
 
     assert edge.kind == ek.CONTAINS
-    assert edge.end.value == "custom-role-1"
+    assert edge.end.value == "CUSTOM-ROLE-1"

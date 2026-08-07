@@ -7,12 +7,11 @@ from dlt.common.libs.pydantic import DltConfig
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
 from openhound.core.models.entries_dataclass import (
     Edge,
-    EdgePath,
     EdgeProperties,
 )
 from pydantic import BaseModel, ConfigDict, Field
 
-from openhound_okta.graph import OktaNode, OktaNodeProperties
+from openhound_okta.graph import OktaOwnedEdgePath, OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 from openhound_okta.models.hybrid_auth import (
@@ -574,7 +573,7 @@ class Application(BaseAsset):
 
         yield Edge(
             kind=edge_kind,
-            start=EdgePath(value=self.id, match_by="id"),
+            start=OktaOwnedEdgePath(value=self.id, match_by="id"),
             end=hybrid_target_edge_path(target),
             properties=HybridAuthEdgeProperties(
                 traversable=edge_kind == ek.OUTBOUND_ORG_SSO,
@@ -593,7 +592,7 @@ class Application(BaseAsset):
     #         yield Edge(
     #             kind=ek.KERBEROS_SSO,
     #             start=ConditionalEdgePath(kind="User", property_matchers=[condition]),
-    #             end=EdgePath(value=self.id, match_by="id"),
+    #             end=OktaOwnedEdgePath(value=self.id, match_by="id"),
     #             properties=EdgeProperties(traversable=True),
     #         )
 
@@ -601,8 +600,8 @@ class Application(BaseAsset):
     def _contains_edge(self):
         yield Edge(
             kind=ek.CONTAINS,
-            start=EdgePath(value=self._lookup.org_id(), match_by="id"),
-            end=EdgePath(value=self.id, match_by="id"),
+            start=OktaOwnedEdgePath(value=self._lookup.org_id(), match_by="id"),
+            end=OktaOwnedEdgePath(value=self.id, match_by="id"),
             properties=EdgeProperties(traversable=True),
         )
 

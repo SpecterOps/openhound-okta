@@ -105,8 +105,8 @@ def test_filtered_app_resource_set_urls_include_integrations_in_graph_edges():
         resource_url,
     )
     assert {edge.end.value for edge in resource.edges} == {
-        "app-1",
-        "integration-1",
+        "APP-1",
+        "INTEGRATION-1",
     }
 
 
@@ -139,7 +139,7 @@ def test_invalid_self_links_fall_back_to_orn_resolution():
         resource._extras = {"tenant": "example.okta.com"}
 
         assert resource.resource_url is None
-        assert [edge.end.value for edge in resource.edges] == ["user-1"]
+        assert [edge.end.value for edge in resource.edges] == ["USER-1"]
 
 
 def test_policy_member_resource_set_urls_resolve_policy_ids():
@@ -170,8 +170,8 @@ def test_workflows_resource_set_ids_are_tenant_qualified_across_graph_edges():
     resource_set._lookup = lookup
     resource_set._extras = {"tenant": "example.okta.com"}
 
-    assert resource_set.as_node.id == "WORKFLOWS_IAM_POLICY@example.okta.com"
-    assert next(resource_set.edges).end.value == "WORKFLOWS_IAM_POLICY@example.okta.com"
+    assert resource_set.as_node.id == "WORKFLOWS_IAM_POLICY@EXAMPLE.OKTA.COM"
+    assert next(resource_set.edges).end.value == "WORKFLOWS_IAM_POLICY@EXAMPLE.OKTA.COM"
 
     binding = ResourceSetRoleAssignment.model_validate(
         {
@@ -183,7 +183,7 @@ def test_workflows_resource_set_ids_are_tenant_qualified_across_graph_edges():
     )
     binding._lookup = lookup
     binding._extras = {"tenant": "example.okta.com"}
-    assert next(binding.edges).end.value == "WORKFLOWS_IAM_POLICY@example.okta.com"
+    assert next(binding.edges).end.value == "WORKFLOWS_IAM_POLICY@EXAMPLE.OKTA.COM"
 
     resource = make_resource(
         lookup,
@@ -193,7 +193,7 @@ def test_workflows_resource_set_ids_are_tenant_qualified_across_graph_edges():
     )
     edge = next(resource.edges)
     assert edge.kind == ek.RESOURCE_SET_CONTAINS
-    assert edge.start.value == "WORKFLOWS_IAM_POLICY@example.okta.com"
+    assert edge.start.value == "WORKFLOWS_IAM_POLICY@EXAMPLE.OKTA.COM"
 
 
 def test_resource_set_node_emits_oktahound_equivalent_properties():
@@ -213,7 +213,7 @@ def test_resource_set_node_emits_oktahound_equivalent_properties():
     properties = resource_set.as_node.properties
 
     assert properties.id == "resource-set-1"
-    assert properties.name == "Help Desk Users"
+    assert properties.name == "HELP DESK USERS"
     assert properties.displayname == "Help Desk Users"
     assert properties.okta_domain == "example.okta.com"
     assert properties.description == "Scoped help desk users"

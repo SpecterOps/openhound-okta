@@ -1,9 +1,10 @@
 from datetime import datetime
 
 from openhound.core.asset import BaseAsset, EdgeDef
-from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from openhound.core.models.entries_dataclass import Edge, EdgeProperties
 from pydantic import BaseModel, ConfigDict, Field
 
+from openhound_okta.graph import OktaOwnedEdgePath
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 
@@ -55,7 +56,7 @@ class GroupAssignedApp(BaseAsset):
     def edges(self):
         yield Edge(
             kind=ek.APP_ASSIGNMENT,
-            start=EdgePath(value=self.group_id, match_by="id"),
-            end=EdgePath(value=self.id, match_by="id"),
+            start=OktaOwnedEdgePath(value=self.group_id, match_by="id"),
+            end=OktaOwnedEdgePath(value=self.id, match_by="id"),
             properties=EdgeProperties(traversable=False),
         )

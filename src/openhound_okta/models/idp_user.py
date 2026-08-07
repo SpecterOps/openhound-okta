@@ -1,9 +1,10 @@
 from datetime import datetime
 
 from openhound.core.asset import BaseAsset, EdgeDef
-from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from openhound.core.models.entries_dataclass import Edge, EdgeProperties
 from pydantic import BaseModel, ConfigDict, Field
 
+from openhound_okta.graph import OktaOwnedEdgePath
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 from openhound_okta.models.saml import (
@@ -95,8 +96,8 @@ class IDPUser(BaseAsset):
         ):
             yield Edge(
                 kind=ek.INBOUND_SSO,
-                start=EdgePath(value=entra_object_id, match_by="id"),
-                end=EdgePath(value=self.id, match_by="id"),
+                start=OktaOwnedEdgePath(value=entra_object_id, match_by="id"),
+                end=OktaOwnedEdgePath(value=self.id, match_by="id"),
                 properties=EdgeProperties(traversable=True),
             )
 
@@ -104,8 +105,8 @@ class IDPUser(BaseAsset):
     def _identity_provider_for_edge(self):
         yield Edge(
             kind=ek.IDENTITY_PROVIDER_FOR,
-            start=EdgePath(value=self.idp_id, match_by="id"),
-            end=EdgePath(value=self.id, match_by="id"),
+            start=OktaOwnedEdgePath(value=self.idp_id, match_by="id"),
+            end=OktaOwnedEdgePath(value=self.id, match_by="id"),
             properties=EdgeProperties(traversable=True),
         )
 
@@ -128,8 +129,10 @@ class IDPUser(BaseAsset):
 
         yield Edge(
             kind=ek.SAML_HAS_ACCOUNT,
-            start=EdgePath(value=saml_service_provider_id(self.idp_id), match_by="id"),
-            end=EdgePath(value=self.id, match_by="id"),
+            start=OktaOwnedEdgePath(
+                value=saml_service_provider_id(self.idp_id), match_by="id"
+            ),
+            end=OktaOwnedEdgePath(value=self.id, match_by="id"),
             properties=SamlAccountEdgeProperties(
                 traversable=False,
                 match_values=evidence["match_values"],

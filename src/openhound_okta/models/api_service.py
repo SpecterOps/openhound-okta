@@ -4,10 +4,10 @@ from typing import ClassVar
 
 from dlt.common.libs.pydantic import DltConfig
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
-from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from openhound.core.models.entries_dataclass import Edge, EdgeProperties
 from pydantic import ConfigDict, Field
 
-from openhound_okta.graph import OktaNode, OktaNodeProperties
+from openhound_okta.graph import OktaOwnedEdgePath, OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 
@@ -81,8 +81,8 @@ class ApiService(BaseAsset):
     def _contains_edges(self):
         yield Edge(
             kind=ek.CONTAINS,
-            start=EdgePath(value=self._lookup.org_id(), match_by="id"),
-            end=EdgePath(value=self.id, match_by="id"),
+            start=OktaOwnedEdgePath(value=self._lookup.org_id(), match_by="id"),
+            end=OktaOwnedEdgePath(value=self.id, match_by="id"),
             properties=EdgeProperties(traversable=True),
         )
 
@@ -91,8 +91,8 @@ class ApiService(BaseAsset):
         if self.created_by:
             yield Edge(
                 kind=ek.CREATOR_OF,
-                start=EdgePath(value=self.created_by, match_by="id"),
-                end=EdgePath(value=self.id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.created_by, match_by="id"),
+                end=OktaOwnedEdgePath(value=self.id, match_by="id"),
                 properties=EdgeProperties(traversable=False),
             )
 

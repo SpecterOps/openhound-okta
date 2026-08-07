@@ -72,7 +72,7 @@ def test_device_edges_use_graph_id():
 
     contains = next(edge for edge in device.edges if edge.kind == ek.CONTAINS)
 
-    assert contains.end.value == "hardware-uuid-1@example.okta.com"
+    assert contains.end.value == "HARDWARE-UUID-1@EXAMPLE.OKTA.COM"
 
 
 def test_device_lookups_return_graph_ids_for_device_targets():

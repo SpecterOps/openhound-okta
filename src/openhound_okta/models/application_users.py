@@ -1,9 +1,10 @@
 from datetime import datetime
 
 from openhound.core.asset import BaseAsset, EdgeDef
-from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from openhound.core.models.entries_dataclass import Edge, EdgeProperties
 from pydantic import BaseModel, ConfigDict, Field
 
+from openhound_okta.graph import OktaOwnedEdgePath
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 from openhound_okta.models.hybrid_auth import (
@@ -260,8 +261,8 @@ class ApplicationUser(BaseAsset):
         if "PUSH_PASSWORD_UPDATES" in self.app_features:
             yield Edge(
                 kind=ek.READ_PASSWORD_UPDATES,
-                start=EdgePath(value=self.app_id, match_by="id"),
-                end=EdgePath(value=self.id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.app_id, match_by="id"),
+                end=OktaOwnedEdgePath(value=self.id, match_by="id"),
                 properties=EdgeProperties(traversable=True),
             )
 
@@ -272,8 +273,8 @@ class ApplicationUser(BaseAsset):
         if self.scope == "USER":
             yield Edge(
                 kind=ek.APP_ASSIGNMENT,
-                start=EdgePath(value=self.id, match_by="id"),
-                end=EdgePath(value=self.app_id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+                end=OktaOwnedEdgePath(value=self.app_id, match_by="id"),
                 properties=EdgeProperties(traversable=False),
             )
 
@@ -298,7 +299,7 @@ class ApplicationUser(BaseAsset):
 
         yield Edge(
             kind=edge_kind,
-            start=EdgePath(value=self.id, match_by="id"),
+            start=OktaOwnedEdgePath(value=self.id, match_by="id"),
             end=hybrid_target_edge_path(target),
             properties=HybridAuthEdgeProperties(
                 traversable=edge_kind == ek.OUTBOUND_SSO,
@@ -337,15 +338,15 @@ class ApplicationUser(BaseAsset):
         if self._is_inbound_sync:
             yield Edge(
                 kind=ek.USER_PULL,
-                start=EdgePath(value=self.app_id, match_by="id"),
-                end=EdgePath(value=self.id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.app_id, match_by="id"),
+                end=OktaOwnedEdgePath(value=self.id, match_by="id"),
                 properties=EdgeProperties(traversable=False),
             )
         elif self.app_name not in IGNORED_OUTBOUND_SYNC_APPS:
             yield Edge(
                 kind=ek.USER_PUSH,
-                start=EdgePath(value=self.id, match_by="id"),
-                end=EdgePath(value=self.app_id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+                end=OktaOwnedEdgePath(value=self.app_id, match_by="id"),
                 properties=EdgeProperties(traversable=False),
             )
 
@@ -359,30 +360,36 @@ class ApplicationUser(BaseAsset):
             if self._is_inbound_sync:
                 yield Edge(
                     kind=ek.USER_SYNC,
-                    start=EdgePath(value=self.profile.object_sid, match_by="id"),
-                    end=EdgePath(value=self.id, match_by="id"),
+                    start=OktaOwnedEdgePath(
+                        value=self.profile.object_sid, match_by="id"
+                    ),
+                    end=OktaOwnedEdgePath(value=self.id, match_by="id"),
                     properties=EdgeProperties(traversable=False),
                 )
 
                 if "OUTBOUND_DEL_AUTH" in self.app_features:
                     yield Edge(
                         kind=ek.PASSWORD_SYNC,
-                        start=EdgePath(value=self.profile.object_sid, match_by="id"),
-                        end=EdgePath(value=self.id, match_by="id"),
+                        start=OktaOwnedEdgePath(
+                            value=self.profile.object_sid, match_by="id"
+                        ),
+                        end=OktaOwnedEdgePath(value=self.id, match_by="id"),
                         properties=EdgeProperties(traversable=True),
                     )
             else:
                 yield Edge(
                     kind=ek.USER_SYNC,
-                    start=EdgePath(value=self.id, match_by="id"),
-                    end=EdgePath(value=self.profile.object_sid, match_by="id"),
+                    start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+                    end=OktaOwnedEdgePath(value=self.profile.object_sid, match_by="id"),
                     properties=EdgeProperties(traversable=False),
                 )
                 if "PUSH_PASSWORD_UPDATES" in self.app_features:
                     yield Edge(
                         kind=ek.PASSWORD_SYNC,
-                        start=EdgePath(value=self.id, match_by="id"),
-                        end=EdgePath(value=self.profile.object_sid, match_by="id"),
+                        start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+                        end=OktaOwnedEdgePath(
+                            value=self.profile.object_sid, match_by="id"
+                        ),
                         properties=EdgeProperties(traversable=True),
                     )
 
@@ -394,24 +401,24 @@ class ApplicationUser(BaseAsset):
         if self._is_inbound_sync:
             yield Edge(
                 kind=ek.USER_SYNC,
-                start=EdgePath(value=self.external_id, match_by="id"),
-                end=EdgePath(value=self.id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.external_id, match_by="id"),
+                end=OktaOwnedEdgePath(value=self.id, match_by="id"),
                 properties=EdgeProperties(traversable=False),
             )
 
         else:
             yield Edge(
                 kind=ek.USER_SYNC,
-                start=EdgePath(value=self.id, match_by="id"),
-                end=EdgePath(value=self.external_id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+                end=OktaOwnedEdgePath(value=self.external_id, match_by="id"),
                 properties=EdgeProperties(traversable=False),
             )
 
             if "PUSH_PASSWORD_UPDATES" in self.app_features:
                 yield Edge(
                     kind=ek.PASSWORD_SYNC,
-                    start=EdgePath(value=self.id, match_by="id"),
-                    end=EdgePath(value=self.external_id, match_by="id"),
+                    start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+                    end=OktaOwnedEdgePath(value=self.external_id, match_by="id"),
                     properties=EdgeProperties(traversable=True),
                 )
 
@@ -453,8 +460,8 @@ class ApplicationUser(BaseAsset):
         source_properties = evidence["source_properties"]
         yield Edge(
             kind=ek.SAML_ELIGIBLE_FOR,
-            start=EdgePath(value=self.id, match_by="id"),
-            end=EdgePath(value=saml_provider_id(self.app_id), match_by="id"),
+            start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+            end=OktaOwnedEdgePath(value=saml_provider_id(self.app_id), match_by="id"),
             properties=SamlMatchValuesEdgeProperties(
                 traversable=False,
                 match_values=evidence["match_values"],
@@ -479,8 +486,8 @@ class ApplicationUser(BaseAsset):
         for claim_value in evidence["claim_values"]:
             yield Edge(
                 kind=ek.SAML_HAS_CLAIM_VALUE,
-                start=EdgePath(value=self.id, match_by="id"),
-                end=EdgePath(value=claim_value["mapping_id"], match_by="id"),
+                start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+                end=OktaOwnedEdgePath(value=claim_value["mapping_id"], match_by="id"),
                 properties=SamlResolutionValueEdgeProperties(
                     traversable=False,
                     match_values=claim_value["match_values"],

@@ -163,17 +163,17 @@ def test_role_assignment_nodes_use_oktahound_composite_ids(
     )
 
     assert assignment.node_id == f"role-assignment-1_{source_id}"
-    assert assignment.as_node.id == assignment.node_id
+    assert assignment.as_node.id == assignment.node_id.upper()
     assert assignment.as_node.properties.okta_domain == "example.okta.com"
 
     has_role_assignment = next(
         edge for edge in assignment.edges if edge.kind == ek.HAS_ROLE_ASSIGNMENT
     )
-    assert has_role_assignment.end.value == assignment.node_id
+    assert has_role_assignment.end.value == assignment.node_id.upper()
 
     contains = next(edge for edge in assignment.edges if edge.kind == ek.CONTAINS)
-    assert contains.start.value == "org-1"
-    assert contains.end.value == assignment.node_id
+    assert contains.start.value == "ORG-1"
+    assert contains.end.value == assignment.node_id.upper()
 
 
 def test_same_role_assignment_id_is_unique_per_assignee():
@@ -190,8 +190,8 @@ def test_same_role_assignment_id_is_unique_per_assignee():
         assignment_type="USER",
     )
 
-    assert first.as_node.id == "role-assignment-1_user-1"
-    assert second.as_node.id == "role-assignment-1_user-2"
+    assert first.as_node.id == "ROLE-ASSIGNMENT-1_USER-1"
+    assert second.as_node.id == "ROLE-ASSIGNMENT-1_USER-2"
     assert first.as_node.id != second.as_node.id
 
 
@@ -206,7 +206,7 @@ def test_built_in_role_assignment_has_role_edge_uses_domain_qualified_role_id():
 
     has_role = next(edge for edge in assignment.edges if edge.kind == ek.HAS_ROLE)
 
-    assert has_role.end.value == "SUPER_ADMIN@example.okta.com"
+    assert has_role.end.value == "SUPER_ADMIN@EXAMPLE.OKTA.COM"
 
 
 def test_privileged_users_are_returned_as_validated_models_for_transformers():
@@ -361,8 +361,8 @@ def test_org_wide_standard_role_assignment_is_scoped_to_org():
     edges = list(assignment._scoped_to_org_edge)
 
     assert len(edges) == 1
-    assert edges[0].start.value == assignment.node_id
-    assert edges[0].end.value == "org-1"
+    assert edges[0].start.value == assignment.node_id.upper()
+    assert edges[0].end.value == "ORG-1"
 
 
 @pytest.mark.parametrize(
@@ -386,7 +386,7 @@ def test_targetable_standard_role_assignment_with_empty_scope_is_scoped_to_org(
         **{scope_field: []},
     )
 
-    assert next(assignment._scoped_to_org_edge).end.value == "org-1"
+    assert next(assignment._scoped_to_org_edge).end.value == "ORG-1"
 
 
 @pytest.mark.parametrize(
@@ -423,8 +423,8 @@ def test_group_targeted_standard_role_assignment_is_not_scoped_to_org():
     )
 
     assert list(assignment._scoped_to_org_edge) == []
-    assert next(assignment._scoped_to_group_edges).end.value == "group-1"
-    assert next(assignment._helpdesk_admin_edges).end.value == "user-1"
+    assert next(assignment._scoped_to_group_edges).end.value == "GROUP-1"
+    assert next(assignment._helpdesk_admin_edges).end.value == "USER-1"
 
 
 @pytest.mark.parametrize(
@@ -489,7 +489,7 @@ def test_group_and_client_assignments_emit_app_scope_edges():
             ],
         )
 
-        assert next(assignment._scoped_to_app_edges).end.value == "app-1"
+        assert next(assignment._scoped_to_app_edges).end.value == "APP-1"
         assert list(assignment._scoped_to_org_edge) == []
 
 
@@ -592,7 +592,7 @@ def test_custom_role_permission_edges_use_collected_binding_scope():
     assignment._lookup = StubLookupWithBinding()
 
     assert assignment.resource_set_ids == ("resource-set-1",)
-    assert next(assignment._reset_password_edges).end.value == "user-1"
+    assert next(assignment._reset_password_edges).end.value == "USER-1"
 
 
 @pytest.mark.parametrize(
@@ -637,8 +637,8 @@ def test_resource_set_role_assignment_emits_scoped_to_edge_for_collected_assignm
     edge = next(binding.edges)
 
     assert edge.kind == ek.SCOPED_TO
-    assert edge.start.value == "role-assignment-1_user-1"
-    assert edge.end.value == "resource-set-1"
+    assert edge.start.value == "ROLE-ASSIGNMENT-1_USER-1"
+    assert edge.end.value == "RESOURCE-SET-1"
 
 
 def test_resource_set_role_assignment_skips_missing_role_assignment():
