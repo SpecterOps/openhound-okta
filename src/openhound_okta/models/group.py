@@ -9,6 +9,7 @@ from dlt.common import json
 from dlt.common.libs.pydantic import DltConfig
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
 from openhound.core.models.entries_dataclass import Edge, EdgeProperties
+from openhound.core.models.entries_dataclass import EdgePath
 from pydantic import BaseModel, ConfigDict, Field
 
 from openhound_okta.graph import OktaOwnedEdgePath, OktaNode, OktaNodeProperties
@@ -197,7 +198,7 @@ class Group(BaseAsset):
         ):
             yield Edge(
                 kind=ek.MEMBERSHIP_SYNC,
-                start=OktaOwnedEdgePath(value=self.profile.object_sid, match_by="id"),
+                start=EdgePath(value=self.profile.object_sid, match_by="id"),
                 end=OktaOwnedEdgePath(value=self.id, match_by="id"),
                 properties=EdgeProperties(traversable=True),
             )

@@ -2,6 +2,7 @@ from datetime import datetime
 
 from openhound.core.asset import BaseAsset, EdgeDef
 from openhound.core.models.entries_dataclass import Edge, EdgeProperties
+from openhound.core.models.entries_dataclass import EdgePath
 from pydantic import BaseModel, ConfigDict, Field
 
 from openhound_okta.graph import OktaOwnedEdgePath
@@ -360,9 +361,7 @@ class ApplicationUser(BaseAsset):
             if self._is_inbound_sync:
                 yield Edge(
                     kind=ek.USER_SYNC,
-                    start=OktaOwnedEdgePath(
-                        value=self.profile.object_sid, match_by="id"
-                    ),
+                    start=EdgePath(value=self.profile.object_sid, match_by="id"),
                     end=OktaOwnedEdgePath(value=self.id, match_by="id"),
                     properties=EdgeProperties(traversable=False),
                 )
@@ -370,9 +369,7 @@ class ApplicationUser(BaseAsset):
                 if "OUTBOUND_DEL_AUTH" in self.app_features:
                     yield Edge(
                         kind=ek.PASSWORD_SYNC,
-                        start=OktaOwnedEdgePath(
-                            value=self.profile.object_sid, match_by="id"
-                        ),
+                        start=EdgePath(value=self.profile.object_sid, match_by="id"),
                         end=OktaOwnedEdgePath(value=self.id, match_by="id"),
                         properties=EdgeProperties(traversable=True),
                     )
@@ -380,16 +377,14 @@ class ApplicationUser(BaseAsset):
                 yield Edge(
                     kind=ek.USER_SYNC,
                     start=OktaOwnedEdgePath(value=self.id, match_by="id"),
-                    end=OktaOwnedEdgePath(value=self.profile.object_sid, match_by="id"),
+                    end=EdgePath(value=self.profile.object_sid, match_by="id"),
                     properties=EdgeProperties(traversable=False),
                 )
                 if "PUSH_PASSWORD_UPDATES" in self.app_features:
                     yield Edge(
                         kind=ek.PASSWORD_SYNC,
                         start=OktaOwnedEdgePath(value=self.id, match_by="id"),
-                        end=OktaOwnedEdgePath(
-                            value=self.profile.object_sid, match_by="id"
-                        ),
+                        end=EdgePath(value=self.profile.object_sid, match_by="id"),
                         properties=EdgeProperties(traversable=True),
                     )
 
