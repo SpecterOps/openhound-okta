@@ -71,7 +71,7 @@ def test_jwk_node_uses_kid_for_display_and_emits_native_properties():
 
     properties = jwk.as_node.properties
 
-    assert properties.name == "kid-1"
+    assert properties.name == "KID-1"
     assert properties.displayname == "kid-1"
     assert properties.okta_domain == "example.okta.com"
     assert properties.kid == "kid-1"

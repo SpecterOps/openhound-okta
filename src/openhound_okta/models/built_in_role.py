@@ -3,10 +3,10 @@ from typing import ClassVar
 
 from dlt.common.libs.pydantic import DltConfig
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
-from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from openhound.core.models.entries_dataclass import Edge, EdgeProperties
 from pydantic import ConfigDict
 
-from openhound_okta.graph import OktaNode, OktaNodeProperties
+from openhound_okta.graph import OktaOwnedEdgePath, OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 from openhound_okta.models.built_in_role_permission import BUILT_IN_PERMISSIONS
@@ -129,7 +129,7 @@ class BuiltInRole(BaseAsset):
         role_id = built_in_role_graph_id(self.type, self._extras["tenant"])
         yield Edge(
             kind=ek.CONTAINS,
-            start=EdgePath(value=self._lookup.org_id(), match_by="id"),
-            end=EdgePath(value=role_id, match_by="id"),
+            start=OktaOwnedEdgePath(value=self._lookup.org_id(), match_by="id"),
+            end=OktaOwnedEdgePath(value=role_id, match_by="id"),
             properties=EdgeProperties(traversable=True),
         )

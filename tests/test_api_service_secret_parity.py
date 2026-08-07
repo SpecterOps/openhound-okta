@@ -104,8 +104,8 @@ def test_api_service_secrets_emit_secret_of_edges_to_the_integration():
     edge = next(secret.edges)
 
     assert edge.kind == ek.SECRET_OF
-    assert edge.start.value == "secret-1"
-    assert edge.end.value == "integration-1"
+    assert edge.start.value == "SECRET-1"
+    assert edge.end.value == "INTEGRATION-1"
 
 
 def test_application_and_api_service_secrets_use_distinct_graph_models():

@@ -4,14 +4,13 @@ from datetime import datetime
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
 from openhound.core.models.entries_dataclass import (
     Edge,
-    EdgePath,
     EdgeProperties,
     ConditionalEdgePath,
     PropertyMatch,
 )
 from pydantic import ConfigDict, Field
 
-from openhound_okta.graph import OktaNode, OktaNodeProperties
+from openhound_okta.graph import OktaOwnedEdgePath, OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 from openhound_okta.models.agent_pool import agent_pool_graph_id
@@ -118,7 +117,7 @@ class Agent(BaseAsset):
                 start=ConditionalEdgePath(
                     kind="Computer", property_matchers=[match_with]
                 ),
-                end=EdgePath(value=self.id, match_by="id"),
+                end=OktaOwnedEdgePath(value=self.id, match_by="id"),
                 kind=ek.HOSTS_AGENT,
                 properties=EdgeProperties(traversable=True),
             )
@@ -127,8 +126,10 @@ class Agent(BaseAsset):
     def _agent_member_of_edge(self):
         yield Edge(
             kind=ek.AGENT_MEMBER_OF,
-            start=EdgePath(value=self.id, match_by="id"),
-            end=EdgePath(value=agent_pool_graph_id(self.pool_id), match_by="id"),
+            start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+            end=OktaOwnedEdgePath(
+                value=agent_pool_graph_id(self.pool_id), match_by="id"
+            ),
             properties=EdgeProperties(traversable=True),
         )
 

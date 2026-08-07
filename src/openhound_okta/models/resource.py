@@ -2,9 +2,10 @@ from datetime import datetime
 from collections.abc import Mapping
 
 from openhound.core.asset import BaseAsset, EdgeDef
-from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from openhound.core.models.entries_dataclass import Edge, EdgeProperties
 from pydantic import ConfigDict, Field
 
+from openhound_okta.graph import OktaOwnedEdgePath
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 from openhound_okta.models.resource_set import resource_set_node_id
@@ -120,8 +121,8 @@ class Resource(BaseAsset):
     def _yield_edge(self, target_id: str):
         yield Edge(
             kind=ek.RESOURCE_SET_CONTAINS,
-            start=EdgePath(value=self.resource_set_node_id, match_by="id"),
-            end=EdgePath(value=target_id, match_by="id"),
+            start=OktaOwnedEdgePath(value=self.resource_set_node_id, match_by="id"),
+            end=OktaOwnedEdgePath(value=target_id, match_by="id"),
             properties=EdgeProperties(traversable=True),
         )
 

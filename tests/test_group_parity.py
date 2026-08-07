@@ -59,7 +59,7 @@ def test_group_node_emits_core_oktahound_equivalent_properties():
 
     properties = group.as_node.properties
 
-    assert properties.name == "Engineering"
+    assert properties.name == "ENGINEERING"
     assert properties.displayname == "Engineering"
     assert properties.okta_domain == "example.okta.com"
     assert properties.okta_group_type == "OKTA_GROUP"

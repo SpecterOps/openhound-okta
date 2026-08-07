@@ -4,10 +4,10 @@ from typing import ClassVar
 
 from dlt.common.libs.pydantic import DltConfig
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
-from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from openhound.core.models.entries_dataclass import Edge, EdgeProperties
 from pydantic import BaseModel, ConfigDict, Field
 
-from openhound_okta.graph import OktaNode, OktaNodeProperties
+from openhound_okta.graph import OktaOwnedEdgePath, OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 
@@ -180,8 +180,8 @@ class User(BaseAsset):
     def _contains_edges(self):
         yield Edge(
             kind=ek.CONTAINS,
-            start=EdgePath(value=self._lookup.org_id(), match_by="id"),
-            end=EdgePath(value=self.id, match_by="id"),
+            start=OktaOwnedEdgePath(value=self._lookup.org_id(), match_by="id"),
+            end=OktaOwnedEdgePath(value=self.id, match_by="id"),
             properties=EdgeProperties(traversable=True),
         )
 
@@ -190,8 +190,8 @@ class User(BaseAsset):
         if self.realm_id:
             yield Edge(
                 kind=ek.REALM_CONTAINS,
-                start=EdgePath(value=self.realm_id, match_by="id"),
-                end=EdgePath(value=self.id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.realm_id, match_by="id"),
+                end=OktaOwnedEdgePath(value=self.id, match_by="id"),
                 properties=EdgeProperties(traversable=True),
             )
 
@@ -202,8 +202,8 @@ class User(BaseAsset):
             if manager_id:
                 yield Edge(
                     kind=ek.MANAGER_OF,
-                    start=EdgePath(value=manager_id, match_by="id"),
-                    end=EdgePath(value=self.id, match_by="id"),
+                    start=OktaOwnedEdgePath(value=manager_id, match_by="id"),
+                    end=OktaOwnedEdgePath(value=self.id, match_by="id"),
                     properties=EdgeProperties(traversable=False),
                 )
 

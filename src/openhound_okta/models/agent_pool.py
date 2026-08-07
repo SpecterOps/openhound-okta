@@ -4,10 +4,10 @@ from typing import ClassVar
 
 from dlt.common.libs.pydantic import DltConfig
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
-from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from openhound.core.models.entries_dataclass import Edge, EdgeProperties
 from pydantic import BaseModel, ConfigDict, Field
 
-from openhound_okta.graph import OktaNode, OktaNodeProperties
+from openhound_okta.graph import OktaOwnedEdgePath, OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 
@@ -113,8 +113,10 @@ class AgentPool(BaseAsset):
         if self.type == "AD":
             yield Edge(
                 kind=ek.AGENT_POOL_FOR,
-                start=EdgePath(value=agent_pool_graph_id(self.id), match_by="id"),
-                end=EdgePath(value=self.id, match_by="id"),
+                start=OktaOwnedEdgePath(
+                    value=agent_pool_graph_id(self.id), match_by="id"
+                ),
+                end=OktaOwnedEdgePath(value=self.id, match_by="id"),
                 properties=EdgeProperties(traversable=True),
             )
 
@@ -122,8 +124,8 @@ class AgentPool(BaseAsset):
     def _contains_edge(self):
         yield Edge(
             kind=ek.CONTAINS,
-            start=EdgePath(value=self._lookup.org_id(), match_by="id"),
-            end=EdgePath(value=agent_pool_graph_id(self.id), match_by="id"),
+            start=OktaOwnedEdgePath(value=self._lookup.org_id(), match_by="id"),
+            end=OktaOwnedEdgePath(value=agent_pool_graph_id(self.id), match_by="id"),
             properties=EdgeProperties(traversable=True),
         )
 

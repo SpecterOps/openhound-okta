@@ -175,14 +175,14 @@ def outbound_trust_target(
     settings = app_settings or {}
 
     if app_name == OKTA_ORG2ORG_APP:
-        return HybridTarget.by_id(nk.IDP, settings.get("idpId"))
+        return HybridTarget.by_id(nk.IDP, _uppercase_match_value(settings.get("idpId")))
     if app_name in {JAMF_SAML_APP, JAMF_SWA_APP}:
         domain = settings.get("domain")
         if _is_missing_match_value(domain):
             return None
         return HybridTarget.by_id(
             nk.JAMF_SSO_INTEGRATION,
-            f"{domain}-SSO",
+            _uppercase_match_value(f"{domain}-SSO"),
         )
     if app_name == GITHUB_CLOUD_APP:
         return HybridTarget.by_name(nk.GITHUB_ORGANIZATION, settings.get("githubOrg"))
@@ -218,7 +218,7 @@ def hybrid_user_target(
     settings = app_settings or {}
 
     if app_name == OKTA_ORG2ORG_APP:
-        return HybridTarget.by_id(nk.USER, external_id)
+        return HybridTarget.by_id(nk.USER, _uppercase_match_value(external_id))
     if app_name in {JAMF_SAML_APP, JAMF_SWA_APP}:
         return HybridTarget.by_properties(
             nk.JAMF_ACCOUNT,

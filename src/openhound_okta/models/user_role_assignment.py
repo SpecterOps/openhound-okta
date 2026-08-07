@@ -2,11 +2,11 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from openhound.core.asset import EdgeDef, NodeDef
-from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from openhound.core.models.entries_dataclass import Edge, EdgeProperties
 from pydantic import BaseModel
 from pydantic import ConfigDict, Field
 
-from openhound_okta.graph import OktaNode, OktaNodeProperties
+from openhound_okta.graph import OktaOwnedEdgePath, OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 from openhound_okta.models.role_assignment import RoleAssignment
@@ -504,8 +504,10 @@ class UserRoleAssignment(RoleAssignment):
                     for group in self.embedded.targets.groups:
                         yield Edge(
                             kind=ek.ORG_ADMIN,
-                            start=EdgePath(value=self.source_id, match_by="id"),
-                            end=EdgePath(value=group.id, match_by="id"),
+                            start=OktaOwnedEdgePath(
+                                value=self.source_id, match_by="id"
+                            ),
+                            end=OktaOwnedEdgePath(value=group.id, match_by="id"),
                             properties=EdgeProperties(traversable=True),
                         )
 
@@ -514,8 +516,10 @@ class UserRoleAssignment(RoleAssignment):
                         if app.id:
                             yield Edge(
                                 kind=ek.ORG_ADMIN,
-                                start=EdgePath(value=self.source_id, match_by="id"),
-                                end=EdgePath(value=app.id, match_by="id"),
+                                start=OktaOwnedEdgePath(
+                                    value=self.source_id, match_by="id"
+                                ),
+                                end=OktaOwnedEdgePath(value=app.id, match_by="id"),
                                 properties=EdgeProperties(traversable=True),
                             )
             else:
@@ -524,8 +528,8 @@ class UserRoleAssignment(RoleAssignment):
                 for (device_id,) in all_devices:
                     yield Edge(
                         kind=ek.ORG_ADMIN,
-                        start=EdgePath(value=self.source_id, match_by="id"),
-                        end=EdgePath(value=device_id, match_by="id"),
+                        start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                        end=OktaOwnedEdgePath(value=device_id, match_by="id"),
                         properties=EdgeProperties(traversable=True),
                     )
 
@@ -533,8 +537,8 @@ class UserRoleAssignment(RoleAssignment):
                 for (user_id,) in all_users:
                     yield Edge(
                         kind=ek.ORG_ADMIN,
-                        start=EdgePath(value=self.source_id, match_by="id"),
-                        end=EdgePath(value=user_id, match_by="id"),
+                        start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                        end=OktaOwnedEdgePath(value=user_id, match_by="id"),
                         properties=EdgeProperties(traversable=True),
                     )
 
@@ -542,8 +546,8 @@ class UserRoleAssignment(RoleAssignment):
                 for (group_id,) in all_groups:
                     yield Edge(
                         kind=ek.ORG_ADMIN,
-                        start=EdgePath(value=self.source_id, match_by="id"),
-                        end=EdgePath(value=group_id, match_by="id"),
+                        start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                        end=OktaOwnedEdgePath(value=group_id, match_by="id"),
                         properties=EdgeProperties(traversable=True),
                     )
 
@@ -551,8 +555,8 @@ class UserRoleAssignment(RoleAssignment):
                 for (app_id,) in all_apps:
                     yield Edge(
                         kind=ek.ORG_ADMIN,
-                        start=EdgePath(value=self.source_id, match_by="id"),
-                        end=EdgePath(value=app_id, match_by="id"),
+                        start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                        end=OktaOwnedEdgePath(value=app_id, match_by="id"),
                         properties=EdgeProperties(traversable=True),
                     )
 

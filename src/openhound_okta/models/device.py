@@ -2,10 +2,10 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
-from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from openhound.core.models.entries_dataclass import Edge, EdgeProperties
 from pydantic import BaseModel, ConfigDict, Field
 
-from openhound_okta.graph import OktaNode, OktaNodeProperties
+from openhound_okta.graph import OktaOwnedEdgePath, OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 
@@ -157,8 +157,8 @@ class Device(BaseAsset):
             for user in self.embedded.users:
                 yield Edge(
                     kind=ek.DEVICE_OF,
-                    start=EdgePath(value=self.node_id, match_by="id"),
-                    end=EdgePath(value=user.user.id, match_by="id"),
+                    start=OktaOwnedEdgePath(value=self.node_id, match_by="id"),
+                    end=OktaOwnedEdgePath(value=user.user.id, match_by="id"),
                     properties=EdgeProperties(traversable=False),
                 )
 
@@ -166,8 +166,8 @@ class Device(BaseAsset):
     def _contains_edge(self):
         yield Edge(
             kind=ek.CONTAINS,
-            start=EdgePath(value=self._lookup.org_id(), match_by="id"),
-            end=EdgePath(value=self.node_id, match_by="id"),
+            start=OktaOwnedEdgePath(value=self._lookup.org_id(), match_by="id"),
+            end=OktaOwnedEdgePath(value=self.node_id, match_by="id"),
             properties=EdgeProperties(traversable=True),
         )
 

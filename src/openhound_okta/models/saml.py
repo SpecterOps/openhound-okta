@@ -6,10 +6,10 @@ from urllib.parse import quote, urlsplit, urlunsplit
 from uuid import UUID
 
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
-from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from openhound.core.models.entries_dataclass import Edge, EdgeProperties
 from pydantic import ConfigDict, Field, model_validator
 
-from openhound_okta.graph import OktaNode, OktaNodeProperties
+from openhound_okta.graph import OktaOwnedEdgePath, OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek
 from openhound_okta.kinds import nodes as nk
 from openhound_okta.main import app
@@ -1748,29 +1748,29 @@ class SamlFederationProvider(BaseAsset):
     def edges(self):
         yield Edge(
             kind=ek.SAML_IMPLEMENTS,
-            start=EdgePath(value=self.app_id, match_by="id"),
-            end=EdgePath(value=self.id, match_by="id"),
+            start=OktaOwnedEdgePath(value=self.app_id, match_by="id"),
+            end=OktaOwnedEdgePath(value=self.id, match_by="id"),
             properties=SamlRelationshipProperties(traversable=False),
         )
         if self.issuer_id:
             yield Edge(
                 kind=ek.SAML_ISSUES_AS,
-                start=EdgePath(value=self.id, match_by="id"),
-                end=EdgePath(value=self.issuer_id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+                end=OktaOwnedEdgePath(value=self.issuer_id, match_by="id"),
                 properties=SamlRelationshipProperties(traversable=False),
             )
         for acs_id in self.acs_ids:
             yield Edge(
                 kind=ek.SAML_ISSUES_ASSERTIONS_TO,
-                start=EdgePath(value=self.id, match_by="id"),
-                end=EdgePath(value=acs_id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+                end=OktaOwnedEdgePath(value=acs_id, match_by="id"),
                 properties=SamlRelationshipProperties(traversable=False),
             )
         for claim_mapping_id in self.claim_mapping_ids:
             yield Edge(
                 kind=ek.SAML_HAS_CLAIM_MAPPING,
-                start=EdgePath(value=self.id, match_by="id"),
-                end=EdgePath(value=claim_mapping_id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+                end=OktaOwnedEdgePath(value=claim_mapping_id, match_by="id"),
                 properties=SamlRelationshipProperties(traversable=False),
             )
 
@@ -2085,8 +2085,8 @@ class SamlServiceProvider(BaseAsset):
 
         yield Edge(
             kind=ek.SAML_HAS_ACCOUNT_RESOLUTION_RULE,
-            start=EdgePath(value=self.id, match_by="id"),
-            end=EdgePath(value=self.account_resolution_rule_id, match_by="id"),
+            start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+            end=OktaOwnedEdgePath(value=self.account_resolution_rule_id, match_by="id"),
             properties=SamlRelationshipProperties(traversable=False),
         )
 
@@ -2105,8 +2105,8 @@ class SamlServiceProvider(BaseAsset):
             if account_id not in directly_linked_account_ids:
                 yield Edge(
                     kind=ek.SAML_HAS_ACCOUNT,
-                    start=EdgePath(value=self.id, match_by="id"),
-                    end=EdgePath(value=account_id, match_by="id"),
+                    start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+                    end=OktaOwnedEdgePath(value=account_id, match_by="id"),
                     properties=SamlAccountEdgeProperties(
                         traversable=False,
                         match_values=match_values,
@@ -2117,8 +2117,10 @@ class SamlServiceProvider(BaseAsset):
                 )
             yield Edge(
                 kind=ek.SAML_HAS_ACCOUNT_RESOLUTION_VALUE,
-                start=EdgePath(value=account_id, match_by="id"),
-                end=EdgePath(value=self.account_resolution_field_id, match_by="id"),
+                start=OktaOwnedEdgePath(value=account_id, match_by="id"),
+                end=OktaOwnedEdgePath(
+                    value=self.account_resolution_field_id, match_by="id"
+                ),
                 properties=SamlResolutionValueEdgeProperties(
                     traversable=False,
                     match_values=match_values,
@@ -2130,22 +2132,22 @@ class SamlServiceProvider(BaseAsset):
     def edges(self):
         yield Edge(
             kind=ek.SAML_IMPLEMENTS,
-            start=EdgePath(value=self.idp_id, match_by="id"),
-            end=EdgePath(value=self.id, match_by="id"),
+            start=OktaOwnedEdgePath(value=self.idp_id, match_by="id"),
+            end=OktaOwnedEdgePath(value=self.id, match_by="id"),
             properties=SamlRelationshipProperties(traversable=False),
         )
         if self.issuer_id:
             yield Edge(
                 kind=ek.SAML_TRUSTS_ISSUER,
-                start=EdgePath(value=self.id, match_by="id"),
-                end=EdgePath(value=self.issuer_id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+                end=OktaOwnedEdgePath(value=self.issuer_id, match_by="id"),
                 properties=SamlRelationshipProperties(traversable=False),
             )
         for acs_id in self.acs_ids:
             yield Edge(
                 kind=ek.SAML_HAS_ASSERTION_CONSUMER_SERVICE,
-                start=EdgePath(value=self.id, match_by="id"),
-                end=EdgePath(value=acs_id, match_by="id"),
+                start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+                end=OktaOwnedEdgePath(value=acs_id, match_by="id"),
                 properties=SamlRelationshipProperties(traversable=False),
             )
         yield from self._account_resolution_edges
@@ -2205,8 +2207,8 @@ class SamlAccountResolutionRule(BaseAsset):
     def edges(self):
         yield Edge(
             kind=ek.SAML_USES_ACCOUNT_RESOLUTION_FIELD,
-            start=EdgePath(value=self.id, match_by="id"),
-            end=EdgePath(value=self.field_id, match_by="id"),
+            start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+            end=OktaOwnedEdgePath(value=self.field_id, match_by="id"),
             properties=SamlRelationshipProperties(traversable=False),
         )
 

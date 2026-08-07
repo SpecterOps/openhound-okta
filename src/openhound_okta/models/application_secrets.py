@@ -3,10 +3,10 @@ from dataclasses import field
 from datetime import datetime
 
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
-from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
+from openhound.core.models.entries_dataclass import Edge, EdgeProperties
 from pydantic import ConfigDict, Field
 
-from openhound_okta.graph import OktaNode, OktaNodeProperties
+from openhound_okta.graph import OktaOwnedEdgePath, OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 
@@ -84,8 +84,8 @@ class ApplicationSecrets(BaseAsset):
     def edges(self):
         yield Edge(
             kind=ek.SECRET_OF,
-            start=EdgePath(value=self.id, match_by="id"),
-            end=EdgePath(value=self.app_id, match_by="id"),
+            start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+            end=OktaOwnedEdgePath(value=self.app_id, match_by="id"),
             properties=EdgeProperties(traversable=True),
         )
 
