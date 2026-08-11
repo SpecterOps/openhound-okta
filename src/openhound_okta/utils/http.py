@@ -16,6 +16,12 @@ from dlt.sources.helpers.requests.retry import (
 )
 from dlt.sources.helpers.requests.session import Session
 
+from .auth import (
+    OktaBearerAuth,
+    UnauthorizedClassification,
+    UnauthorizedDecision,
+)
+
 logger = logging.getLogger(__name__)
 
 RETRYABLE_STATUS_CODES = set(DEFAULT_RETRY_STATUS)
@@ -230,6 +236,7 @@ class OktaRESTClient(RESTClient):
         attempt = 0
         rate_limit_attempt = 0
         transient_attempt = 0
+        unauthorized_retry_attempted = False
         while True:
             attempt += 1
             self._throttle.acquire()
@@ -242,6 +249,19 @@ class OktaRESTClient(RESTClient):
             except requests.HTTPError as exc:
                 response = exc.response
                 status_code = response.status_code if response is not None else None
+                unauthorized_decision = None
+                if status_code == 401 and not unauthorized_retry_attempted:
+                    unauthorized_decision = self._retry_after_unauthorized(
+                        request,
+                        response,
+                    )
+                if (
+                    unauthorized_decision is not None
+                    and unauthorized_decision.retry
+                ):
+                    unauthorized_retry_attempted = True
+                    self._throttle.release()
+                    continue
                 if status_code not in RETRYABLE_STATUS_CODES:
                     self._throttle.release()
                     raise
@@ -329,6 +349,75 @@ class OktaRESTClient(RESTClient):
             except BaseException:
                 self._throttle.release()
                 raise
+
+    def _retry_after_unauthorized(
+        self,
+        request: requests.Request,
+        response: requests.Response | None,
+    ) -> UnauthorizedDecision | None:
+        auth = self._refreshable_auth(request)
+        if auth is None or response is None:
+            return None
+
+        failed_access_token = self._response_bearer_token(response)
+        if failed_access_token is None:
+            return None
+
+        classification = self._classify_unauthorized(response)
+        decision = auth.handle_unauthorized(failed_access_token, classification)
+        logger.warning(
+            "Handled Okta bearer 401 endpoint_family=%s classification=%s "
+            "reason=%s invalidated=%s retry=%s url=%s",
+            self.endpoint_family,
+            classification.value,
+            decision.reason,
+            decision.invalidated,
+            decision.retry,
+            response.url,
+        )
+        return decision
+
+    def _refreshable_auth(self, request: requests.Request) -> OktaBearerAuth | None:
+        request_auth = getattr(request, "auth", None)
+        auth = request_auth if request_auth is not None else self.auth
+        return auth if isinstance(auth, OktaBearerAuth) else None
+
+    @staticmethod
+    def _response_bearer_token(response: requests.Response) -> str | None:
+        prepared_request = getattr(response, "request", None)
+        headers = getattr(prepared_request, "headers", None)
+        if headers is None:
+            return None
+
+        authorization = headers.get("Authorization")
+        if not isinstance(authorization, str) or not authorization.startswith("Bearer "):
+            return None
+
+        access_token = authorization.removeprefix("Bearer ")
+        return access_token or None
+
+    @staticmethod
+    def _classify_unauthorized(
+        response: requests.Response,
+    ) -> UnauthorizedClassification:
+        challenge = response.headers.get("WWW-Authenticate", "")
+        if re.search(r'\berror\s*=\s*"?invalid_token"?', challenge, re.IGNORECASE):
+            return UnauthorizedClassification.INVALID_TOKEN
+        if re.search(r'\berror\s*=\s*"?insufficient_scope"?', challenge, re.IGNORECASE):
+            return UnauthorizedClassification.NON_TOKEN
+
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        if isinstance(payload, dict):
+            error_code = payload.get("errorCode")
+            if error_code == "E0000011":
+                return UnauthorizedClassification.INVALID_TOKEN
+            if error_code == "E0000015":
+                return UnauthorizedClassification.NON_TOKEN
+
+        return UnauthorizedClassification.UNKNOWN
 
     def _retry_context(
         self,

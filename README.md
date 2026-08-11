@@ -41,6 +41,16 @@ Follow the OpenHound docs to get started:
 
 - [OpenHound Documentation](https://bloodhound.specterops.io/openhound/overview)
 
+## OAuth app authentication behavior
+
+When the collector uses Okta OAuth app credentials, it shares one bearer token across endpoint clients and refreshes
+that token before it expires. Long-running collections can therefore continue across the Okta access-token lifetime
+without failing active resource pagination. If a transient proactive refresh fails while the current token is still
+valid, the collector temporarily keeps using that token and suppresses repeated refresh attempts for a short cooldown.
+If Okta rejects a bearer token with HTTP 401, the collector retries once for stale, invalid, or unknown token responses
+while preserving the current token for known non-token authorization failures. Classic SSWS API token authentication
+remains static.
+
 ## Rate-limit behavior
 
 The collector coordinates requests by Okta API endpoint family. It limits concurrent requests, observes
