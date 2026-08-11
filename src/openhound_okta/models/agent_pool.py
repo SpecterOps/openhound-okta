@@ -37,6 +37,7 @@ class Agent(BaseModel):
     message: str | None = None
     indicator: str | None = None
     name: str
+    type: str | None = None
     version: str
     upgrade_required: bool | None = Field(alias="upgradeRequired", default=None)
     active: bool | None = None

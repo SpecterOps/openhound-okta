@@ -69,11 +69,51 @@ def test_agent_member_of_edges_target_namespaced_pool_ids():
     assert edge.end.value == "APP-OR-POOL-1_POOL"
 
 
+def test_ad_agents_match_host_computers_like_oktahound():
+    agent = Agent.model_validate(
+        {
+            "id": "agent-1",
+            "name": "WIN-region1A-dc",
+            "version": "1.0.0",
+            "poolId": "app-or-pool-1",
+            "agent_pool_name": "region1A.dc",
+            "agent_type": "AD",
+        }
+    )
+
+    edge = next(agent._hosts_agent_edge)
+
+    assert edge.kind == ek.HOSTS_AGENT
+    assert edge.start.kind == "Computer"
+    assert [(matcher.key, matcher.value) for matcher in edge.start.property_matchers] == [
+        ("samaccountname", "WIN-REGION1A-DC$"),
+        ("domain", "REGION1A.DC"),
+    ]
+    assert edge.end.value == "AGENT-1"
+    assert edge.properties.traversable is True
+
+
+def test_non_ad_agents_do_not_emit_hosts_agent_edges():
+    agent = Agent.model_validate(
+        {
+            "id": "agent-1",
+            "name": "radius-agent",
+            "version": "1.0.0",
+            "poolId": "pool-1",
+            "agent_pool_name": "RADIUS",
+            "agent_type": "RADIUS",
+        }
+    )
+
+    assert list(agent._hosts_agent_edge) == []
+
+
 def test_agent_node_emits_oktahound_equivalent_properties():
     agent = Agent.model_validate(
         {
             "id": "agent-1",
             "name": "WIN-corp-dc",
+            "type": "AD_AGENT",
             "version": "1.0.0",
             "operationalStatus": "OPERATIONAL",
             "poolId": "app-or-pool-1",
@@ -91,6 +131,7 @@ def test_agent_node_emits_oktahound_equivalent_properties():
     assert properties.okta_domain == "example.okta.com"
     assert properties.pool_id == "app-or-pool-1"
     assert properties.pool_name == "corp.example.com"
+    assert properties.type == "AD_AGENT"
     assert properties.operational_status == "OPERATIONAL"
     assert properties.update_status == "CURRENT"
     assert properties.last_connection.isoformat() == "2026-01-01T00:00:00+00:00"
