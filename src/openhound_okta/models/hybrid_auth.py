@@ -285,7 +285,7 @@ def hybrid_group_target(
         return HybridTarget.by_properties(
             nk.GROUP,
             (
-                ("name", group_name),
+                ("name", _uppercase_match_value(group_name)),
                 ("okta_domain", okta_org2org_domain(settings.get("baseUrl"))),
             ),
         )

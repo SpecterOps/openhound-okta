@@ -100,7 +100,7 @@ def test_group_node_emits_active_directory_profile_properties():
     assert properties.object_guid == "54cce1ad-7278-4ca3-b146-19ec6f90d34a"
 
 
-def test_group_membership_sync_matcher_uses_oktahound_name_and_domain_name():
+def test_group_membership_sync_matcher_uses_uppercase_name_and_okta_domain():
     group = make_group(
         type="APP_GROUP",
         source={"id": "app-1"},
@@ -110,6 +110,6 @@ def test_group_membership_sync_matcher_uses_oktahound_name_and_domain_name():
     matchers = {matcher.key: matcher.value for matcher in edge.start.property_matchers}
 
     assert matchers == {
-        "name": "Engineering",
-        "domainName": "source.example.okta.com",
+        "name": "ENGINEERING",
+        "okta_domain": "source.example.okta.com",
     }

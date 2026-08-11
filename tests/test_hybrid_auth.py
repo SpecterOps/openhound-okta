@@ -237,7 +237,7 @@ def test_hybrid_user_targets_keep_external_schema_match_properties():
             {"baseUrl": "https://target.example.okta.com/"},
             nk.GROUP,
             (
-                ("name", "Engineering"),
+                ("name", "ENGINEERING"),
                 ("okta_domain", "target.example.okta.com"),
             ),
         ),
