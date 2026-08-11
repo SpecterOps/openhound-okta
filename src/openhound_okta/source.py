@@ -77,6 +77,7 @@ from .models.saml import (
     saml_sp_acs_rows,
     saml_trusted_issuer_row,
 )
+from .models.token import Token
 from .models.built_in_role import (
     BUILT_IN_ROLES,
     SUPPORTED_ROLE_ASSIGNMENT_TYPES,
@@ -84,7 +85,7 @@ from .models.built_in_role import (
 )
 from .models.built_in_role_permission import BUILT_IN_PERMISSIONS
 from .models.role_assignment import DIRECT_ASSIGNMENT_TYPES, GROUP_TARGETED_ROLE_TYPES
-from .utils.auth import OktaAuth
+from .utils.auth import OktaAuth, OktaBearerAuth
 from .utils.http import (
     DEFAULT_ENDPOINT_CONCURRENCY,
     DEFAULT_RATE_LIMIT_MAX_ELAPSED_SECONDS,
@@ -227,6 +228,17 @@ class OktaCredentials(CredentialsConfiguration):
         pass
 
 
+def _app_token(okta_auth: OktaAuth, base_url: str, client_id: str) -> Token:
+    private_key = okta_auth.private_key
+    jwt = okta_auth.jwt(
+        private_key=private_key,
+        client_id=client_id,
+        audience=f"{base_url}/oauth2/v1/token",
+        exp_delta=60,
+    )
+    return okta_auth.token_response(base_url, jwt, " ".join(OKTA_DEFAULT_SCOPE))
+
+
 @configspec
 class OktaAppCredentials(OktaCredentials):
     private_key_path: str = None
@@ -235,18 +247,16 @@ class OktaAppCredentials(OktaCredentials):
     def auth(self) -> str:
         return "app"
 
+    def fetch_token(self) -> Token:
+        return _app_token(
+            OktaAuth(private_key_path=self.private_key_path),
+            self.base_url,
+            self.client_id,
+        )
+
     @property
     def header(self) -> str:
-        okta_auth = OktaAuth(private_key_path=self.private_key_path)
-        private_key = okta_auth.private_key
-        jwt = okta_auth.jwt(
-            private_key=private_key,
-            client_id=self.client_id,
-            audience=f"{self.base_url}/oauth2/v1/token",
-            exp_delta=60,
-        )
-        bearer_token = okta_auth.token(self.base_url, jwt, " ".join(OKTA_DEFAULT_SCOPE))
-        return f"Bearer {bearer_token}"
+        return f"Bearer {self.fetch_token().access_token}"
 
 
 @configspec
@@ -257,19 +267,17 @@ class OktaEncodedAppCredentials(OktaCredentials):
     def auth(self) -> str:
         return "app"
 
+    def fetch_token(self) -> Token:
+        decoded_credentials = b64decode(self.private_key_b64).decode("utf-8")
+        return _app_token(
+            OktaAuth(private_key_string=decoded_credentials),
+            self.base_url,
+            self.client_id,
+        )
+
     @property
     def header(self) -> str:
-        decoded_credentials = b64decode(self.private_key_b64).decode("utf-8")
-        okta_auth = OktaAuth(private_key_string=decoded_credentials)
-        private_key = okta_auth.private_key
-        jwt = okta_auth.jwt(
-            private_key=private_key,
-            client_id=self.client_id,
-            audience=f"{self.base_url}/oauth2/v1/token",
-            exp_delta=60,
-        )
-        bearer_token = okta_auth.token(self.base_url, jwt, " ".join(OKTA_DEFAULT_SCOPE))
-        return f"Bearer {bearer_token}"
+        return f"Bearer {self.fetch_token().access_token}"
 
 
 @configspec
@@ -282,6 +290,16 @@ class OktaTokenCredentials(OktaCredentials):
     @property
     def header(self) -> str:
         return f"SSWS {self.token}"
+
+
+def _request_auth(
+    credentials: Union[
+        OktaAppCredentials, OktaEncodedAppCredentials, OktaTokenCredentials
+    ],
+):
+    if isinstance(credentials, (OktaAppCredentials, OktaEncodedAppCredentials)):
+        return OktaBearerAuth(credentials.fetch_token)
+    return APIKeyAuth(name="Authorization", api_key=credentials.header, location="header")
 
 
 class ClientPool:
@@ -1413,9 +1431,7 @@ def source(
 
     pool = ClientPool(
         base_url=credentials.base_url,
-        auth=APIKeyAuth(
-            name="Authorization", api_key=credentials.header, location="header"
-        ),
+        auth=_request_auth(credentials),
         paginator=HeaderLinkPaginator(),
         endpoint_concurrency=endpoint_concurrency,
         rate_limit_max_elapsed_seconds=rate_limit_max_elapsed_seconds,

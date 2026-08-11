@@ -1,4 +1,5 @@
 import inspect
+import logging
 from threading import Event, Thread
 from types import SimpleNamespace
 
@@ -8,8 +9,10 @@ from requests import Request
 from requests.adapters import BaseAdapter
 from requests.exceptions import ChunkedEncodingError
 from dlt.sources.helpers.rest_client.paginators import HeaderLinkPaginator
+from dlt.sources.helpers.rest_client.auth import APIKeyAuth
 from dlt.sources.helpers.requests.session import Session
 
+from openhound_okta.models.token import Token
 from openhound_okta.source import (
     APPLICATION_USERS_PAGE_SIZE,
     GROUP_PUSH_MAPPINGS_PAGE_SIZE,
@@ -26,6 +29,7 @@ from openhound_okta.source import (
     identity_provider_users,
     user_role_assignment_rows,
 )
+from openhound_okta.utils.auth import OktaBearerAuth, UnauthorizedClassification
 from openhound_okta.utils.http import (
     EndpointThrottle,
     OktaRESTClient,
@@ -47,12 +51,17 @@ class FakeClock:
         self.now += delay
 
 
-def _response(status_code: int, url: str, headers: dict[str, str] | None = None):
+def _response(
+    status_code: int,
+    url: str,
+    headers: dict[str, str] | None = None,
+    content: bytes = b"[]",
+):
     response = requests.Response()
     response.status_code = status_code
     response.url = url
     response.headers.update(headers or {})
-    response._content = b"[]"
+    response._content = content
     return response
 
 
@@ -112,9 +121,11 @@ class SequencedAdapter(BaseAdapter):
     def __init__(self, responses):
         self.responses = list(responses)
         self.requested_urls: list[str] = []
+        self.authorization_headers: list[str | None] = []
 
     def send(self, request, **kwargs):
         self.requested_urls.append(request.url)
+        self.authorization_headers.append(request.headers.get("Authorization"))
         response = self.responses.pop(0)
         response.request = request
         response.connection = self
@@ -178,6 +189,341 @@ def test_dlt_paginator_retries_the_same_cursor_through_the_real_session_path():
     ]
     assert adapter.requested_urls == [first_url, cursor_url, cursor_url]
     assert clock.sleeps == [1.0]
+
+
+def test_dlt_paginator_refreshes_expired_bearer_token_between_pages():
+    clock = FakeClock()
+    first_url = "https://example.okta.test/api/v1/groups/00g123/users?limit=1000"
+    cursor_url = f"{first_url}&after=00u456"
+    first_page = _response(
+        200,
+        first_url,
+        {"Link": f'<{cursor_url}>; rel="next"'},
+    )
+    first_page._content = b'[{"id":"00u123"}]'
+    second_page = _response(200, cursor_url)
+    second_page._content = b'[{"id":"00u456"}]'
+
+    class ExpiringTokenAdapter(SequencedAdapter):
+        def send(self, request, **kwargs):
+            response = super().send(request, **kwargs)
+            if len(self.requested_urls) == 1:
+                clock.now += 2.0
+            return response
+
+    adapter = ExpiringTokenAdapter([first_page, second_page])
+    session = Session(raise_for_status=False)
+    session.mount("https://", adapter)
+    tokens = iter(
+        [
+            Token(
+                access_token="token-1",
+                token_type="Bearer",
+                expires_in=1,
+                scope="okta.groups.read",
+            ),
+            Token(
+                access_token="token-2",
+                token_type="Bearer",
+                expires_in=1,
+                scope="okta.groups.read",
+            ),
+        ]
+    )
+    auth = OktaBearerAuth(
+        lambda: next(tokens),
+        refresh_skew_seconds=0,
+        clock=clock.time,
+    )
+    client = OktaRESTClient(
+        base_url="https://example.okta.test",
+        endpoint_family="/api/v1/groups*",
+        throttle=EndpointThrottle(clock=clock.time, sleep=clock.sleep),
+        paginator=HeaderLinkPaginator(),
+        session=session,
+        clock=clock.time,
+        elapsed_clock=clock.time,
+        sleep=clock.sleep,
+        jitter=lambda: 0.0,
+        auth=auth,
+    )
+
+    pages = list(client.paginate(first_url))
+
+    assert [list(page) for page in pages] == [
+        [{"id": "00u123"}],
+        [{"id": "00u456"}],
+    ]
+    assert adapter.requested_urls == [first_url, cursor_url]
+    assert adapter.authorization_headers == ["Bearer token-1", "Bearer token-2"]
+
+
+def test_unknown_401_refreshes_bearer_token_once_through_the_real_session_path(caplog):
+    url = "https://example.okta.test/api/v1/groups/00g123/users?after=00u456&limit=1000"
+    adapter = SequencedAdapter([_response(401, url), _response(200, url)])
+    session = Session(raise_for_status=False)
+    session.mount("https://", adapter)
+    tokens = iter(
+        [
+            Token(
+                access_token="token-1",
+                token_type="Bearer",
+                expires_in=3600,
+                scope="okta.groups.read",
+            ),
+            Token(
+                access_token="token-2",
+                token_type="Bearer",
+                expires_in=3600,
+                scope="okta.groups.read",
+            ),
+        ]
+    )
+    auth = OktaBearerAuth(lambda: next(tokens))
+    client = OktaRESTClient(
+        base_url="https://example.okta.test",
+        endpoint_family="/api/v1/groups*",
+        throttle=EndpointThrottle(),
+        session=session,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        response = client._send_request(Request("GET", url, auth=auth))
+
+    assert response.status_code == 200
+    assert adapter.requested_urls == [url, url]
+    assert adapter.authorization_headers == ["Bearer token-1", "Bearer token-2"]
+    assert "classification=unknown" in caplog.text
+    assert "reason=current_token_unknown_401" in caplog.text
+
+
+def test_invalid_token_401_refreshes_bearer_token():
+    url = "https://example.okta.test/api/v1/groups/00g123/users"
+    adapter = SequencedAdapter(
+        [
+            _response(
+                401,
+                url,
+                content=b'{"errorCode":"E0000011","errorSummary":"Invalid token"}',
+            ),
+            _response(200, url),
+        ]
+    )
+    session = Session(raise_for_status=False)
+    session.mount("https://", adapter)
+    tokens = iter(
+        [
+            Token(
+                access_token="token-1",
+                token_type="Bearer",
+                expires_in=3600,
+                scope="okta.groups.read",
+            ),
+            Token(
+                access_token="token-2",
+                token_type="Bearer",
+                expires_in=3600,
+                scope="okta.groups.read",
+            ),
+        ]
+    )
+    auth = OktaBearerAuth(lambda: next(tokens))
+    client = OktaRESTClient(
+        base_url="https://example.okta.test",
+        endpoint_family="/api/v1/groups*",
+        throttle=EndpointThrottle(),
+        session=session,
+    )
+
+    response = client._send_request(Request("GET", url, auth=auth))
+
+    assert response.status_code == 200
+    assert adapter.requested_urls == [url, url]
+    assert adapter.authorization_headers == ["Bearer token-1", "Bearer token-2"]
+
+
+def test_non_token_401_preserves_current_bearer_token():
+    url = "https://example.okta.test/api/v1/groups/00g123/users"
+    adapter = SequencedAdapter(
+        [
+            _response(
+                401,
+                url,
+                content=b'{"errorCode":"E0000015","errorSummary":"Feature not enabled"}',
+            ),
+            _response(200, url),
+        ]
+    )
+    session = Session(raise_for_status=False)
+    session.mount("https://", adapter)
+    fetch_count = 0
+
+    def fetch_token():
+        nonlocal fetch_count
+        fetch_count += 1
+        return Token(
+            access_token=f"token-{fetch_count}",
+            token_type="Bearer",
+            expires_in=3600,
+            scope="okta.groups.read",
+        )
+
+    auth = OktaBearerAuth(fetch_token)
+    client = OktaRESTClient(
+        base_url="https://example.okta.test",
+        endpoint_family="/api/v1/groups*",
+        throttle=EndpointThrottle(),
+        session=session,
+    )
+
+    with pytest.raises(requests.HTTPError):
+        client._send_request(Request("GET", url, auth=auth))
+
+    assert adapter.requested_urls == [url]
+    assert adapter.authorization_headers == ["Bearer token-1"]
+    assert auth.authorization_header() == "Bearer token-1"
+    assert fetch_count == 1
+
+
+def test_stale_token_401_retries_with_current_bearer_without_rotating_again():
+    url = "https://example.okta.test/api/v1/groups/00g123/users"
+    fetch_count = 0
+
+    def fetch_token():
+        nonlocal fetch_count
+        fetch_count += 1
+        return Token(
+            access_token=f"token-{fetch_count}",
+            token_type="Bearer",
+            expires_in=3600,
+            scope="okta.groups.read",
+        )
+
+    auth = OktaBearerAuth(fetch_token)
+
+    class RefreshBeforeResponseAdapter(SequencedAdapter):
+        def send(self, request, **kwargs):
+            response = super().send(request, **kwargs)
+            if len(self.requested_urls) == 1:
+                assert auth.invalidate("token-1") is True
+                assert auth.authorization_header() == "Bearer token-2"
+            return response
+
+    adapter = RefreshBeforeResponseAdapter([_response(401, url), _response(200, url)])
+    session = Session(raise_for_status=False)
+    session.mount("https://", adapter)
+    client = OktaRESTClient(
+        base_url="https://example.okta.test",
+        endpoint_family="/api/v1/groups*",
+        throttle=EndpointThrottle(),
+        session=session,
+    )
+
+    response = client._send_request(Request("GET", url, auth=auth))
+
+    assert response.status_code == 200
+    assert adapter.requested_urls == [url, url]
+    assert adapter.authorization_headers == ["Bearer token-1", "Bearer token-2"]
+    assert fetch_count == 2
+
+
+@pytest.mark.parametrize(
+    ("headers", "content", "expected"),
+    [
+        (
+            {"WWW-Authenticate": 'Bearer error="invalid_token"'},
+            b"[]",
+            UnauthorizedClassification.INVALID_TOKEN,
+        ),
+        (
+            {"WWW-Authenticate": 'Bearer error="insufficient_scope"'},
+            b"[]",
+            UnauthorizedClassification.NON_TOKEN,
+        ),
+        (
+            {},
+            b'{"errorCode":"E0000011"}',
+            UnauthorizedClassification.INVALID_TOKEN,
+        ),
+        (
+            {},
+            b'{"errorCode":"E0000015"}',
+            UnauthorizedClassification.NON_TOKEN,
+        ),
+        ({}, b"[]", UnauthorizedClassification.UNKNOWN),
+    ],
+)
+def test_401_classification_uses_oauth_challenges_and_okta_error_codes(
+    headers,
+    content,
+    expected,
+):
+    response = _response(
+        401,
+        "https://example.okta.test/api/v1/groups/00g123/users",
+        headers=headers,
+        content=content,
+    )
+
+    assert OktaRESTClient._classify_unauthorized(response) is expected
+
+
+def test_401_bearer_refresh_retry_is_bounded_to_once():
+    url = "https://example.okta.test/api/v1/groups/00g123/users"
+    adapter = SequencedAdapter(
+        [_response(401, url), _response(401, url), _response(200, url)]
+    )
+    session = Session(raise_for_status=False)
+    session.mount("https://", adapter)
+    tokens = iter(
+        [
+            Token(
+                access_token="token-1",
+                token_type="Bearer",
+                expires_in=3600,
+                scope="okta.groups.read",
+            ),
+            Token(
+                access_token="token-2",
+                token_type="Bearer",
+                expires_in=3600,
+                scope="okta.groups.read",
+            ),
+        ]
+    )
+    auth = OktaBearerAuth(lambda: next(tokens))
+    client = OktaRESTClient(
+        base_url="https://example.okta.test",
+        endpoint_family="/api/v1/groups*",
+        throttle=EndpointThrottle(),
+        session=session,
+    )
+
+    with pytest.raises(requests.HTTPError):
+        client._send_request(Request("GET", url, auth=auth))
+
+    assert adapter.requested_urls == [url, url]
+    assert adapter.authorization_headers == ["Bearer token-1", "Bearer token-2"]
+
+
+def test_401_static_auth_is_not_retried():
+    url = "https://example.okta.test/api/v1/groups/00g123/users"
+    adapter = SequencedAdapter([_response(401, url), _response(200, url)])
+    session = Session(raise_for_status=False)
+    session.mount("https://", adapter)
+    auth = APIKeyAuth(name="Authorization", api_key="SSWS token-1", location="header")
+    client = OktaRESTClient(
+        base_url="https://example.okta.test",
+        endpoint_family="/api/v1/groups*",
+        throttle=EndpointThrottle(),
+        session=session,
+    )
+
+    with pytest.raises(requests.HTTPError):
+        client._send_request(Request("GET", url, auth=auth))
+
+    assert adapter.requested_urls == [url]
+    assert adapter.authorization_headers == ["SSWS token-1"]
 
 
 def test_retry_exhaustion_includes_app_and_cursor_context():
