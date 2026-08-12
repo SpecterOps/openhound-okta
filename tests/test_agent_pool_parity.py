@@ -28,9 +28,7 @@ def test_agent_pool_ids_are_namespaced_away_from_backing_app_ids():
     assert agent_pool.as_node.id == "APP-OR-POOL-1_POOL"
     assert agent_pool.as_node.properties.okta_domain == "example.okta.com"
 
-    contains_edge = next(
-        edge for edge in agent_pool.edges if edge.kind == ek.CONTAINS
-    )
+    contains_edge = next(edge for edge in agent_pool.edges if edge.kind == ek.CONTAINS)
     assert contains_edge.end.value == "APP-OR-POOL-1_POOL"
 
 
@@ -46,9 +44,7 @@ def test_ad_agent_pool_for_edges_target_the_backing_application():
 def test_non_ad_agent_pools_do_not_emit_agent_pool_for_edges():
     agent_pool = make_agent_pool(pool_type="RADIUS")
 
-    assert [
-        edge for edge in agent_pool.edges if edge.kind == ek.AGENT_POOL_FOR
-    ] == []
+    assert [edge for edge in agent_pool.edges if edge.kind == ek.AGENT_POOL_FOR] == []
 
 
 def test_agent_member_of_edges_target_namespaced_pool_ids():
@@ -85,7 +81,9 @@ def test_ad_agents_match_host_computers_like_oktahound():
 
     assert edge.kind == ek.HOSTS_AGENT
     assert edge.start.kind == "Computer"
-    assert [(matcher.key, matcher.value) for matcher in edge.start.property_matchers] == [
+    assert [
+        (matcher.key, matcher.value) for matcher in edge.start.property_matchers
+    ] == [
         ("samaccountname", "WIN-REGION1A-DC$"),
         ("domain", "REGION1A.DC"),
     ]
