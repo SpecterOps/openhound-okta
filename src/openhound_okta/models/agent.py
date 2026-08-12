@@ -23,7 +23,7 @@ class AgentProperties(OktaNodeProperties):
     name: str
     okta_domain: str
     operational_status: str
-    type: str
+    type: str | None
     version: str
     pool_id: str
     pool_name: str | None = None
@@ -48,7 +48,7 @@ class AgentProperties(OktaNodeProperties):
             traversable=True,
         ),
         EdgeDef(
-            start=nk.AD_USER,
+            start=nk.AD_COMPUTER,
             end=nk.AGENT,
             kind=ek.HOSTS_AGENT,
             description="Computer hosts okta agent",
@@ -82,6 +82,7 @@ class Agent(BaseAsset):
     # Additional
     agent_pool_name: str | None = None
     agent_type: str
+    type: str | None = None
 
     @property
     def as_node(self):
@@ -94,7 +95,7 @@ class Agent(BaseAsset):
                 name=self.name,
                 displayname=self.name,
                 okta_domain=self._extras["tenant"],
-                type=self.agent_type,
+                type=self.type,
                 operational_status=self.operational_status,
                 version=self.version,
                 pool_id=self.pool_id,
@@ -107,15 +108,14 @@ class Agent(BaseAsset):
 
     @property
     def _hosts_agent_edge(self):
-        if self.agent_type == "AD":
-            # The agent name has a prefix that needs to be stripped before matching is possible
-            agent_name_split = self.name.split("-")
-            agent_name = "-".join(agent_name_split[1:])
-            agent_match = f"{agent_name.upper()}.{self.agent_pool_name.upper()}"
-            match_with = PropertyMatch(key="name", value=agent_match)
+        if self.agent_type == "AD" and self.agent_pool_name:
+            matchers = [
+                PropertyMatch(key="samaccountname", value=f"{self.name.upper()}$"),
+                PropertyMatch(key="domain", value=self.agent_pool_name.upper()),
+            ]
             yield Edge(
                 start=ConditionalEdgePath(
-                    kind="Computer", property_matchers=[match_with]
+                    kind=nk.AD_COMPUTER, property_matchers=matchers
                 ),
                 end=OktaOwnedEdgePath(value=self.id, match_by="id"),
                 kind=ek.HOSTS_AGENT,
