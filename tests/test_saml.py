@@ -424,6 +424,7 @@ def test_saml_issuer_accepts_matching_concrete_evidence():
     assert issuer is not None
     assert issuer["entity_id"] == "http://www.okta.com/exk_runtime"
     assert provider is not None
+    assert provider["issuer_id"] == issuer["id"]
     assert provider["issuer_resolution_diagnostics"] == []
 
 
