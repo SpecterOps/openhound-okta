@@ -102,18 +102,18 @@ def _concrete_issuer(value: Any) -> str | None:
     return issuer if issuer and "${" not in issuer else None
 
 
-def _idp_issuer_resolution(
-    application, sign_on: Any
-) -> tuple[str | None, list[str]]:
+def _idp_issuer_resolution(application, sign_on: Any) -> tuple[str | None, list[str]]:
     metadata_issuer = _concrete_issuer(
         getattr(application, "saml_metadata_entity_id", None)
     )
     configured_value = _clean(getattr(sign_on, "idp_issuer", None))
     configured_issuer = _concrete_issuer(configured_value)
+    if metadata_issuer and configured_issuer and metadata_issuer != configured_issuer:
+        return None, ["conflicting_concrete_issuer_evidence"]
     if metadata_issuer:
         diagnostics = (
             ["configured_issuer_superseded_by_metadata"]
-            if configured_value and configured_value != metadata_issuer
+            if configured_value and not configured_issuer
             else []
         )
         return metadata_issuer, diagnostics

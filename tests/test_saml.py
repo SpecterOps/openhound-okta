@@ -409,6 +409,46 @@ def test_saml_issuer_prefers_runtime_metadata_over_configured_template():
     ]
 
 
+def test_saml_issuer_accepts_matching_concrete_evidence():
+    app = _application(
+        settings={
+            "app": {},
+            "signOn": {"idpIssuer": "http://www.okta.com/exk_runtime"},
+        },
+        saml_metadata_entity_id="http://www.okta.com/exk_runtime",
+    )
+
+    issuer = saml_issuer_row(app)
+    provider = saml_federation_provider_row(app)
+
+    assert issuer is not None
+    assert issuer["entity_id"] == "http://www.okta.com/exk_runtime"
+    assert provider is not None
+    assert provider["issuer_resolution_diagnostics"] == []
+
+
+def test_saml_issuer_omits_conflicting_concrete_evidence():
+    app = _application(
+        settings={
+            "app": {},
+            "signOn": {"idpIssuer": "http://www.okta.com/exk_configured"},
+        },
+        saml_metadata_entity_id="http://www.okta.com/exk_metadata",
+    )
+
+    provider = saml_federation_provider_row(app)
+
+    assert saml_issuer_row(app) is None
+    assert provider is not None
+    assert provider["issuer_id"] is None
+    assert provider["issuer_resolution_diagnostics"] == [
+        "conflicting_concrete_issuer_evidence"
+    ]
+    assert ek.SAML_ISSUES_AS not in [
+        edge.kind for edge in SamlFederationProvider.model_validate(provider).edges
+    ]
+
+
 def test_saml_issuer_node_uses_resolved_entity_id_for_display_values():
     row = saml_issuer_row(
         _application(
