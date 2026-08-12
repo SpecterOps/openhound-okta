@@ -97,11 +97,31 @@ def _app_settings(application) -> dict[str, Any]:
     return app_settings if isinstance(app_settings, dict) else {}
 
 
-def _idp_issuer(application, sign_on: Any) -> str | None:
-    return _clean(
-        getattr(sign_on, "idp_issuer", None)
-        or getattr(application, "saml_metadata_entity_id", None)
+def _concrete_issuer(value: Any) -> str | None:
+    issuer = _clean(value)
+    return issuer if issuer and "${" not in issuer else None
+
+
+def _idp_issuer_resolution(application, sign_on: Any) -> tuple[str | None, list[str]]:
+    metadata_issuer = _concrete_issuer(
+        getattr(application, "saml_metadata_entity_id", None)
     )
+    configured_value = _clean(getattr(sign_on, "idp_issuer", None))
+    configured_issuer = _concrete_issuer(configured_value)
+    if metadata_issuer and configured_issuer and metadata_issuer != configured_issuer:
+        return None, ["conflicting_concrete_issuer_evidence"]
+    if metadata_issuer:
+        diagnostics = (
+            ["configured_issuer_superseded_by_metadata"]
+            if configured_value and not configured_issuer
+            else []
+        )
+        return metadata_issuer, diagnostics
+    if configured_issuer:
+        return configured_issuer, []
+    if configured_value:
+        return None, ["unresolved_idp_issuer_expression"]
+    return None, ["missing_issuer_evidence"]
 
 
 @dataclass(frozen=True)
@@ -1077,7 +1097,9 @@ def saml_federation_provider_row(application) -> dict[str, Any] | None:
     sign_on = _sign_on(application)
     if not is_saml_application(application):
         return None
-    idp_issuer = _idp_issuer(application, sign_on)
+    idp_issuer, issuer_resolution_diagnostics = _idp_issuer_resolution(
+        application, sign_on
+    )
     routes, route_diagnostics = _saml_routes(application)
     acs_rows = _saml_acs_rows(application, routes)
     claim_mapping_rows = saml_claim_mapping_rows(application)
@@ -1091,6 +1113,7 @@ def saml_federation_provider_row(application) -> dict[str, Any] | None:
         "acs_ids": [row["id"] for row in acs_rows],
         "claim_mapping_ids": [row["id"] for row in claim_mapping_rows],
         "enabled": application.status == "ACTIVE",
+        "issuer_resolution_diagnostics": issuer_resolution_diagnostics,
         "route_diagnostics": route_diagnostics,
     }
 
@@ -1182,9 +1205,9 @@ def saml_claim_mapping_rows(application) -> list[dict[str, Any]]:
 
 def saml_issuer_row(application) -> dict[str, Any] | None:
     sign_on = _sign_on(application)
-    if not is_saml_application(application) or not sign_on:
+    if not is_saml_application(application):
         return None
-    entity_id = _idp_issuer(application, sign_on)
+    entity_id, _ = _idp_issuer_resolution(application, sign_on)
     if not entity_id:
         return None
     return {
@@ -1440,6 +1463,7 @@ class SamlFederationProviderProperties(OktaNodeProperties):
         app_label: The Okta application display label.
         app_status: The Okta application lifecycle status.
         enabled: Whether the application is active.
+        issuer_resolution_diagnostics: Missing or conflicting issuer evidence retained for review.
         route_diagnostics: Missing or conflicting route evidence retained for review.
         schema_contract_version: Fact-local normalized SAML contract version.
     """
@@ -1449,6 +1473,7 @@ class SamlFederationProviderProperties(OktaNodeProperties):
     app_label: str
     app_status: str
     enabled: bool
+    issuer_resolution_diagnostics: list[str] = dc_field(default_factory=list)
     route_diagnostics: list[str] = dc_field(default_factory=list)
     schema_contract_version: str = SAML_CONTRACT_VERSION
 
@@ -1721,6 +1746,7 @@ class SamlFederationProvider(BaseAsset):
     acs_ids: list[str] = Field(default_factory=list)
     claim_mapping_ids: list[str] = Field(default_factory=list)
     enabled: bool
+    issuer_resolution_diagnostics: list[str] = Field(default_factory=list)
     route_diagnostics: list[str] = Field(default_factory=list)
 
     @property
@@ -1739,6 +1765,7 @@ class SamlFederationProvider(BaseAsset):
                 app_label=self.app_label,
                 app_status=self.app_status,
                 enabled=self.enabled,
+                issuer_resolution_diagnostics=self.issuer_resolution_diagnostics,
                 route_diagnostics=self.route_diagnostics,
                 schema_contract_version=SAML_CONTRACT_VERSION,
             ),
