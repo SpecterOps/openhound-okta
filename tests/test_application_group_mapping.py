@@ -46,6 +46,6 @@ def test_group_push_mapping_emits_outbound_membership_sync_edge():
     assert edge.start.value == "SOURCE-GROUP-1"
     assert isinstance(edge.end, ConditionalEdgePath)
     assert {matcher.key: matcher.value for matcher in edge.end.property_matchers} == {
-        "name": "ENGINEERING",
+        "displayname": "Engineering",
         "okta_domain": "target.example.okta.com",
     }

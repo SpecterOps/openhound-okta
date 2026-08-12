@@ -49,6 +49,11 @@ from openhound_okta.oin_routes.declarative import (
     RouteVariable,
 )
 from openhound_okta.oin_routes.validators import present_string
+from openhound_okta.saml_entity_panel_queries import (
+    ENTITY_PANEL_QUERY_VERSION,
+    cypher_string_literal,
+    node_entity_panel_queries,
+)
 
 
 def _application(**overrides) -> Application:
@@ -2422,6 +2427,42 @@ def test_inbound_automatic_username_policy_emits_canonical_rule_and_accounts():
         ["alice@example.test"],
         ["blocked@example.test"],
     ]
+
+
+def test_normalized_saml_nodes_emit_canonical_entity_panel_queries():
+    application = _application(
+        credentials={
+            "signing": {},
+            "userNameTemplate": {"template": "${source.login}"},
+        }
+    )
+    identity_provider = _identity_provider(policy=_automatic_username_policy())
+    rows = [
+        (SamlIssuer, saml_issuer_row(application)),
+        (SamlAssertionConsumerService, saml_acs_rows(application)[0]),
+        (SamlClaimMapping, saml_claim_mapping_rows(application)[0]),
+        (
+            SamlAccountResolutionRule,
+            saml_account_resolution_rule_row(identity_provider),
+        ),
+        (
+            SamlAccountResolutionField,
+            saml_account_resolution_field_row(identity_provider),
+        ),
+    ]
+
+    for model_type, row in rows:
+        model = model_type.model_validate(row)
+        model._lookup = _ApplicationLookup()
+        model._extras = {"tenant": "example.okta.test"}
+        node = model.as_node
+        properties = asdict(node)["properties"]
+        assert properties["entity_panel_query_version"] == (ENTITY_PANEL_QUERY_VERSION)
+        assert {
+            key: properties[key]
+            for key in node_entity_panel_queries(node.kinds[0], node.id)
+        } == node_entity_panel_queries(node.kinds[0], node.id)
+    assert cypher_string_literal("id'\\\n東京") == "'id\\'\\\\\\n東京'"
 
 
 def test_inbound_rule_candidates_do_not_overwrite_direct_account_binding():

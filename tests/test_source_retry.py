@@ -34,6 +34,7 @@ from openhound_okta.source import (
     groups,
     identity_provider_users,
     source,
+    users,
     user_role_assignment_rows,
 )
 from openhound_okta.utils.auth import OktaBearerAuth, UnauthorizedClassification
@@ -1048,6 +1049,40 @@ def test_source_rejects_invalid_groups_page_size(groups_page_size):
             credentials=credentials,
             groups_page_size=groups_page_size,
         )
+
+
+def test_users_adds_a_deduplicated_deprovisioned_inventory_pass():
+    class UserInventoryPool:
+        def __init__(self):
+            self.calls = []
+
+        def paginate(self, path, **kwargs):
+            self.calls.append((path, kwargs))
+            if kwargs == {
+                "params": {"filter": 'status eq "DEPROVISIONED"'}
+            }:
+                yield [
+                    {"id": "deprovisioned-user", "status": "DEPROVISIONED"},
+                    {"id": "active-user", "status": "ACTIVE"},
+                ]
+            else:
+                yield [{"id": "active-user", "status": "ACTIVE"}]
+
+    pool = UserInventoryPool()
+
+    rows = list(users.__wrapped__(SimpleNamespace(pool=pool)))
+
+    assert rows == [
+        {"id": "active-user", "status": "ACTIVE"},
+        {"id": "deprovisioned-user", "status": "DEPROVISIONED"},
+    ]
+    assert pool.calls == [
+        ("/api/v1/users", {}),
+        (
+            "/api/v1/users",
+            {"params": {"filter": 'status eq "DEPROVISIONED"'}},
+        ),
+    ]
 
 
 def test_group_push_mappings_request_the_maximum_page_size():

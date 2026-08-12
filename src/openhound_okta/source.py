@@ -423,7 +423,12 @@ def organization(ctx: SourceContext):
 
 @app.resource(name="users", columns=User, parallelized=True)
 def users(ctx: SourceContext):
-    """DLT resource, fetches Okta users via GET /users.
+    """DLT resource, fetches every Okta user via GET /users.
+
+    Okta's unfiltered listing omits DEPROVISIONED users by default. Fetch that
+    lifecycle state explicitly and deduplicate by native user ID so the graph
+    retains deactivated identities even if Okta later includes them in the
+    unfiltered response.
 
     Args:
         ctx: SourceContext containing the REST client for API calls.
@@ -431,9 +436,18 @@ def users(ctx: SourceContext):
     Yields:
         user (User): Okta user record.
     """
-    for page in ctx.pool.paginate("/api/v1/users"):
-        for user in page:
-            yield user
+    seen_user_ids: set[str] = set()
+    queries = (
+        {},
+        {"params": {"filter": 'status eq "DEPROVISIONED"'}},
+    )
+    for query in queries:
+        for page in ctx.pool.paginate("/api/v1/users", **query):
+            for user in page:
+                if user["id"] in seen_user_ids:
+                    continue
+                seen_user_ids.add(user["id"])
+                yield user
 
 
 @app.transformer(

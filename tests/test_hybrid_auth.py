@@ -206,7 +206,7 @@ def test_hybrid_user_targets_keep_external_schema_match_properties():
     assert jamf is not None
     assert jamf.property_matchers == (
         ("email", "alice@example.com"),
-        ("domainName", "example.jamfcloud.com"),
+        ("tenant", "example.jamfcloud.com"),
     )
     assert github is not None
     assert github.property_matchers == (
@@ -237,7 +237,7 @@ def test_hybrid_user_targets_keep_external_schema_match_properties():
             {"baseUrl": "https://target.example.okta.com/"},
             nk.GROUP,
             (
-                ("name", "ENGINEERING"),
+                ("displayname", "Engineering"),
                 ("okta_domain", "target.example.okta.com"),
             ),
         ),

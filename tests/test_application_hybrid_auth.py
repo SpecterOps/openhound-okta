@@ -136,7 +136,7 @@ def test_github_outbound_trust_preserves_oktahound_name_only_matching():
     assert isinstance(edge.end, ConditionalEdgePath)
     assert edge.end.kind == nk.GITHUB_ORGANIZATION
     assert [(matcher.key, matcher.value) for matcher in edge.end.property_matchers] == [
-        ("name", "example-org")
+        ("name", "EXAMPLE-ORG")
     ]
 
 

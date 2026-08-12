@@ -123,7 +123,7 @@ def test_application_user_emits_id_based_hybrid_sign_on_edges(
             "alice@example.com",
             ek.OUTBOUND_SSO,
             nk.JAMF_ACCOUNT,
-            [("email", "alice@example.com"), ("domainName", "example.jamfcloud.com")],
+            [("email", "alice@example.com"), ("tenant", "example.jamfcloud.com")],
         ),
         (
             "casper",
@@ -132,7 +132,7 @@ def test_application_user_emits_id_based_hybrid_sign_on_edges(
             "alice@example.com",
             ek.SWA,
             nk.JAMF_ACCOUNT,
-            [("email", "alice@example.com"), ("domainName", "example.jamfcloud.com")],
+            [("email", "alice@example.com"), ("tenant", "example.jamfcloud.com")],
         ),
         (
             "githubcloud",

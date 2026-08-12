@@ -106,7 +106,9 @@ def hybrid_target_edge_path(target: HybridTarget) -> EdgePath | ConditionalEdgeP
             raise ValueError("HybridTarget value is required for name matches")
         return ConditionalEdgePath(
             kind=target.kind,
-            property_matchers=[PropertyMatch(key="name", value=target.value)],
+            property_matchers=[
+                PropertyMatch(key="name", value=_uppercase_match_value(target.value))
+            ],
         )
 
     if target.match_by == "property":
@@ -222,7 +224,7 @@ def hybrid_user_target(
     if app_name in {JAMF_SAML_APP, JAMF_SWA_APP}:
         return HybridTarget.by_properties(
             nk.JAMF_ACCOUNT,
-            (("email", target_user_name), ("domainName", settings.get("domain"))),
+            (("email", target_user_name), ("tenant", settings.get("domain"))),
         )
     if app_name == GITHUB_CLOUD_APP:
         return HybridTarget.by_properties(
@@ -285,7 +287,7 @@ def hybrid_group_target(
         return HybridTarget.by_properties(
             nk.GROUP,
             (
-                ("name", _uppercase_match_value(group_name)),
+                ("displayname", group_name),
                 ("okta_domain", okta_org2org_domain(settings.get("baseUrl"))),
             ),
         )

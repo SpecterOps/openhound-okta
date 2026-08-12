@@ -14,6 +14,10 @@ from openhound_okta.kinds import edges as ek
 from openhound_okta.kinds import nodes as nk
 from openhound_okta.main import app
 from openhound_okta.oin_routes import SamlRouteEvidence, resolve_oin_routes
+from openhound_okta.saml_entity_panel_queries import (
+    ENTITY_PANEL_QUERY_VERSION,
+    node_entity_panel_queries,
+)
 
 
 SAML_CONTRACT_VERSION = "opengraph-saml-v0.3.0"
@@ -1401,6 +1405,9 @@ class SamlIssuerProperties(OktaNodeProperties):
         source_object_kind: The native OpenGraph kind that owns this SAML issuer.
         entity_id: The byte-exact SAML issuer entity ID.
         schema_contract_version: Fact-local normalized SAML contract version.
+        entity_panel_query_version: Entity-panel query contract version.
+        query_federation_providers: Query for federation providers using this endpoint.
+        query_service_providers: Query for service providers using this endpoint.
     """
 
     app_id: str
@@ -1409,6 +1416,9 @@ class SamlIssuerProperties(OktaNodeProperties):
     entity_id: str
     source_object_kind: str = nk.APPLICATION
     schema_contract_version: str = SAML_CONTRACT_VERSION
+    entity_panel_query_version: str = dc_field(kw_only=True)
+    query_federation_providers: str = dc_field(kw_only=True)
+    query_service_providers: str = dc_field(kw_only=True)
 
 
 @dataclass
@@ -1434,6 +1444,9 @@ class SamlAssertionConsumerServiceProperties(OktaNodeProperties):
         sp_entity_source_field: The exact native field that proved or scoped the SP entity.
         route_conflicts: Conflicting lower-precedence route evidence retained for review.
         schema_contract_version: Fact-local normalized SAML contract version.
+        entity_panel_query_version: Entity-panel query contract version.
+        query_federation_providers: Query for federation providers using this endpoint.
+        query_service_providers: Query for service providers using this endpoint.
     """
 
     app_id: str
@@ -1454,6 +1467,9 @@ class SamlAssertionConsumerServiceProperties(OktaNodeProperties):
     sp_entity_source_field: str | None = None
     route_conflicts: list[str] = dc_field(default_factory=list)
     schema_contract_version: str = SAML_CONTRACT_VERSION
+    entity_panel_query_version: str = dc_field(kw_only=True)
+    query_federation_providers: str = dc_field(kw_only=True)
+    query_service_providers: str = dc_field(kw_only=True)
 
 
 @dataclass
@@ -1482,7 +1498,12 @@ class SamlServiceProviderProperties(OktaNodeProperties):
 
 @dataclass
 class SamlAccountResolutionRuleProperties(OktaNodeProperties):
-    """Properties for a source-proven Okta account-resolution rule."""
+    """Properties for a source-proven Okta account-resolution rule.
+
+    Attributes:
+        entity_panel_query_version: Entity-panel query contract version.
+        query_service_provider: Query for the owning service provider.
+    """
 
     idp_id: str
     idp_name: str
@@ -1491,16 +1512,27 @@ class SamlAccountResolutionRuleProperties(OktaNodeProperties):
     expression: str
     summary: str
     schema_contract_version: str = SAML_CONTRACT_VERSION
+    entity_panel_query_version: str = dc_field(kw_only=True)
+    query_service_provider: str = dc_field(kw_only=True)
 
 
 @dataclass
 class SamlAccountResolutionFieldProperties(OktaNodeProperties):
-    """Properties for the Okta login field used by an inbound SAML policy."""
+    """Properties for the Okta login field used by an inbound SAML policy.
+
+    Attributes:
+        entity_panel_query_version: Entity-panel query contract version.
+        query_account_resolution_rule: Query for the rule using this field.
+        query_accounts: Query for accounts supplying values for this field.
+    """
 
     idp_id: str
     idp_name: str
     account_field_name: str
     schema_contract_version: str = SAML_CONTRACT_VERSION
+    entity_panel_query_version: str = dc_field(kw_only=True)
+    query_account_resolution_rule: str = dc_field(kw_only=True)
+    query_accounts: str = dc_field(kw_only=True)
 
 
 @dataclass
@@ -1523,6 +1555,9 @@ class SamlClaimMappingProperties(OktaNodeProperties):
         name_format: Effective attribute NameFormat for an attribute mapping.
         name_format_was_omitted: Whether the native attribute NameFormat was omitted.
         schema_contract_version: Fact-local normalized SAML contract version.
+        entity_panel_query_version: Entity-panel query contract version.
+        query_federation_provider: Query for the owning federation provider.
+        query_principals: Query for principals supplying mapped claim values.
     """
 
     app_id: str
@@ -1540,6 +1575,9 @@ class SamlClaimMappingProperties(OktaNodeProperties):
     name_format: str | None = None
     name_format_was_omitted: bool | None = None
     schema_contract_version: str = SAML_CONTRACT_VERSION
+    entity_panel_query_version: str = dc_field(kw_only=True)
+    query_federation_provider: str = dc_field(kw_only=True)
+    query_principals: str = dc_field(kw_only=True)
 
 
 @dataclass
@@ -1780,6 +1818,8 @@ class SamlClaimMapping(BaseAsset):
                 name_format=self.name_format,
                 name_format_was_omitted=self.name_format_was_omitted,
                 schema_contract_version=SAML_CONTRACT_VERSION,
+                entity_panel_query_version=ENTITY_PANEL_QUERY_VERSION,
+                **node_entity_panel_queries(nk.SAML_CLAIM_MAPPING, self.id),
             ),
         )
 
@@ -1823,6 +1863,8 @@ class SamlIssuer(BaseAsset):
                 entity_id=self.entity_id,
                 source_object_kind=self.source_object_kind,
                 schema_contract_version=SAML_CONTRACT_VERSION,
+                entity_panel_query_version=ENTITY_PANEL_QUERY_VERSION,
+                **node_entity_panel_queries(nk.SAML_ISSUER, self.id),
             ),
         )
 
@@ -1907,6 +1949,10 @@ class SamlAssertionConsumerService(BaseAsset):
                 sp_entity_source_field=self.sp_entity_source_field,
                 route_conflicts=self.route_conflicts,
                 schema_contract_version=SAML_CONTRACT_VERSION,
+                entity_panel_query_version=ENTITY_PANEL_QUERY_VERSION,
+                **node_entity_panel_queries(
+                    nk.SAML_ASSERTION_CONSUMER_SERVICE, self.id
+                ),
             ),
         )
 
@@ -2139,6 +2185,8 @@ class SamlAccountResolutionRule(BaseAsset):
                 expression=self.expression,
                 summary=self.summary,
                 schema_contract_version=SAML_CONTRACT_VERSION,
+                entity_panel_query_version=ENTITY_PANEL_QUERY_VERSION,
+                **node_entity_panel_queries(nk.SAML_ACCOUNT_RESOLUTION_RULE, self.id),
             ),
         )
 
@@ -2183,6 +2231,8 @@ class SamlAccountResolutionField(BaseAsset):
                 idp_name=self.idp_name,
                 account_field_name=self.account_field_name,
                 schema_contract_version=SAML_CONTRACT_VERSION,
+                entity_panel_query_version=ENTITY_PANEL_QUERY_VERSION,
+                **node_entity_panel_queries(nk.SAML_ACCOUNT_RESOLUTION_FIELD, self.id),
             ),
         )
 
