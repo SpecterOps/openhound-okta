@@ -389,6 +389,101 @@ def test_saml_provider_links_only_to_resolved_route_nodes():
     ]
 
 
+def test_saml_issuer_prefers_runtime_metadata_over_configured_template():
+    app = _application(
+        settings={
+            "app": {},
+            "signOn": {"idpIssuer": "http://www.okta.com/${org.externalKey}"},
+        },
+        saml_metadata_entity_id="http://www.okta.com/exk_runtime",
+    )
+
+    issuer = saml_issuer_row(app)
+    provider = saml_federation_provider_row(app)
+
+    assert issuer is not None
+    assert issuer["entity_id"] == "http://www.okta.com/exk_runtime"
+    assert provider is not None
+    assert provider["issuer_resolution_diagnostics"] == [
+        "configured_issuer_superseded_by_metadata"
+    ]
+
+
+def test_saml_issuer_node_uses_resolved_entity_id_for_display_values():
+    row = saml_issuer_row(
+        _application(
+            settings={
+                "app": {},
+                "signOn": {"idpIssuer": "http://www.okta.com/${org.externalKey}"},
+            },
+            saml_metadata_entity_id="http://www.okta.com/exk_runtime",
+        )
+    )
+    issuer = SamlIssuer.model_validate(row)
+    issuer._lookup = _ApplicationLookup()
+    issuer._extras = {"tenant": "example.okta.test"}
+
+    properties = issuer.as_node.properties
+
+    assert properties.entity_id == "http://www.okta.com/exk_runtime"
+    assert properties.name == "HTTP://WWW.OKTA.COM/EXK_RUNTIME"
+    assert properties.displayname == "http://www.okta.com/exk_runtime"
+
+
+def test_saml_issuer_uses_concrete_configured_value_without_metadata():
+    app = _application(
+        settings={
+            "app": {},
+            "signOn": {"idpIssuer": "http://www.okta.com/exk_configured"},
+        }
+    )
+
+    issuer = saml_issuer_row(app)
+
+    assert issuer is not None
+    assert issuer["entity_id"] == "http://www.okta.com/exk_configured"
+
+
+def test_saml_issuer_omits_unresolved_expression_without_metadata():
+    app = _application(
+        settings={
+            "app": {},
+            "signOn": {"idpIssuer": "http://www.okta.com/${org.externalKey}"},
+        }
+    )
+
+    provider = saml_federation_provider_row(app)
+
+    assert saml_issuer_row(app) is None
+    assert provider is not None
+    assert provider["issuer_id"] is None
+    assert provider["issuer_resolution_diagnostics"] == [
+        "unresolved_idp_issuer_expression"
+    ]
+
+
+def test_saml_issuer_uses_metadata_without_sign_on_settings():
+    app = _application(
+        settings={"app": {}},
+        saml_metadata_entity_id="http://www.okta.com/exk_runtime",
+    )
+
+    issuer = saml_issuer_row(app)
+
+    assert issuer is not None
+    assert issuer["entity_id"] == "http://www.okta.com/exk_runtime"
+
+
+def test_saml_provider_reports_missing_issuer_evidence():
+    provider = saml_federation_provider_row(
+        _application(settings={"app": {}, "signOn": {}})
+    )
+
+    assert provider is not None
+    assert provider["issuer_id"] is None
+    assert provider["issuer_resolution_diagnostics"] == ["missing_issuer_evidence"]
+
+
 def test_inbound_and_outbound_route_assets_have_distinct_conversion_names():
     assert SamlIssuer.__name__ != SamlTrustedIssuer.__name__
     assert (
