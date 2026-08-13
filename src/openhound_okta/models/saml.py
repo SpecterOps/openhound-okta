@@ -610,10 +610,12 @@ def _source_login_email_values(
 
     result: list[str] = []
     for value in values:
-        trimmed = value.strip()
         if any(
-            ord(character) < 32 or 127 <= ord(character) <= 159 for character in trimmed
+            ord(character) < 32 or 127 <= ord(character) <= 159 for character in value
         ):
+            continue
+        trimmed = value.strip()
+        if any(character.isspace() for character in trimmed):
             continue
         if trimmed.count("@") != 1 or not all(trimmed.split("@", 1)):
             continue

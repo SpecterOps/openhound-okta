@@ -110,6 +110,60 @@
       }
     },
     {
+      "name": "control_character_source_login_is_not_promoted",
+      "source_profile": {
+        "login": "\nalice.saml@example.test",
+        "email": "alice.saml@example.test"
+      },
+      "claim_mappings": [
+        {
+          "id": "okta:saml:claim-mapping:0oa_saml:0",
+          "app_id": "0oa_saml",
+          "claim_name": "NameID",
+          "mapping_type": "name_id",
+          "mapping_origin": "application_user_name",
+          "claim_type": "name_id",
+          "source_property": "source.login",
+          "expression": "source.login",
+          "format": "urn:oasis:names:tc:SAML:1.0:nameid-format:unspecified"
+        }
+      ],
+      "expected": {
+        "match_values": ["\nalice.saml@example.test"],
+        "email_match_values": [],
+        "scoped_exact_match_values": ["alice.saml@example.test"],
+        "incomplete_match_value_fields": [],
+        "source_properties": ["source.login"]
+      }
+    },
+    {
+      "name": "internal_whitespace_source_login_is_not_promoted",
+      "source_profile": {
+        "login": "alice.saml @example.test",
+        "email": "alice.saml@example.test"
+      },
+      "claim_mappings": [
+        {
+          "id": "okta:saml:claim-mapping:0oa_saml:0",
+          "app_id": "0oa_saml",
+          "claim_name": "NameID",
+          "mapping_type": "name_id",
+          "mapping_origin": "application_user_name",
+          "claim_type": "name_id",
+          "source_property": "source.login",
+          "expression": "source.login",
+          "format": "urn:oasis:names:tc:SAML:1.0:nameid-format:unspecified"
+        }
+      ],
+      "expected": {
+        "match_values": ["alice.saml @example.test"],
+        "email_match_values": [],
+        "scoped_exact_match_values": ["alice.saml @example.test"],
+        "incomplete_match_value_fields": [],
+        "source_properties": ["source.login"]
+      }
+    },
+    {
       "name": "missing_profile_email",
       "source_profile": {"login": "alice.saml@example.test"},
       "claim_mappings": [
