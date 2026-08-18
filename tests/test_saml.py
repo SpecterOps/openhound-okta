@@ -209,6 +209,9 @@ class _SamlLookup:
         self.source_profile = source_profile
         self.claim_mappings = claim_mappings
         self.directly_linked_accounts = directly_linked_accounts
+        self.user_saml_context_calls = 0
+        self.user_status_calls = 0
+        self.user_profile_calls = 0
 
     def iter_user_saml_accounts(self):
         yield from self.accounts
@@ -219,11 +222,18 @@ class _SamlLookup:
 
     def user_status(self, user_id: str) -> str | None:
         assert user_id in {"00u_okta_user", "00u_saml_user"}
+        self.user_status_calls += 1
         return self.status
 
     def user_profile(self, user_id: str) -> dict | None:
         assert user_id == "00u_saml_user"
+        self.user_profile_calls += 1
         return self.source_profile
+
+    def user_saml_context(self, user_id: str) -> tuple[str | None, dict | None]:
+        assert user_id == "00u_saml_user"
+        self.user_saml_context_calls += 1
+        return self.status, self.source_profile
 
     def saml_claim_mappings(self, app_id: str) -> tuple[dict, ...]:
         assert app_id == "0oa_saml"
@@ -305,6 +315,10 @@ def test_saml_lookup_reads_source_profile_and_ordered_claim_mappings() -> None:
         "login": "Alice.Login",
         "custom": "C-1",
     }
+    assert lookup.user_saml_context("00u_saml_user") == (
+        "ACTIVE",
+        {"login": "Alice.Login", "custom": "C-1"},
+    )
     assert lookup.directly_linked_saml_account_ids("0oa_idp") == frozenset(
         {"00u_direct_a", "00u_direct_b"}
     )
@@ -318,7 +332,141 @@ def test_saml_lookup_reads_source_profile_and_ordered_claim_mappings() -> None:
     missing_mapping_lookup = OktaLookup(missing_mapping_connection)
     assert missing_mapping_lookup.user_status("00u_saml_user") is None
     assert missing_mapping_lookup.user_profile("00u_saml_user") is None
+    assert missing_mapping_lookup.user_saml_context("00u_saml_user") is None
     assert missing_mapping_lookup.saml_claim_mappings("0oa_saml") == ()
+
+    missing_column_connection = duckdb.connect(":memory:")
+    missing_column_connection.execute("CREATE SCHEMA okta")
+    missing_column_connection.execute("CREATE TABLE okta.users (id VARCHAR)")
+    missing_column_lookup = OktaLookup(missing_column_connection)
+    assert missing_column_lookup.user_saml_context("00u_saml_user") is None
+    connection.close()
+    missing_mapping_connection.close()
+    missing_column_connection.close()
+
+
+class _CountingConnection:
+    def __init__(self, connection: duckdb.DuckDBPyConnection):
+        self.connection = connection
+        self.user_context_statements = 0
+        self.user_status_statements = 0
+
+    def execute(self, query, parameters=None):
+        normalized = " ".join(query.split()).lower()
+        if "select status, profile" in normalized and ".users" in normalized:
+            self.user_context_statements += 1
+        elif "select status from" in normalized and ".users" in normalized:
+            self.user_status_statements += 1
+        if parameters is None:
+            self.connection.execute(query)
+        else:
+            self.connection.execute(query, parameters)
+        return self
+
+    def fetchone(self):
+        return self.connection.fetchone()
+
+
+def test_saml_context_lookup_is_bounded_and_executes_once_per_cache_miss() -> None:
+    connection = duckdb.connect(":memory:")
+    connection.execute("CREATE SCHEMA okta")
+    connection.execute(
+        "CREATE TABLE okta.users (id VARCHAR, status VARCHAR, profile JSON)"
+    )
+    connection.execute(
+        "INSERT INTO okta.users VALUES (?, ?, ?)",
+        ["00u_saml_user", "ACTIVE", '{"login":"Alice.Login"}'],
+    )
+    counting_connection = _CountingConnection(connection)
+    lookup = OktaLookup(counting_connection)
+    lookup.user_saml_context.cache_clear()
+    lookup.user_status.cache_clear()
+
+    assert lookup.user_status("00u_saml_user") == "ACTIVE"
+    assert counting_connection.user_status_statements == 1
+    assert counting_connection.user_context_statements == 0
+
+    expected = ("ACTIVE", {"login": "Alice.Login"})
+    assert lookup.user_saml_context("00u_saml_user") == expected
+    assert lookup.user_saml_context("00u_saml_user") == expected
+    assert counting_connection.user_context_statements == 1
+    assert lookup.user_saml_context.cache_info().maxsize == 128
+    assert lookup.user_saml_context.cache_info().hits == 1
+    assert lookup.user_saml_context.cache_info().misses == 1
+
+    lookup.user_saml_context.cache_clear()
+    lookup.user_status.cache_clear()
+    connection.close()
+
+
+def test_saml_context_lookup_retains_status_for_unusable_profiles() -> None:
+    connection = duckdb.connect(":memory:")
+    connection.execute("CREATE SCHEMA okta")
+    connection.execute(
+        "CREATE TABLE okta.users (id VARCHAR, status VARCHAR, profile VARCHAR)"
+    )
+    connection.executemany(
+        "INSERT INTO okta.users VALUES (?, 'ACTIVE', ?)",
+        [
+            ("malformed", "not-json"),
+            ("non-object", "[]"),
+            ("missing", None),
+        ],
+    )
+    lookup = OktaLookup(connection)
+    lookup.user_saml_context.cache_clear()
+
+    assert lookup.user_saml_context("malformed") == ("ACTIVE", None)
+    assert lookup.user_saml_context("non-object") == ("ACTIVE", None)
+    assert lookup.user_saml_context("missing") == ("ACTIVE", None)
+    assert lookup.user_saml_context("unknown") is None
+
+    lookup.user_saml_context.cache_clear()
+    connection.close()
+
+
+def test_application_user_prefers_combined_saml_context_lookup() -> None:
+    app_user = _application_user(app_status="ACTIVE")
+    lookup = _SamlLookup(
+        status="ACTIVE",
+        source_profile={"login": "Alice.Login"},
+        claim_mappings=(_claim_mapping(0),),
+    )
+    app_user._lookup = lookup
+
+    assert any(edge.kind == ek.SAML_ELIGIBLE_FOR for edge in app_user.edges)
+    assert lookup.user_saml_context_calls == 1
+    assert lookup.user_status_calls == 0
+    assert lookup.user_profile_calls == 0
+
+
+def test_application_user_supports_legacy_saml_context_lookup() -> None:
+    class LegacyLookup:
+        def __init__(self):
+            self.user_status_calls = 0
+            self.user_profile_calls = 0
+
+        def user_status(self, user_id: str) -> str:
+            assert user_id == "00u_saml_user"
+            self.user_status_calls += 1
+            return "ACTIVE"
+
+        def user_profile(self, user_id: str) -> dict:
+            assert user_id == "00u_saml_user"
+            self.user_profile_calls += 1
+            return {"login": "Alice.Login"}
+
+        def saml_claim_mappings(self, app_id: str) -> tuple[dict, ...]:
+            assert app_id == "0oa_saml"
+            return (_claim_mapping(0),)
+
+    app_user = _application_user(app_status="ACTIVE")
+    lookup = LegacyLookup()
+    app_user._lookup = lookup
+
+    assert any(edge.kind == ek.SAML_ELIGIBLE_FOR for edge in app_user.edges)
+    assert lookup.user_status_calls == 1
+    assert lookup.user_profile_calls == 1
 
 
 def test_saml_account_iterators_keep_independent_results_across_fetch_batches() -> None:
@@ -1333,6 +1481,8 @@ def test_saml_assertion_edges_respect_provider_and_principal_lifecycle() -> None
     for app_status, principal_status in (
         ("INACTIVE", "ACTIVE"),
         ("ACTIVE", "SUSPENDED"),
+        ("ACTIVE", "DEPROVISIONED"),
+        ("ACTIVE", "STAGED"),
         ("ACTIVE", "LOCKED_OUT"),
     ):
         app_user = _application_user(app_status=app_status)

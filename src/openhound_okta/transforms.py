@@ -1,6 +1,34 @@
 import duckdb
 
 
+USERS_ID_INDEX_NAME = "users_id_idx"
+
+
+def ensure_users_id_index(con: duckdb.DuckDBPyConnection, schema: str = "okta") -> bool:
+    """Create the non-unique users(id) lookup index when it is absent."""
+
+    rows = con.execute(
+        """
+        SELECT schema_name, table_name, index_name, is_unique, expressions
+        FROM duckdb_indexes()
+        WHERE schema_name = ? AND index_name = ?
+        ORDER BY schema_name, table_name
+        """,
+        [schema, USERS_ID_INDEX_NAME],
+    ).fetchall()
+    if rows:
+        expected = (schema, "users", USERS_ID_INDEX_NAME, False, "[id]")
+        if rows != [expected]:
+            raise RuntimeError(
+                f"incompatible DuckDB index named {USERS_ID_INDEX_NAME!r}: {rows!r}"
+            )
+        return False
+
+    quoted_schema = schema.replace('"', '""')
+    con.execute(f'CREATE INDEX {USERS_ID_INDEX_NAME} ON "{quoted_schema}".users(id)')
+    return True
+
+
 def principals_with_admin_roles(con, schema: str = "okta") -> None:
     con.execute(f"""
         CREATE OR REPLACE TABLE {schema}.principals_with_admin_roles (
@@ -88,3 +116,4 @@ def transforms(con: duckdb.DuckDBPyConnection, schema: str = "okta") -> None:
     non_admin_users(con, schema)
     non_admin_groups(con, schema)
     non_admin_apps(con, schema)
+    ensure_users_id_index(con, schema)

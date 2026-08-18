@@ -168,6 +168,35 @@ class OktaLookup(LookupManager):
             return decoded if isinstance(decoded, dict) else None
         return profile if isinstance(profile, dict) else None
 
+    @lru_cache(maxsize=128)
+    def user_saml_context(
+        self, user_id: str
+    ) -> tuple[str | None, dict[str, Any] | None] | None:
+        """Return source-user lifecycle and profile in one point statement."""
+
+        try:
+            row = self.client.execute(
+                f"""SELECT status, profile
+                    FROM {self.schema}.users
+                    WHERE id = ?""",
+                [user_id],
+            ).fetchone()
+        except DuckDBError:
+            return None
+        if row is None:
+            return None
+
+        status, profile = row
+        if isinstance(profile, str):
+            try:
+                decoded = json.loads(profile)
+            except (json.JSONDecodeError, TypeError):
+                decoded = None
+            profile = decoded if isinstance(decoded, dict) else None
+        elif not isinstance(profile, dict):
+            profile = None
+        return status, profile
+
     @lru_cache
     def saml_claim_mappings(self, app_id: str) -> tuple[dict[str, Any], ...]:
         try:

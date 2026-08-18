@@ -426,13 +426,21 @@ class ApplicationUser(BaseAsset):
         if self.status not in {"ACTIVE", "PROVISIONED"}:
             return
         lookup = getattr(self, "_lookup", None)
-        lookup_available = all(
+        combined_context_lookup = getattr(lookup, "user_saml_context", None)
+        legacy_context_available = all(
             callable(getattr(lookup, method, None))
-            for method in ("user_status", "user_profile", "saml_claim_mappings")
+            for method in ("user_status", "user_profile")
+        )
+        lookup_available = callable(getattr(lookup, "saml_claim_mappings", None)) and (
+            callable(combined_context_lookup) or legacy_context_available
         )
         if lookup_available:
-            source_user_status = lookup.user_status(self.id)
-            source_profile = lookup.user_profile(self.id)
+            if callable(combined_context_lookup):
+                source_context = combined_context_lookup(self.id)
+                source_user_status, source_profile = source_context or (None, None)
+            else:
+                source_user_status = lookup.user_status(self.id)
+                source_profile = lookup.user_profile(self.id)
             claim_mappings = lookup.saml_claim_mappings(self.app_id)
         else:
             source_user_status = None
