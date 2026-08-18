@@ -13,6 +13,7 @@ from openhound_okta.graph import OktaOwnedEdgePath, OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek
 from openhound_okta.kinds import nodes as nk
 from openhound_okta.main import app
+from openhound_okta.oin_routes import SamlRouteEvidence, resolve_oin_routes
 
 
 SAML_CONTRACT_VERSION = "opengraph-saml-v0.3.0"
@@ -125,48 +126,12 @@ def _idp_issuer_resolution(application, sign_on: Any) -> tuple[str | None, list[
 
 
 @dataclass(frozen=True)
-class _SamlRouteEvidence:
-    acs_url: str
-    sp_entity_id: str
-    index: int | None
-    binding: str | None
-    is_default: bool | None
-    target_product_family: str
-    route_source: str
-    extraction_mode: str
-    acs_source_field: str
-    sp_entity_source_field: str
-    route_conflicts: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
 class _ExplicitRouteExtraction:
-    routes: tuple[_SamlRouteEvidence, ...] = ()
+    routes: tuple[SamlRouteEvidence, ...] = ()
     acs_urls: tuple[str, ...] = ()
     sp_entity_id: str | None = None
     diagnostics: tuple[str, ...] = ()
     contradictory: bool = False
-
-
-_HOST_LABEL = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
-_GITHUB_SLUG = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,98}[A-Za-z0-9])?$")
-
-
-def _valid_host_scope(value: Any) -> str | None:
-    if not isinstance(value, str) or value != value.strip():
-        return None
-    if not value or len(value) > 253 or "." not in value:
-        return None
-    labels = value.split(".")
-    if any(not _HOST_LABEL.fullmatch(label) for label in labels):
-        return None
-    return value
-
-
-def _valid_github_slug(value: Any) -> str | None:
-    if not isinstance(value, str) or value != value.strip():
-        return None
-    return value if _GITHUB_SLUG.fullmatch(value) else None
 
 
 def _explicit_sp_entity(sign_on: Any) -> tuple[str | None, str | None, list[str]]:
@@ -278,7 +243,7 @@ def _explicit_saml_routes(application) -> _ExplicitRouteExtraction:
             sp_entity_id=sp_entity_id,
         )
 
-    routes: list[_SamlRouteEvidence] = []
+    routes: list[SamlRouteEvidence] = []
     route_keys: set[tuple[str, str]] = set()
     for acs_url, acs_source, index, binding, is_default in acs_candidates:
         route_key = (acs_url, sp_entity_id)
@@ -286,7 +251,7 @@ def _explicit_saml_routes(application) -> _ExplicitRouteExtraction:
             continue
         route_keys.add(route_key)
         routes.append(
-            _SamlRouteEvidence(
+            SamlRouteEvidence(
                 acs_url=acs_url,
                 sp_entity_id=sp_entity_id,
                 index=index,
@@ -306,114 +271,18 @@ def _explicit_saml_routes(application) -> _ExplicitRouteExtraction:
     )
 
 
-def _oin_saml_route(
-    application,
-) -> tuple[_SamlRouteEvidence | None, list[str]]:
-    app_settings = _app_settings(application)
-    app_name = getattr(application, "name", None)
-
-    if app_name == "okta_org2org":
-        acs_url = _clean(app_settings.get("acsUrl"))
-        sp_entity_id = _clean(app_settings.get("audRestriction"))
-        missing = []
-        if not acs_url:
-            missing.append("missing_settings.app.acsUrl")
-        if not sp_entity_id:
-            missing.append("missing_settings.app.audRestriction")
-        if missing:
-            return None, missing
-        assert acs_url is not None and sp_entity_id is not None
-        return (
-            _SamlRouteEvidence(
-                acs_url=acs_url,
-                sp_entity_id=sp_entity_id,
-                index=0,
-                binding=None,
-                is_default=True,
-                target_product_family="okta_org2org",
-                route_source="settings.app",
-                extraction_mode="oin_explicit_fields",
-                acs_source_field="settings.app.acsUrl",
-                sp_entity_source_field="settings.app.audRestriction",
-            ),
-            [],
-        )
-
-    if app_name == "jamfsoftwareserver":
-        domain = _valid_host_scope(app_settings.get("domain"))
-        if not domain:
-            return None, ["missing_or_malformed_settings.app.domain"]
-        return (
-            _SamlRouteEvidence(
-                acs_url=f"https://{domain}/saml/SSO",
-                sp_entity_id=f"https://{domain}/saml/metadata",
-                index=0,
-                binding=None,
-                is_default=True,
-                target_product_family="jamf_pro",
-                route_source="settings.app+documented_jamf_route",
-                extraction_mode="allowlisted_deterministic_route",
-                acs_source_field="settings.app.domain",
-                sp_entity_source_field="settings.app.domain",
-            ),
-            [],
-        )
-
-    if app_name == "githubenterprisemanageduser":
-        enterprise_name = _valid_github_slug(app_settings.get("enterpriseName"))
-        if not enterprise_name:
-            return None, ["missing_or_malformed_settings.app.enterpriseName"]
-        return (
-            _SamlRouteEvidence(
-                acs_url=(
-                    f"https://github.com/enterprises/{enterprise_name}/saml/consume"
-                ),
-                sp_entity_id=f"https://github.com/enterprises/{enterprise_name}",
-                index=0,
-                binding=None,
-                is_default=True,
-                target_product_family="github_enterprise",
-                route_source="settings.app+documented_github_route",
-                extraction_mode="allowlisted_deterministic_route",
-                acs_source_field="settings.app.enterpriseName",
-                sp_entity_source_field="settings.app.enterpriseName",
-            ),
-            [],
-        )
-
-    if app_name == "githubcloud":
-        org_field = "githubOrg" if app_settings.get("githubOrg") else "orgName"
-        org_name = _valid_github_slug(app_settings.get(org_field))
-        if not org_name:
-            return None, ["missing_or_malformed_settings.app.githubOrg_or_orgName"]
-        source_field = f"settings.app.{org_field}"
-        return (
-            _SamlRouteEvidence(
-                acs_url=f"https://github.com/orgs/{org_name}/saml/consume",
-                sp_entity_id=f"https://github.com/orgs/{org_name}",
-                index=0,
-                binding=None,
-                is_default=True,
-                target_product_family="github_organization",
-                route_source="settings.app+documented_github_route",
-                extraction_mode="allowlisted_deterministic_route",
-                acs_source_field=source_field,
-                sp_entity_source_field=source_field,
-            ),
-            [],
-        )
-
-    return None, []
-
-
 def _saml_routes(
     application,
-) -> tuple[list[_SamlRouteEvidence], list[str]]:
+) -> tuple[list[SamlRouteEvidence], list[str]]:
     if not is_saml_application(application):
         return [], []
 
     explicit = _explicit_saml_routes(application)
-    oin_route, oin_diagnostics = _oin_saml_route(application)
+    oin_resolution = resolve_oin_routes(
+        getattr(application, "name", None),
+        _app_settings(application),
+    )
+    oin_routes = list(oin_resolution.routes)
     if explicit.contradictory:
         return [], list(explicit.diagnostics)
 
@@ -422,14 +291,8 @@ def _saml_routes(
         explicit_keys = {
             (route.acs_url, route.sp_entity_id) for route in explicit.routes
         }
-        if (
-            oin_route
-            and (
-                oin_route.acs_url,
-                oin_route.sp_entity_id,
-            )
-            not in explicit_keys
-        ):
+        oin_keys = {(route.acs_url, route.sp_entity_id) for route in oin_routes}
+        if oin_keys - explicit_keys:
             conflict = "explicit_generic_route_overrides_conflicting_oin_route"
             diagnostics.append(conflict)
             return [
@@ -441,20 +304,24 @@ def _saml_routes(
             ], diagnostics
         return list(explicit.routes), diagnostics
 
-    if oin_route:
+    if oin_routes:
         partial_conflicts = []
-        if explicit.acs_urls and oin_route.acs_url not in explicit.acs_urls:
+        if explicit.acs_urls and any(
+            route.acs_url not in explicit.acs_urls for route in oin_routes
+        ):
             partial_conflicts.append("partial_explicit_acs_conflicts_with_oin_route")
-        if explicit.sp_entity_id and explicit.sp_entity_id != oin_route.sp_entity_id:
+        if explicit.sp_entity_id and any(
+            explicit.sp_entity_id != route.sp_entity_id for route in oin_routes
+        ):
             partial_conflicts.append(
                 "partial_explicit_sp_entity_conflicts_with_oin_route"
             )
         if partial_conflicts:
             return [], partial_conflicts
-        return [oin_route], []
+        return oin_routes, []
 
-    if oin_diagnostics:
-        return [], oin_diagnostics
+    if oin_resolution.diagnostics:
+        return [], list(oin_resolution.diagnostics)
     if explicit.acs_urls and not explicit.sp_entity_id:
         return [], ["missing_authoritative_sp_entity_evidence"]
     if explicit.sp_entity_id and not explicit.acs_urls:
@@ -1227,7 +1094,7 @@ def saml_acs_rows(application) -> list[dict[str, Any]]:
 
 def _saml_acs_rows(
     application,
-    routes: list[_SamlRouteEvidence],
+    routes: list[SamlRouteEvidence],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     used_id_indexes: set[int] = set()

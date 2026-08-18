@@ -33,6 +33,11 @@ workflow to collect, process, and convert data from any source into BloodHound-c
 The openhound-okta extension collects Okta resources and transforms these into usable nodes and edges for
 BloodHound.
 
+For SAML catalog integrations, see the [OIN route evidence and resolver
+contract](docs/saml-oin-route-evidence.md). The collector prefers explicit
+deployed routes and otherwise fails closed unless a reviewed catalog resolver
+has the complete settings it requires.
+
 [![Python Version](https://img.shields.io/badge/Python-3.13-brightgreen.svg)](#about)
 
 ## Getting Started
