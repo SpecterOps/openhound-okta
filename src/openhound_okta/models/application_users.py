@@ -427,15 +427,18 @@ class ApplicationUser(BaseAsset):
             return
         lookup = getattr(self, "_lookup", None)
         combined_context_lookup = getattr(lookup, "user_saml_context", None)
-        legacy_context_available = all(
-            callable(getattr(lookup, method, None))
-            for method in ("user_status", "user_profile")
-        )
+        combined_context_available = callable(combined_context_lookup)
+        legacy_context_available = False
+        if not combined_context_available:
+            legacy_context_available = all(
+                callable(getattr(lookup, method, None))
+                for method in ("user_status", "user_profile")
+            )
         lookup_available = callable(getattr(lookup, "saml_claim_mappings", None)) and (
-            callable(combined_context_lookup) or legacy_context_available
+            combined_context_available or legacy_context_available
         )
         if lookup_available:
-            if callable(combined_context_lookup):
+            if combined_context_available:
                 source_context = combined_context_lookup(self.id)
                 source_user_status, source_profile = source_context or (None, None)
             else:

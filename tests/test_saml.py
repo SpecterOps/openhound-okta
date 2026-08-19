@@ -4,7 +4,7 @@ import json
 
 import duckdb
 
-from openhound_okta.lookup import OktaLookup
+from openhound_okta.lookup import USER_SAML_CONTEXT_CACHE_MAXSIZE, OktaLookup
 from openhound_okta.kinds import edges as ek
 from openhound_okta.models.application import Application
 from openhound_okta.models.application_users import ApplicationUser
@@ -230,7 +230,7 @@ class _SamlLookup:
         self.user_profile_calls += 1
         return self.source_profile
 
-    def user_saml_context(self, user_id: str) -> tuple[str | None, dict | None]:
+    def user_saml_context(self, user_id: str) -> tuple[str | None, dict | None] | None:
         assert user_id == "00u_saml_user"
         self.user_saml_context_calls += 1
         return self.status, self.source_profile
@@ -379,7 +379,6 @@ def test_saml_context_lookup_is_bounded_and_executes_once_per_cache_miss() -> No
     )
     counting_connection = _CountingConnection(connection)
     lookup = OktaLookup(counting_connection)
-    lookup.user_saml_context.cache_clear()
     lookup.user_status.cache_clear()
 
     assert lookup.user_status("00u_saml_user") == "ACTIVE"
@@ -390,11 +389,22 @@ def test_saml_context_lookup_is_bounded_and_executes_once_per_cache_miss() -> No
     assert lookup.user_saml_context("00u_saml_user") == expected
     assert lookup.user_saml_context("00u_saml_user") == expected
     assert counting_connection.user_context_statements == 1
-    assert lookup.user_saml_context.cache_info().maxsize == 128
-    assert lookup.user_saml_context.cache_info().hits == 1
-    assert lookup.user_saml_context.cache_info().misses == 1
+    assert lookup._user_saml_context_cache == {"00u_saml_user": expected}
 
-    lookup.user_saml_context.cache_clear()
+    assert lookup.user_saml_context("missing-user") is None
+    assert lookup.user_saml_context("missing-user") is None
+    assert counting_connection.user_context_statements == 3
+    assert "missing-user" not in lookup._user_saml_context_cache
+
+    connection.executemany(
+        "INSERT INTO okta.users VALUES (?, 'ACTIVE', '{}')",
+        [(f"user-{index}",) for index in range(USER_SAML_CONTEXT_CACHE_MAXSIZE)],
+    )
+    for index in range(USER_SAML_CONTEXT_CACHE_MAXSIZE):
+        assert lookup.user_saml_context(f"user-{index}") == ("ACTIVE", {})
+    assert len(lookup._user_saml_context_cache) == USER_SAML_CONTEXT_CACHE_MAXSIZE
+    assert "00u_saml_user" not in lookup._user_saml_context_cache
+
     lookup.user_status.cache_clear()
     connection.close()
 
@@ -414,20 +424,24 @@ def test_saml_context_lookup_retains_status_for_unusable_profiles() -> None:
         ],
     )
     lookup = OktaLookup(connection)
-    lookup.user_saml_context.cache_clear()
 
     assert lookup.user_saml_context("malformed") == ("ACTIVE", None)
     assert lookup.user_saml_context("non-object") == ("ACTIVE", None)
     assert lookup.user_saml_context("missing") == ("ACTIVE", None)
     assert lookup.user_saml_context("unknown") is None
 
-    lookup.user_saml_context.cache_clear()
     connection.close()
 
 
 def test_application_user_prefers_combined_saml_context_lookup() -> None:
+    class CombinedContextLookup(_SamlLookup):
+        def __getattribute__(self, name: str):
+            if name in {"user_status", "user_profile"}:
+                raise AssertionError("legacy context capability must not be evaluated")
+            return super().__getattribute__(name)
+
     app_user = _application_user(app_status="ACTIVE")
-    lookup = _SamlLookup(
+    lookup = CombinedContextLookup(
         status="ACTIVE",
         source_profile={"login": "Alice.Login"},
         claim_mappings=(_claim_mapping(0),),
@@ -435,6 +449,33 @@ def test_application_user_prefers_combined_saml_context_lookup() -> None:
     app_user._lookup = lookup
 
     assert any(edge.kind == ek.SAML_ELIGIBLE_FOR for edge in app_user.edges)
+    assert lookup.user_saml_context_calls == 1
+    assert lookup.user_status_calls == 0
+    assert lookup.user_profile_calls == 0
+
+
+def test_application_user_does_not_fall_back_when_combined_context_is_missing() -> None:
+    class MissingCombinedContextLookup(_SamlLookup):
+        def user_saml_context(
+            self, user_id: str
+        ) -> tuple[str | None, dict | None] | None:
+            assert user_id == "00u_saml_user"
+            self.user_saml_context_calls += 1
+            return None
+
+    app_user = _application_user(app_status="ACTIVE")
+    lookup = MissingCombinedContextLookup(
+        status="ACTIVE",
+        source_profile={"login": "must-not-be-used"},
+        claim_mappings=(_claim_mapping(0),),
+    )
+    app_user._lookup = lookup
+
+    eligible = next(
+        edge for edge in app_user.edges if edge.kind == ek.SAML_ELIGIBLE_FOR
+    )
+    assert eligible.properties.match_values == []
+    assert eligible.properties.source_properties == []
     assert lookup.user_saml_context_calls == 1
     assert lookup.user_status_calls == 0
     assert lookup.user_profile_calls == 0
