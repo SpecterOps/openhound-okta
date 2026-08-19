@@ -163,7 +163,7 @@ def _route_signals(
         signals.add("route_template_hint")
 
     default_text = ""
-    if has_default:
+    if has_default and default is not None:
         default_text = str(default)
     if "explicit_route_input" in signals and (
         bool(description and _DEFAULT_ROUTE_HINT.search(description))

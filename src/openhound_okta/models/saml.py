@@ -244,9 +244,9 @@ def _explicit_saml_routes(application) -> _ExplicitRouteExtraction:
         )
 
     routes: list[SamlRouteEvidence] = []
-    route_keys: set[tuple[str, str]] = set()
+    route_keys: set[tuple[str, str, int | None, str | None, bool | None]] = set()
     for acs_url, acs_source, index, binding, is_default in acs_candidates:
-        route_key = (acs_url, sp_entity_id)
+        route_key = (acs_url, sp_entity_id, index, binding, is_default)
         if route_key in route_keys:
             continue
         route_keys.add(route_key)

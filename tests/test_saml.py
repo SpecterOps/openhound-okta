@@ -671,7 +671,7 @@ def test_claim_mapping_accepts_pre_v03_rows_without_claim_type():
     assert claim.claim_type == "name_id"
 
 
-def test_saml_acs_rows_dedup_repeated_acs_url_and_entity():
+def test_saml_acs_rows_dedup_exact_repeated_route():
     app = _application(
         settings={
             "app": {},
@@ -680,7 +680,11 @@ def test_saml_acs_rows_dedup_repeated_acs_url_and_entity():
                 "ssoAcsUrl": "https://sp.example.test/saml/consume",
                 "audience": "https://sp.example.test/saml",
                 "acsEndpoints": [
-                    {"url": "https://sp.example.test/saml/consume"},
+                    {
+                        "url": "https://sp.example.test/saml/consume",
+                        "index": 0,
+                        "isDefault": True,
+                    },
                     {
                         "url": "https://sp.example.test/saml/consume/alternate",
                         "index": 5,
@@ -1200,6 +1204,43 @@ def test_multiple_explicit_acs_endpoints_preserve_one_to_one_route_tuples():
     assert [row["acs_source_field"] for row in rows] == [
         "settings.signOn.acsEndpoints[0].url",
         "settings.signOn.acsEndpoints[1].url",
+    ]
+
+
+def test_explicit_route_dedup_preserves_distinct_endpoint_metadata():
+    acs_url = "https://sp.example.test/saml/acs"
+    post_binding = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
+    redirect_binding = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+    base_endpoint = {
+        "url": acs_url,
+        "index": 0,
+        "binding": post_binding,
+        "isDefault": True,
+    }
+    app = _application(
+        settings={
+            "app": {},
+            "signOn": {
+                "idpIssuer": "http://www.okta.com/exk123",
+                "audience": "https://sp.example.test/saml",
+                "acsEndpoints": [
+                    base_endpoint,
+                    {**base_endpoint, "index": 1},
+                    {**base_endpoint, "binding": redirect_binding},
+                    {**base_endpoint, "isDefault": False},
+                    base_endpoint,
+                ],
+            },
+        }
+    )
+
+    rows = saml_acs_rows(app)
+
+    assert [(row["index"], row["binding"], row["is_default"]) for row in rows] == [
+        (0, post_binding, True),
+        (1, post_binding, True),
+        (0, redirect_binding, True),
+        (0, post_binding, False),
     ]
 
 

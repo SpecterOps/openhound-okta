@@ -237,6 +237,38 @@ def test_analyzer_omits_sensitive_attributes_and_preserves_nonsecret_defaults():
     assert analysis["omitted_sensitive_attribute_count"] == 2
 
 
+def test_analyzer_does_not_treat_null_route_default_as_catalog_hint():
+    analysis = analyze_catalog_schema_snapshot(
+        _snapshot(
+            [
+                _application(
+                    "null_default_app",
+                    {
+                        "sso": {
+                            "properties": {
+                                "customAcsUrl": {
+                                    "title": "Custom ACS URL",
+                                    "type": "string",
+                                    "default": None,
+                                }
+                            }
+                        }
+                    },
+                )
+            ]
+        )
+    )
+
+    application = analysis["applications"][0]
+    attribute = application["attributes"][0]
+    assert attribute["has_default"] is True
+    assert attribute["default"] is None
+    assert attribute["route_signals"] == ["explicit_route_input"]
+    assert application["classification"]["research_disposition"] == (
+        "optional_explicit_route_review"
+    )
+
+
 def test_analyzer_records_missing_definitions_without_inventing_attributes():
     analysis = analyze_catalog_schema_snapshot(
         _snapshot([_application("missing_schema", None)])
