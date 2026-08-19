@@ -2,7 +2,8 @@ from dataclasses import fields, replace
 
 import pytest
 
-from openhound_okta.oin_routes import OinRouteResolution
+from openhound_okta.oin_routes import OinRouteResolution, SamlRouteEvidence
+from openhound_okta.oin_routes.contract import route_resolution
 from openhound_okta.oin_routes.declarative import (
     RouteProfile,
     RouteTemplate,
@@ -128,6 +129,49 @@ def test_declarative_profile_requires_route_source_provenance():
             evidence_references=("test:evidence",),
             evidence_reviewed_at="2026-08-13",
         )
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "https://example.test/{}/acs",
+        "https://example.test/{0}/acs",
+        "https://example.test/{tenant.path}/acs",
+        "https://example.test/{tenant[0]}/acs",
+    ],
+)
+def test_declarative_profile_rejects_non_identifier_placeholders(template: str):
+    profile = _multi_route_profile("test_app")
+
+    with pytest.raises(ValueError, match="ACS template has invalid placeholders"):
+        replace(
+            profile,
+            routes=(replace(profile.routes[0], acs=template),),
+        )
+
+
+def test_route_resolution_preserves_distinct_route_identity_fields():
+    base = SamlRouteEvidence(
+        acs_url="https://example.test/saml/acs",
+        sp_entity_id="https://example.test/saml",
+        index=0,
+        binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
+        is_default=True,
+        target_product_family="test_product",
+        route_source="test",
+        extraction_mode="test",
+        acs_source_field="test.acs",
+        sp_entity_source_field="test.entity",
+    )
+    routes = (
+        base,
+        replace(base, index=1),
+        replace(base, binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"),
+        replace(base, is_default=False),
+        base,
+    )
+
+    assert route_resolution(routes=routes).routes == routes[:-1]
 
 
 def test_declarative_profile_supports_documented_static_route_values():
@@ -351,6 +395,7 @@ def test_bundled_resolver_app_fields_are_graph_expressed_or_documented():
     assert all(
         reason.strip() for reason in COLLECTION_TIME_ONLY_RESOLVER_APP_FIELDS.values()
     )
+    assert SAML_ROUTE_APP_SETTING_PROPERTIES <= graph_property_names
     for app_field in resolver_fields:
         if app_field in COLLECTION_TIME_ONLY_RESOLVER_APP_FIELDS:
             continue

@@ -22,7 +22,6 @@ from openhound_okta.models.hybrid_auth import (
 from openhound_okta.oin_routes.settings_contract import (
     SAML_ROUTE_APP_SETTING_PROPERTIES,
     canonical_app_setting_property_name,
-    snake_case_app_setting_property_name,
 )
 
 
@@ -200,11 +199,6 @@ APP_SETTING_PROPERTY_NAMES = {
     "windows_transport_enabled",
     "ws_fed_configure_type",
 } | SAML_ROUTE_APP_SETTING_PROPERTIES
-
-
-def _snake_case_property_name(name: str) -> str:
-    return snake_case_app_setting_property_name(name)
-
 
 def _is_primitive_app_setting(value) -> bool:
     return isinstance(value, (str, bool, int))
@@ -531,9 +525,13 @@ class Application(BaseAsset):
         else:
             return {}
 
+        is_saml = self.sign_on_mode in {"SAML_2_0", "SAML_1_1"}
+        present_route_fields: set[str] = set()
         properties: dict[str, object] = {}
         for key, value in app_settings.items():
             property_name = canonical_app_setting_property_name(key)
+            if is_saml and property_name in SAML_ROUTE_APP_SETTING_PROPERTIES:
+                present_route_fields.add(property_name)
             if property_name not in allowed_property_names:
                 continue
             if _is_primitive_app_setting(value) or _is_homogeneous_primitive_list(
@@ -541,17 +539,8 @@ class Application(BaseAsset):
             ):
                 properties[property_name] = value
 
-        if self.sign_on_mode in {"SAML_2_0", "SAML_1_1"}:
-            present_route_fields = sorted(
-                {
-                    canonical_app_setting_property_name(key)
-                    for key in app_settings
-                    if canonical_app_setting_property_name(key)
-                    in SAML_ROUTE_APP_SETTING_PROPERTIES
-                }
-            )
-            if present_route_fields:
-                properties["saml_route_setting_fields"] = present_route_fields
+        if present_route_fields:
+            properties["saml_route_setting_fields"] = sorted(present_route_fields)
 
         return properties
 

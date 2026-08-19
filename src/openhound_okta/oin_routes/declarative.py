@@ -77,11 +77,22 @@ class RouteProfile:
                     route.sp_entity_static_source,
                 ),
             ):
-                placeholders = {
+                parsed_placeholders = [
                     placeholder
                     for _, placeholder, _, _ in Formatter().parse(template)
-                    if placeholder
-                }
+                    if placeholder is not None
+                ]
+                invalid_placeholders = [
+                    placeholder
+                    for placeholder in parsed_placeholders
+                    if not placeholder or not placeholder.isidentifier()
+                ]
+                if invalid_placeholders:
+                    raise ValueError(
+                        f"OIN profile {self.profile_id} {field_name} template has "
+                        f"invalid placeholders: {', '.join(invalid_placeholders)}"
+                    )
+                placeholders = set(parsed_placeholders)
                 source_variable_set = set(source_variables)
                 unknown = (placeholders | source_variable_set) - variable_names
                 if unknown:

@@ -318,7 +318,7 @@ def _saml_routes(
             )
         if partial_conflicts:
             return [], partial_conflicts
-        return oin_routes, []
+        return oin_routes, list(oin_resolution.diagnostics)
 
     if oin_resolution.diagnostics:
         return [], list(oin_resolution.diagnostics)

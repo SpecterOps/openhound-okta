@@ -3,8 +3,8 @@
 This runbook is the bounded handoff contract for an agent gathering Okta OIN
 SAML route evidence. It assumes the operator has authorized a specific lab
 tenant and active temporary integrations. It does not authorize changes to
-tenant policy, downstream services, GlobalTech range state, the route registry,
-or public documentation.
+tenant policy, downstream services, persistent simulated-environment state, the
+route registry, or public documentation.
 
 The campaign tooling is deliberately sequential. Every generated command
 creates at most one catalog app and one purpose-built Okta-only user, captures
@@ -168,7 +168,7 @@ stop only when the evidence supports a campaign-wide condition.
 
 `active-trace` records a stable `failure_category` and `failure_scope` without
 persisting the raw error text. A case-scoped failure with verified cleanup is a
-completed attempt: the command returns its state normally and Terra should
+completed attempt: the command returns its state normally and the agent should
 continue. Per-app HTTP 400, 403, and 404 responses are case-scoped because OIN
 integrations commonly reject missing catalog settings with those statuses; a
 read-only preflight has already established tenant access. HTTP 401, rate
@@ -188,7 +188,7 @@ exception does not identify which host failed. Playwright launch failures,
 browser/context crashes, and unrecognized browser exceptions remain
 campaign-scoped because they may invalidate every later trace.
 
-Terra may investigate case-scoped catalog failures without operator approval:
+The agent may investigate case-scoped catalog failures without operator approval:
 capture that app's schema with the read-only `schemas` command under the
 external state root, inspect its normalized analysis, consult first-party
 documentation, and record `explicit_only`, `parameterized_candidate`,
@@ -210,7 +210,7 @@ clean case-scoped outcome.
 
 This campaign is also authorized for bounded harness maintenance. When cleanup
 is verified and evidence shows a defect in `tools/oin_lab` rather than a tenant
-hazard, Terra may inspect and minimally update the harness, its focused tests,
+hazard, the agent may inspect and minimally update the harness, its focused tests,
 and these two OIN lab runbooks; run the focused tests and static checks; then
 continue with the next unconsumed command emitted by `sweep-status`. This does
 not authorize changes to the immutable sweep manifest, route resolvers,

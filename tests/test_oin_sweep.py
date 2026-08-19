@@ -69,6 +69,7 @@ def _record_clean_capture(tmp_path: Path, case: dict) -> None:
             "cleanup_verified": True,
         },
     }
+    # Saving refreshes updated_at, which is the heartbeat for case_running.
     run_store.save(state)
     run_store.write_capture(
         "active-review",

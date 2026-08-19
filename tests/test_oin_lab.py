@@ -5,16 +5,20 @@ from typing import Any
 
 import pytest
 
+from tools.oin_lab import lab as oin_lab
 from tools.oin_lab.lab import (
+    CaseScopedLabOutcome,
     CatalogSchemaStore,
     LabSafetyError,
     MATRIX_PATH,
+    MatrixError,
     OktaApiError,
     OktaLabClient,
     ProbeCase,
     RunStore,
     REPOSITORY_ROOT,
     _active_trace_failure_classification,
+    _synthetic_catalog_value,
     build_application_payload,
     capture_catalog_schemas,
     cleanup_run,
@@ -310,6 +314,64 @@ def test_tenant_url_must_be_an_exact_https_origin(tenant_url: str):
 def test_run_store_refuses_state_inside_the_repository():
     with pytest.raises(LabSafetyError, match="outside the repository workspace"):
         RunStore(REPOSITORY_ROOT / ".tmp" / "oin-lab", "https://lab.okta.test", "run1")
+
+
+def test_default_state_root_is_allowed_when_workspace_root_is_home(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    home = Path.home().resolve()
+    repository = home / "openhound-okta"
+    monkeypatch.setattr(oin_lab, "REPOSITORY_WORKSPACE_ROOT", home)
+    monkeypatch.setattr(oin_lab, "REPOSITORY_ROOT", repository)
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    default_root = oin_lab.default_state_root()
+
+    assert oin_lab._external_state_root(default_root) == default_root.resolve()
+    with pytest.raises(LabSafetyError, match="outside the repository workspace"):
+        oin_lab._external_state_root(repository / ".tmp" / "oin-lab")
+    with pytest.raises(LabSafetyError, match="outside the repository workspace"):
+        oin_lab._external_state_root(home / "unrelated-state")
+
+
+def test_load_cases_enforces_active_option_foreign_keys(tmp_path: Path):
+    matrix = tmp_path / "matrix.sql"
+    matrix.write_text(
+        MATRIX_PATH.read_text(encoding="utf-8")
+        + "\nINSERT INTO oin_probe_active_options (case_id) "
+        + "VALUES ('missing-case');\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(MatrixError, match="FOREIGN KEY constraint failed"):
+        load_cases(matrix)
+
+
+@pytest.mark.parametrize(
+    ("attribute", "expected"),
+    [
+        ({"enum": [None, "first", "second"]}, ("first", "first_catalog_enum")),
+        ({"type": "boolean"}, (False, "boolean_false")),
+        ({"type": "integer"}, (1, "integer_one")),
+        ({"type": "number"}, (1.0, "number_one")),
+        (
+            {"type": "string", "format": "uri", "name": "siteUrl"},
+            (
+                "https://oin-lab-34e9aedefffd.invalid/siteurl",
+                "reserved_invalid_uri",
+            ),
+        ),
+        (
+            {"type": "string", "name": "adminEmail"},
+            ("oin-lab-34e9aedefffd@example.invalid", "reserved_invalid_email"),
+        ),
+        ({"type": "object", "name": "unsupported"}, None),
+    ],
+)
+def test_synthetic_catalog_value_strategies(
+    attribute: dict[str, Any], expected: tuple[Any, str] | None
+):
+    assert _synthetic_catalog_value(attribute, "run1") == expected
 
 
 def test_client_uses_activate_false_and_does_not_put_token_in_url_or_body():
@@ -778,6 +840,41 @@ def test_active_create_prepares_missing_nonroute_catalog_settings(tmp_path: Path
     assert payload["settings"]["app"]["subdomain"] not in str(preparation)
 
 
+def test_active_create_stops_before_create_for_required_sensitive_setting(
+    tmp_path: Path,
+):
+    session = StubSession(
+        [
+            StubResponse(200, []),
+            StubResponse(
+                200,
+                _catalog_application_schema(
+                    "slack",
+                    required=["apiToken"],
+                    properties={"apiToken": {"type": "string"}},
+                ),
+            ),
+        ]
+    )
+    store = RunStore(tmp_path, "https://lab.okta.test", "run1")
+
+    with pytest.raises(CaseScopedLabOutcome) as raised:
+        create_run(
+            _client(session),
+            store,
+            [_case()],
+            matrix_digest=matrix_digest(MATRIX_PATH),
+            prepare_catalog_settings=True,
+        )
+
+    assert raised.value.failure_category == "unsupported_required_catalog_input"
+    assert [request["method"] for request in session.requests] == ["GET", "GET"]
+    preparation = store.load()["records"]["slack-workspace"][
+        "catalog_schema_preparation"
+    ]
+    assert preparation["unresolved_required_fields"] == ["apiToken"]
+
+
 def test_active_trace_skips_required_explicit_route_without_stopping_campaign(
     tmp_path: Path,
 ):
@@ -1025,6 +1122,47 @@ def test_active_trace_outer_boundary_cleans_app_after_pretrace_failure(
     assert record["active_trace_attempt"]["outcome"] == "failed_clean"
     assert record["active_trace_attempt"]["cleanup_verified"] is True
     assert record["active_trace_attempt"]["failure_scope"] == "campaign"
+
+
+def test_active_trace_refuses_reused_state_without_cleaning_sibling_case(
+    tmp_path: Path,
+):
+    case = _case()
+    store = RunStore(tmp_path, "https://lab.okta.test", "campaign1-001")
+    state = store.load_or_create(matrix_digest(MATRIX_PATH))
+    state["records"]["asana-default"] = {
+        "case_id": "asana-default",
+        "app_key": "asana",
+        "label": "oin-lab-campaign1-001-asana-default",
+        "app_id": "0oa-sibling",
+    }
+    store.save(state)
+    session = StubSession([])
+
+    with pytest.raises(LabSafetyError, match="another probe case"):
+        execute_active_trace(
+            _client(session),
+            store,
+            case,
+            matrix_sha256=matrix_digest(MATRIX_PATH),
+        )
+
+    assert session.requests == []
+    assert "deleted_at" not in store.load()["records"]["asana-default"]
+
+
+def test_run_store_reports_corrupt_json_and_missing_matrix_digest(tmp_path: Path):
+    store = RunStore(tmp_path, "https://lab.okta.test", "run1")
+    state = store.load_or_create(matrix_digest(MATRIX_PATH))
+    state.pop("matrix_sha256")
+    store.save(state)
+
+    with pytest.raises(LabSafetyError, match="invalid or mismatched run state"):
+        store.load_or_create(matrix_digest(MATRIX_PATH))
+
+    store.state_path.write_text("{not-json", encoding="utf-8")
+    with pytest.raises(LabSafetyError, match="unable to read run state"):
+        store.load()
 
 
 def test_active_trace_returns_clean_case_specific_no_capture(

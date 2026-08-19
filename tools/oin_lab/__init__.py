@@ -21,9 +21,9 @@ from .schema_analyzer import SchemaAnalysisError, analyze_catalog_schema_snapsho
 
 
 __all__ = [
-    "MatrixError",
     "CatalogSchemaCaptureResult",
     "CatalogSchemaStore",
+    "MatrixError",
     "OktaLabClient",
     "ProbeCase",
     "RunStore",

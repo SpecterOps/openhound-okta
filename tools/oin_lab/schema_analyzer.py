@@ -167,8 +167,7 @@ def _route_signals(
         default_text = str(default)
     if "explicit_route_input" in signals and (
         bool(description and _DEFAULT_ROUTE_HINT.search(description))
-        or has_default
-        and bool(default_text.strip())
+        or bool(default_text.strip())
     ):
         signals.add("catalog_default_hint")
 
@@ -264,6 +263,7 @@ def _analyze_application(application: Mapping[str, Any]) -> dict[str, Any]:
     diagnostics: list[str] = []
     attributes: list[dict[str, Any]] = []
     sensitive_count = 0
+    required_sensitive_attribute_names: set[str] = set()
     schema = _application_schema(application)
     definitions = schema.get("definitions") if schema is not None else None
 
@@ -297,6 +297,11 @@ def _analyze_application(application: Mapping[str, Any]) -> dict[str, Any]:
                 continue
             if _SENSITIVE_ATTRIBUTE.search(attribute_name):
                 sensitive_count += 1
+                if (
+                    attribute_schema.get("required") is True
+                    or attribute_name in section_required
+                ):
+                    required_sensitive_attribute_names.add(attribute_name)
                 continue
             attributes.append(
                 _normalize_attribute(
@@ -322,6 +327,9 @@ def _analyze_application(application: Mapping[str, Any]) -> dict[str, Any]:
         "sign_on_modes": sorted(sign_on_modes),
         "attribute_count": len(attributes),
         "omitted_sensitive_attribute_count": sensitive_count,
+        "omitted_required_sensitive_attribute_names": sorted(
+            required_sensitive_attribute_names
+        ),
         "attributes": attributes,
         "diagnostics": sorted(diagnostics),
         "classification": {

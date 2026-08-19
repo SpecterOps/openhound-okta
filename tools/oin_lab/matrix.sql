@@ -1,7 +1,8 @@
 -- Ephemeral OIN catalog research matrix.
 --
 -- This is reproducible experiment input for disposable lab applications. It is
--- not GlobalTech/KNG desired state and must never be consumed by range deployment.
+-- not persistent simulated-environment desired state and must never be consumed by
+-- environment deployment.
 
 CREATE TABLE matrix_metadata (
     key TEXT PRIMARY KEY,

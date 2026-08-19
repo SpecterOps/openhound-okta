@@ -4,10 +4,11 @@ The OIN lab research harness creates short-lived, inactive Okta Integration
 Network application instances to observe the source fields that Okta returns for
 catalog integrations. It is development tooling owned by `openhound-okta`.
 
-It is deliberately not part of the GlobalTech/KNG range model. The matrix in
-`tools/oin_lab/matrix.sql` is SQL only to make experiments deterministic and
-reviewable. It is not consumed by the GlobalTech DuckDB build, generated range
-contracts, provisioners, deployment profiles, or range history.
+It is deliberately not part of a persistent simulated-environment model. The
+matrix in `tools/oin_lab/matrix.sql` is SQL only to make experiments
+deterministic and reviewable. It is not consumed by environment inventory
+builds, generated deployment contracts, provisioners, deployment profiles, or
+environment history.
 
 ## Safety contract
 
@@ -71,7 +72,7 @@ name. The current popularity dataset contains:
   [Businesses at Work 2025 infographic](https://www.okta.com/sites/default/files/2025-03/Businesses-at-Work-Infographic.pdf)
   plus the growth apps named on the public report page; and
 - the overall top 15 and fastest-growing 10 from the public
-  [Okta Japan 2026 press release](https://www.okta.com/ja-jp/newsroom/press-releases/okta-businesses-at-work2026/)
+  [Okta Japan 2026 press release mirror](https://prtimes.jp/main/html/rd/p/000000176.000063011.html)
   and its published chart assets. The full 2025 and 2026 reports are form-gated; the
   harness does not submit forms or attempt to bypass those gates.
 
@@ -117,7 +118,7 @@ The default state root is
 `~/.local/state/openhound-okta/oin-lab` when `XDG_STATE_HOME` is unset. Use
 `--state-root` to choose another external location. The harness refuses any
 state root inside the repository workspace, including `openhound-okta` and
-GlobalTech.
+adjacent repository checkouts.
 
 To refresh raw and review captures without creating anything:
 

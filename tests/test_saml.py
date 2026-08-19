@@ -37,6 +37,11 @@ from openhound_okta.models.saml import (
     saml_trusted_issuer_row,
 )
 from openhound_okta.oin_routes import registry as oin_route_registry
+from openhound_okta.oin_routes.contract import (
+    CallableRouteProvider,
+    SamlRouteEvidence,
+    route_resolution,
+)
 from openhound_okta.oin_routes.declarative import (
     RouteProfile,
     RouteTemplate,
@@ -1257,6 +1262,49 @@ def test_oin_profile_preserves_multiple_routes_through_normalization(monkeypatch
         "okta:saml:acs:0oa_saml:1",
     ]
     assert [row["index"] for row in rows] == [0, 1]
+
+
+def test_oin_routes_preserve_resolver_diagnostics_through_normalization(monkeypatch):
+    route = SamlRouteEvidence(
+        acs_url="https://example.test/saml/acs",
+        sp_entity_id="https://example.test/saml",
+        index=0,
+        binding=None,
+        is_default=True,
+        target_product_family="test_product",
+        route_source="test_route",
+        extraction_mode="test",
+        acs_source_field="test.acs",
+        sp_entity_source_field="test.entity",
+    )
+    provider = CallableRouteProvider(
+        profile_id="test_diagnostic_route",
+        app_keys=("test_diagnostic_route",),
+        app_fields=(),
+        resolver=lambda _: route_resolution(
+            routes=(route,), diagnostics=("resolver_evidence",)
+        ),
+        evidence_references=("test:evidence",),
+        evidence_reviewed_at="2026-08-19",
+    )
+    monkeypatch.setitem(
+        oin_route_registry.OIN_ROUTE_REGISTRY,
+        "test_diagnostic_route",
+        provider,
+    )
+    app = _application(
+        name="test_diagnostic_route",
+        settings={
+            "app": {},
+            "signOn": {"idpIssuer": "http://www.okta.com/exk_diagnostic"},
+        },
+    )
+
+    provider_row = saml_federation_provider_row(app)
+
+    assert provider_row is not None
+    assert provider_row["acs_ids"] == ["okta:saml:acs:0oa_saml:0"]
+    assert provider_row["route_diagnostics"] == ["resolver_evidence"]
 
 
 def test_okta_metadata_is_issuer_evidence_not_downstream_route_evidence():

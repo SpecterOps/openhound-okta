@@ -185,6 +185,7 @@ def test_analyzer_omits_sensitive_attributes_and_preserves_nonsecret_defaults():
                     "safe_app",
                     {
                         "general": {
+                            "required": ["apiToken"],
                             "properties": {
                                 "apiToken": {
                                     "description": "never-copy-this-secret-guidance",
@@ -193,6 +194,7 @@ def test_analyzer_omits_sensitive_attributes_and_preserves_nonsecret_defaults():
                                 "accessKey": {
                                     "description": "also-sensitive",
                                     "default": "access-key-value",
+                                    "required": True,
                                 },
                                 "environment": {
                                     "default": "production",
@@ -209,6 +211,10 @@ def test_analyzer_omits_sensitive_attributes_and_preserves_nonsecret_defaults():
 
     application = analysis["applications"][0]
     assert application["omitted_sensitive_attribute_count"] == 2
+    assert application["omitted_required_sensitive_attribute_names"] == [
+        "accessKey",
+        "apiToken",
+    ]
     assert application["attributes"] == [
         {
             "section": "general",

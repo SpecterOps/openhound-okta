@@ -2,7 +2,7 @@
 
 The checked-in SQL matrix is reproducible research input. Live application state and
 raw captures are deliberately stored outside the repository and are never part of the
-GlobalTech range model.
+persistent model for a simulated environment.
 """
 
 from __future__ import annotations
@@ -42,6 +42,7 @@ MAX_SCHEMA_MAX_ATTEMPTS = 10
 DEFAULT_SCHEMA_PROGRESS_EVERY = 100
 _SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 _APP_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SENSITIVE_KEY = re.compile(
     r"(?:password|secret|token|certificate|private.?key|encrypted)", re.IGNORECASE
 )
@@ -145,7 +146,7 @@ def normalize_tenant_url(value: str) -> str:
         raise LabSafetyError("tenant URL must be an exact HTTPS origin")
     try:
         parsed = urlsplit(value)
-        parsed.port
+        _ = parsed.port
     except ValueError as error:
         raise LabSafetyError("tenant URL must be a valid HTTPS origin") from error
     if (
@@ -180,6 +181,7 @@ def load_cases(path: Path = MATRIX_PATH) -> tuple[ProbeCase, ...]:
     connection = sqlite3.connect(":memory:")
     connection.row_factory = sqlite3.Row
     try:
+        connection.execute("PRAGMA foreign_keys = ON")
         connection.executescript(path.read_text(encoding="utf-8"))
         metadata = connection.execute(
             "SELECT value FROM matrix_metadata WHERE key = 'schema_version'"
@@ -403,6 +405,18 @@ def _prepare_catalog_case(
     }
     record["catalog_schema_preparation"] = preparation
     store.save(state)
+    required_sensitive_fields = sorted(
+        name
+        for name in analysis["omitted_required_sensitive_attribute_names"]
+        if settings_app.get(name) is None or settings_app.get(name) == ""
+    )
+    if required_sensitive_fields:
+        preparation["unresolved_required_fields"] = required_sensitive_fields
+        store.save(state)
+        raise CaseScopedLabOutcome(
+            "unsupported_required_catalog_input",
+            "catalog integration has unsupported required input",
+        )
     if explicit_route_fields:
         raise CaseScopedLabOutcome(
             "required_explicit_route_input",
@@ -448,10 +462,21 @@ def default_state_root() -> Path:
 
 def _external_state_root(path: Path) -> Path:
     resolved = path.expanduser().resolve()
+    workspace_root = REPOSITORY_WORKSPACE_ROOT.resolve()
+    repository_root = REPOSITORY_ROOT.resolve()
+    default_root = default_state_root().expanduser().resolve()
+    is_default_state_tree = resolved == default_root or default_root in resolved.parents
+    is_repository_tree = (
+        resolved == repository_root or repository_root in resolved.parents
+    )
+    allow_home_default = (
+        workspace_root == Path.home().resolve()
+        and is_default_state_tree
+        and not is_repository_tree
+    )
     if (
-        resolved == REPOSITORY_WORKSPACE_ROOT
-        or REPOSITORY_WORKSPACE_ROOT in resolved.parents
-    ):
+        resolved == workspace_root or workspace_root in resolved.parents
+    ) and not allow_home_default:
         raise LabSafetyError("state root must be outside the repository workspace")
     return resolved
 
@@ -492,11 +517,12 @@ class RunStore:
         *,
         max_age_hours: int = DEFAULT_MAX_AGE_HOURS,
     ) -> dict[str, Any]:
+        if not isinstance(matrix_digest, str) or not _SHA256.fullmatch(matrix_digest):
+            raise LabSafetyError("matrix digest must be a lowercase SHA-256 value")
         if not 1 <= max_age_hours <= MAX_ALLOWED_AGE_HOURS:
             raise LabSafetyError(f"max app age must be 1-{MAX_ALLOWED_AGE_HOURS} hours")
         if self.state_path.exists():
-            existing_state = json.loads(self.state_path.read_text(encoding="utf-8"))
-            self._validate_state(existing_state)
+            existing_state = self.load()
             if existing_state["matrix_sha256"] != matrix_digest:
                 raise LabSafetyError(
                     "probe matrix changed after this run began; use a new run ID"
@@ -519,15 +545,23 @@ class RunStore:
     def load(self) -> dict[str, Any]:
         if not self.state_path.exists():
             raise LabSafetyError(f"run state does not exist: {self.state_path}")
-        state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        try:
+            state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise LabSafetyError(
+                f"unable to read run state {self.state_path}: {error}"
+            ) from error
         self._validate_state(state)
         return state
 
-    def _validate_state(self, state: Mapping[str, Any]) -> None:
+    def _validate_state(self, state: Any) -> None:
         if (
-            state.get("schema_version") != STATE_SCHEMA_VERSION
+            not isinstance(state, Mapping)
+            or state.get("schema_version") != STATE_SCHEMA_VERSION
             or state.get("run_id") != self.run_id
             or state.get("tenant_url") != self.tenant_url
+            or not isinstance(state.get("matrix_sha256"), str)
+            or not _SHA256.fullmatch(state["matrix_sha256"])
             or not isinstance(state.get("expires_at"), str)
             or not isinstance(state.get("records"), dict)
         ):
@@ -1691,7 +1725,7 @@ def cleanup_run(
     apply: bool,
 ) -> dict[str, Any]:
     state = store.load()
-    for case_id, record in state["records"].items():
+    for _case_id, record in state["records"].items():
         if record.get("deleted_at"):
             if _reconcile_delayed_cleanup(record):
                 store.save(state)
@@ -1857,6 +1891,13 @@ def execute_active_trace(
 ) -> dict[str, Any]:
     """Create, trace, and clean one app under an outer cleanup boundary."""
     from .active_trace import run_active_trace
+
+    if store.state_path.exists():
+        existing_state = store.load()
+        if set(existing_state["records"]) - {case.case_id}:
+            raise LabSafetyError(
+                "active trace run cannot reuse state containing another probe case"
+            )
 
     started_at = _now()
     try:

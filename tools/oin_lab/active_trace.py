@@ -99,6 +99,19 @@ def _playwright_navigation_outcome(
     raise error
 
 
+def _redact_trace_diagnostic(value: Any, login: str) -> Any:
+    if isinstance(value, str):
+        return value.replace(login, "{ephemeralLogin}")
+    if isinstance(value, list):
+        return [_redact_trace_diagnostic(item, login) for item in value]
+    if isinstance(value, Mapping):
+        return {
+            key: _redact_trace_diagnostic(item, login)
+            for key, item in value.items()
+        }
+    return value
+
+
 def active_trace_preflight() -> dict[str, Any]:
     """Verify the optional browser runtime locally without contacting Okta."""
     try:
@@ -670,39 +683,46 @@ def capture_with_playwright(trace_input: BrowserTraceInput) -> Mapping[str, Any]
                     page.wait_for_timeout(1_000)
                 except PlaywrightError as error:
                     return _playwright_navigation_outcome(error, captured)
-            input_fields = page.locator("input").evaluate_all(
-                """elements => elements.map(element => ({
-                    name: element.getAttribute('name'),
-                    type: element.getAttribute('type'),
-                    autocomplete: element.getAttribute('autocomplete')
-                }))"""
+            input_fields = _redact_trace_diagnostic(
+                page.locator("input").evaluate_all(
+                    """elements => elements.map(element => ({
+                        name: element.getAttribute('name'),
+                        type: element.getAttribute('type'),
+                        autocomplete: element.getAttribute('autocomplete')
+                    }))"""
+                ),
+                trace_input.login,
             )
             current = urlsplit(page.url)
-            current_url = urlunsplit(
-                (current.scheme, current.netloc, current.path, "", "")
+            current_url = _redact_trace_diagnostic(
+                urlunsplit((current.scheme, current.netloc, current.path, "", "")),
+                trace_input.login,
             )
             alerts = [
-                text.replace(trace_input.login, "{ephemeralLogin}")
+                _redact_trace_diagnostic(text, trace_input.login)
                 for text in page.locator(
                     '[role="alert"], .o-form-error-container, .okta-form-infobox-error'
                 ).all_inner_texts()
                 if text.strip()
             ]
             visible_text = " ".join(page.locator("body").inner_text().split())
-            visible_text = visible_text.replace(trace_input.login, "{ephemeralLogin}")[
-                :1_000
-            ]
-            submit_controls = page.locator(
-                'button, input[type="submit"], input[type="button"], '
-                'a:has-text("Select")'
-            ).evaluate_all(
-                """elements => elements.map(element => ({
-                    tag: element.tagName,
-                    text: (element.innerText || '').trim(),
-                    value: element.getAttribute('value'),
-                    classes: element.getAttribute('class'),
-                    dataSe: element.getAttribute('data-se')
-                }))"""
+            visible_text = _redact_trace_diagnostic(
+                visible_text, trace_input.login
+            )[:1_000]
+            submit_controls = _redact_trace_diagnostic(
+                page.locator(
+                    'button, input[type="submit"], input[type="button"], '
+                    'a:has-text("Select")'
+                ).evaluate_all(
+                    """elements => elements.map(element => ({
+                        tag: element.tagName,
+                        text: (element.innerText || '').trim(),
+                        value: element.getAttribute('value'),
+                        classes: element.getAttribute('class'),
+                        dataSe: element.getAttribute('data-se')
+                    }))"""
+                ),
+                trace_input.login,
             )
             raise TraceNoCaptureError(
                 "outbound_saml_response_missing",
@@ -889,7 +909,12 @@ def run_active_trace(
             except OktaNotFound:
                 existing_user = None
                 record["active_trace"]["user_absent_at"] = _now()
-                store.save(state)
+                try:
+                    store.save(state)
+                except Exception as error:  # cleanup must continue to the app
+                    cleanup_errors.append(
+                        f"user absence state save: {type(error).__name__}"
+                    )
             except Exception as error:  # cleanup must continue to the app
                 cleanup_errors.append(f"user lookup: {type(error).__name__}")
                 existing_user = None

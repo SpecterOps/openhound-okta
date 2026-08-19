@@ -2,9 +2,9 @@ import duckdb
 
 from openhound_okta.lookup import OktaLookup
 from openhound_okta.models import Application
-from openhound_okta.models.application import _snake_case_property_name
 from openhound_okta.oin_routes.settings_contract import (
     canonical_app_setting_property_name,
+    snake_case_app_setting_property_name,
 )
 
 
@@ -271,11 +271,13 @@ def test_application_node_emits_oauth_scopes_and_ad_domain_sid_from_lookup():
 
 
 def test_application_property_name_conversion_handles_okta_acronyms():
-    assert _snake_case_property_name("githubOrg") == "github_org"
-    assert _snake_case_property_name("filterGroupsByOU") == "filter_groups_by_ou"
-    assert _snake_case_property_name("loginURL") == "login_url"
-    assert _snake_case_property_name("redirectURI") == "redirect_uri"
-    assert _snake_case_property_name("accountID") == "account_id"
+    assert snake_case_app_setting_property_name("githubOrg") == "github_org"
+    assert snake_case_app_setting_property_name("filterGroupsByOU") == (
+        "filter_groups_by_ou"
+    )
+    assert snake_case_app_setting_property_name("loginURL") == "login_url"
+    assert snake_case_app_setting_property_name("redirectURI") == "redirect_uri"
+    assert snake_case_app_setting_property_name("accountID") == "account_id"
 
 
 def test_application_property_aliases_normalize_equivalent_oin_names():

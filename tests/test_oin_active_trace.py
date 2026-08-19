@@ -14,6 +14,7 @@ from tools.oin_lab.active_trace import (
     TraceNoCaptureError,
     _application_links,
     _playwright_navigation_outcome,
+    _redact_trace_diagnostic,
     _select_application_link,
     _totp_code,
     ephemeral_user_login,
@@ -553,6 +554,53 @@ def test_playwright_error_after_capture_returns_the_capture():
     assert _playwright_navigation_outcome(
         RuntimeError("net::ERR_ABORTED"), capture
     ) == (capture)
+
+
+def test_trace_diagnostics_redact_ephemeral_login_from_nested_fields():
+    login = "oin-lab-run1-user@lab.okta.test"
+    diagnostic = {
+        "current_url": f"https://lab.okta.test/{login}",
+        "input_fields": [{"name": login, "autocomplete": "username"}],
+        "submit_controls": [{"text": f"Continue {login}", "value": login}],
+    }
+
+    redacted = _redact_trace_diagnostic(diagnostic, login)
+    serialized = json.dumps(redacted)
+
+    assert login not in serialized
+    assert serialized.count("{ephemeralLogin}") == 4
+
+
+def test_user_absence_state_save_failure_does_not_interrupt_app_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    store = RunStore(tmp_path, "https://lab.okta.test", "run1")
+    _state(store)
+    client = FakeActiveClient()
+    case = next(case for case in load_cases() if case.case_id == "slack-workspace")
+    original_save = store.save
+    save_failed = False
+
+    def fail_user_absence_save(state: dict[str, Any]) -> None:
+        nonlocal save_failed
+        trace = state["records"][case.case_id].get("active_trace", {})
+        if trace.get("user_absent_at") and not save_failed:
+            save_failed = True
+            raise OSError("synthetic state save failure")
+        original_save(state)
+
+    def fail_user_creation(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("synthetic user creation failure")
+
+    monkeypatch.setattr(store, "save", fail_user_absence_save)
+    monkeypatch.setattr(client, "create_user", fail_user_creation)
+
+    with pytest.raises(LabSafetyError, match="user absence state save") as raised:
+        run_active_trace(client, store, case)  # type: ignore[arg-type]
+
+    assert isinstance(raised.value.__cause__, RuntimeError)
+    assert client.application is None
 
 
 def test_active_trace_rejects_non_saml_browser_navigation_and_cleans_up(

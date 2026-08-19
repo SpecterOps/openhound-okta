@@ -193,7 +193,9 @@ def _review_summary(path: Path) -> dict[str, Any]:
     try:
         review = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        raise LabSafetyError(f"unable to read sanitized trace review {path}: {error}")
+        raise LabSafetyError(
+            f"unable to read sanitized trace review {path}: {error}"
+        ) from error
     saml = review.get("saml") if isinstance(review, Mapping) else None
     if (
         not isinstance(review, Mapping)

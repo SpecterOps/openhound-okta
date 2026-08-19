@@ -65,9 +65,15 @@ def route_resolution(
 ) -> OinRouteResolution:
     """Create a stable resolution while deduplicating identical route tuples."""
     unique_routes: list[SamlRouteEvidence] = []
-    route_keys: set[tuple[str, str]] = set()
+    route_keys: set[tuple[str, str, int | None, str | None, bool | None]] = set()
     for route in routes:
-        key = (route.acs_url, route.sp_entity_id)
+        key = (
+            route.acs_url,
+            route.sp_entity_id,
+            route.index,
+            route.binding,
+            route.is_default,
+        )
         if key not in route_keys:
             route_keys.add(key)
             unique_routes.append(route)

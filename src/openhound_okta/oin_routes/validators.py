@@ -62,7 +62,7 @@ def https_origin(value: Any) -> str | None:
         return None
     try:
         parsed = urlsplit(value)
-        parsed.port
+        _ = parsed.port
     except ValueError:
         return None
     if (
@@ -97,7 +97,7 @@ def https_url(value: Any) -> str | None:
         return None
     try:
         parsed = urlsplit(value)
-        parsed.port
+        _ = parsed.port
     except ValueError:
         return None
     if (

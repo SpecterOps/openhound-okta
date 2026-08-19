@@ -81,11 +81,12 @@ display-name matches. Brand names with multiple product integrations remain
 one-to-many instead of being collapsed to a guessed catalog key.
 
 An isolated, guarded lab harness is now available in `tools/oin_lab`. Its SQL
-matrix is reproducible experiment input owned by `openhound-okta`; it is not KNG
-range state and is never consumed by GlobalTech generation or deployment. The
-harness creates inactive temporary catalog apps, records native IDs externally,
-captures raw and sanitized review evidence, and deletes only exact recorded
-inactive matches. See [Ephemeral OIN lab research](development/oin-lab-research.md).
+matrix is reproducible experiment input owned by `openhound-okta`; it is not
+persistent simulated-environment state and is never consumed by environment
+provisioning or deployment. The harness creates inactive temporary catalog apps,
+records native IDs externally, captures raw and sanitized review evidence, and
+deletes only exact recorded inactive matches. See
+[Ephemeral OIN lab research](development/oin-lab-research.md).
 
 The bounded result is therefore: there is no reviewed universal public route
 definition source. Coverage must be added through explicit deployed fields or
