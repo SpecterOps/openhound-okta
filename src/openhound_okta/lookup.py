@@ -9,12 +9,27 @@ from duckdb import DuckDBPyConnection, Error as DuckDBError
 from openhound.core.lookup import LookupManager
 
 
+USER_SAML_CONTEXT_CACHE_MAXSIZE = 128
+
+
+def _normalize_user_profile(profile: Any) -> dict[str, Any] | None:
+    if isinstance(profile, str):
+        try:
+            profile = json.loads(profile)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return profile if isinstance(profile, dict) else None
+
+
 class OktaLookup(LookupManager):
     def __init__(self, client: DuckDBPyConnection, schema: str = "okta"):
         super().__init__(client, schema)
         self.schema = schema
         self.client = client
         self.tenant_domain: str | None = None
+        self._user_saml_context_cache: dict[
+            str, tuple[str | None, dict[str, Any] | None]
+        ] = {}
 
     @lru_cache
     def _table_exists(self, table_name: str) -> bool:
@@ -160,13 +175,39 @@ class OktaLookup(LookupManager):
             )
         except DuckDBError:
             return None
-        if isinstance(profile, str):
-            try:
-                decoded = json.loads(profile)
-            except (json.JSONDecodeError, TypeError):
-                return None
-            return decoded if isinstance(decoded, dict) else None
-        return profile if isinstance(profile, dict) else None
+        return _normalize_user_profile(profile)
+
+    def user_saml_context(
+        self, user_id: str
+    ) -> tuple[str | None, dict[str, Any] | None] | None:
+        """Return source-user lifecycle and profile in one point statement."""
+
+        cached = self._user_saml_context_cache.get(user_id)
+        if cached is not None:
+            # Reinsert cache hits so the first entry remains the least recently used.
+            del self._user_saml_context_cache[user_id]
+            self._user_saml_context_cache[user_id] = cached
+            return cached
+
+        try:
+            row = self.client.execute(
+                f"""SELECT status, profile
+                    FROM {self.schema}.users
+                    WHERE id = ?""",
+                [user_id],
+            ).fetchone()
+        except DuckDBError:
+            return None
+        if row is None:
+            return None
+
+        status, profile = row
+        context = status, _normalize_user_profile(profile)
+        if len(self._user_saml_context_cache) >= USER_SAML_CONTEXT_CACHE_MAXSIZE:
+            oldest_user_id = next(iter(self._user_saml_context_cache))
+            del self._user_saml_context_cache[oldest_user_id]
+        self._user_saml_context_cache[user_id] = context
+        return context
 
     @lru_cache
     def saml_claim_mappings(self, app_id: str) -> tuple[dict[str, Any], ...]:
