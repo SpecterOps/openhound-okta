@@ -269,6 +269,36 @@ def test_analyzer_does_not_treat_null_route_default_as_catalog_hint():
     )
 
 
+def test_analyzer_normalizes_only_string_mapping_keys_before_sorting():
+    analysis = analyze_catalog_schema_snapshot(
+        _snapshot(
+            [
+                _application(
+                    "mixed_mapping_keys",
+                    {
+                        "general": {
+                            "properties": {
+                                "configuration": {
+                                    "type": "object",
+                                    "default": {
+                                        "z": 1,
+                                        7: "excluded",
+                                        "a": {2: "excluded", "b": 2},
+                                    },
+                                }
+                            }
+                        }
+                    },
+                )
+            ]
+        )
+    )
+
+    default = analysis["applications"][0]["attributes"][0]["default"]
+    assert list(default) == ["a", "z"]
+    assert default == {"a": {"b": 2}, "z": 1}
+
+
 def test_analyzer_records_missing_definitions_without_inventing_attributes():
     analysis = analyze_catalog_schema_snapshot(
         _snapshot([_application("missing_schema", None)])

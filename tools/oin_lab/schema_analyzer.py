@@ -115,11 +115,10 @@ def _json_value(value: Any) -> Any:
     if isinstance(value, list):
         return [_json_value(item) for item in value]
     if isinstance(value, Mapping):
-        return {
-            key: _json_value(item)
-            for key, item in sorted(value.items())
-            if isinstance(key, str)
-        }
+        string_items = (
+            (key, item) for key, item in value.items() if isinstance(key, str)
+        )
+        return {key: _json_value(item) for key, item in sorted(string_items)}
     return None
 
 
