@@ -1,0 +1,421 @@
+{
+  "description": "Source-shaped Okta SAML assignment cases for source-exact, email-shaped source.login normalization.",
+  "cases": [
+    {
+      "name": "exact_profile_login_email_equality",
+      "source_profile": {
+        "login": "alice.saml@example.test",
+        "email": "alice.saml@example.test"
+      },
+      "claim_mappings": [
+        {
+          "id": "okta:saml:claim-mapping:0oa_saml:0",
+          "app_id": "0oa_saml",
+          "claim_name": "NameID",
+          "mapping_type": "name_id",
+          "mapping_origin": "application_user_name",
+          "claim_type": "name_id",
+          "source_property": "source.login",
+          "expression": "${source.login}",
+          "format": "urn:oasis:names:tc:SAML:1.0:nameid-format:unspecified"
+        }
+      ],
+      "expected": {
+        "match_values": ["alice.saml@example.test"],
+        "email_match_values": ["alice.saml@example.test"],
+        "scoped_exact_match_values": ["alice.saml@example.test"],
+        "incomplete_match_value_fields": [],
+        "source_properties": ["source.login"]
+      }
+    },
+    {
+      "name": "trimmed_casefolded_profile_equality",
+      "source_profile": {
+        "login": "  Alice.SAML@Example.TEST  ",
+        "email": "alice.saml@example.test"
+      },
+      "claim_mappings": [
+        {
+          "id": "okta:saml:claim-mapping:0oa_saml:0",
+          "app_id": "0oa_saml",
+          "claim_name": "NameID",
+          "mapping_type": "name_id",
+          "mapping_origin": "application_user_name",
+          "claim_type": "name_id",
+          "source_property": "source.login",
+          "expression": "source.login",
+          "format": "urn:oasis:names:tc:SAML:1.0:nameid-format:unspecified"
+        }
+      ],
+      "expected": {
+        "match_values": ["  Alice.SAML@Example.TEST  "],
+        "email_match_values": ["alice.saml@example.test"],
+        "scoped_exact_match_values": ["Alice.SAML@Example.TEST"],
+        "incomplete_match_value_fields": [],
+        "source_properties": ["source.login"]
+      }
+    },
+    {
+      "name": "email_looking_login_mismatches_profile_email",
+      "source_profile": {
+        "login": "canary.login@example.test",
+        "email": "canary.mail@example.test"
+      },
+      "claim_mappings": [
+        {
+          "id": "okta:saml:claim-mapping:0oa_saml:0",
+          "app_id": "0oa_saml",
+          "claim_name": "NameID",
+          "mapping_type": "name_id",
+          "mapping_origin": "application_user_name",
+          "claim_type": "name_id",
+          "source_property": "source.login",
+          "expression": "source.login",
+          "format": "urn:oasis:names:tc:SAML:1.0:nameid-format:unspecified"
+        }
+      ],
+      "expected": {
+        "match_values": ["canary.login@example.test"],
+        "email_match_values": ["canary.login@example.test"],
+        "scoped_exact_match_values": ["canary.login@example.test"],
+        "incomplete_match_value_fields": [],
+        "source_properties": ["source.login"]
+      }
+    },
+    {
+      "name": "non_email_source_login_is_not_promoted",
+      "source_profile": {
+        "login": "canary-login",
+        "email": "canary.mail@example.test"
+      },
+      "claim_mappings": [
+        {
+          "id": "okta:saml:claim-mapping:0oa_saml:0",
+          "app_id": "0oa_saml",
+          "claim_name": "NameID",
+          "mapping_type": "name_id",
+          "mapping_origin": "application_user_name",
+          "claim_type": "name_id",
+          "source_property": "source.login",
+          "expression": "source.login",
+          "format": "urn:oasis:names:tc:SAML:1.0:nameid-format:unspecified"
+        }
+      ],
+      "expected": {
+        "match_values": ["canary-login"],
+        "email_match_values": [],
+        "scoped_exact_match_values": ["canary-login"],
+        "incomplete_match_value_fields": [],
+        "source_properties": ["source.login"]
+      }
+    },
+    {
+      "name": "control_character_source_login_is_not_promoted",
+      "source_profile": {
+        "login": "\nalice.saml@example.test",
+        "email": "alice.saml@example.test"
+      },
+      "claim_mappings": [
+        {
+          "id": "okta:saml:claim-mapping:0oa_saml:0",
+          "app_id": "0oa_saml",
+          "claim_name": "NameID",
+          "mapping_type": "name_id",
+          "mapping_origin": "application_user_name",
+          "claim_type": "name_id",
+          "source_property": "source.login",
+          "expression": "source.login",
+          "format": "urn:oasis:names:tc:SAML:1.0:nameid-format:unspecified"
+        }
+      ],
+      "expected": {
+        "match_values": ["\nalice.saml@example.test"],
+        "email_match_values": [],
+        "scoped_exact_match_values": ["alice.saml@example.test"],
+        "incomplete_match_value_fields": [],
+        "source_properties": ["source.login"]
+      }
+    },
+    {
+      "name": "internal_whitespace_source_login_is_not_promoted",
+      "source_profile": {
+        "login": "alice.saml @example.test",
+        "email": "alice.saml@example.test"
+      },
+      "claim_mappings": [
+        {
+          "id": "okta:saml:claim-mapping:0oa_saml:0",
+          "app_id": "0oa_saml",
+          "claim_name": "NameID",
+          "mapping_type": "name_id",
+          "mapping_origin": "application_user_name",
+          "claim_type": "name_id",
+          "source_property": "source.login",
+          "expression": "source.login",
+          "format": "urn:oasis:names:tc:SAML:1.0:nameid-format:unspecified"
+        }
+      ],
+      "expected": {
+        "match_values": ["alice.saml @example.test"],
+        "email_match_values": [],
+        "scoped_exact_match_values": ["alice.saml @example.test"],
+        "incomplete_match_value_fields": [],
+        "source_properties": ["source.login"]
+      }
+    },
+    {
+      "name": "missing_profile_email",
+      "source_profile": {"login": "alice.saml@example.test"},
+      "claim_mappings": [
+        {
+          "id": "okta:saml:claim-mapping:0oa_saml:0",
+          "app_id": "0oa_saml",
+          "claim_name": "NameID",
+          "mapping_type": "name_id",
+          "mapping_origin": "application_user_name",
+          "claim_type": "name_id",
+          "source_property": "source.login",
+          "expression": "source.login",
+          "format": "urn:oasis:names:tc:SAML:1.0:nameid-format:unspecified"
+        }
+      ],
+      "expected": {
+        "match_values": ["alice.saml@example.test"],
+        "email_match_values": ["alice.saml@example.test"],
+        "scoped_exact_match_values": ["alice.saml@example.test"],
+        "incomplete_match_value_fields": [],
+        "source_properties": ["source.login"]
+      }
+    },
+    {
+      "name": "blank_profile_email",
+      "source_profile": {
+        "login": "alice.saml@example.test",
+        "email": "   "
+      },
+      "claim_mappings": [
+        {
+          "id": "okta:saml:claim-mapping:0oa_saml:0",
+          "app_id": "0oa_saml",
+          "claim_name": "NameID",
+          "mapping_type": "name_id",
+          "mapping_origin": "application_user_name",
+          "claim_type": "name_id",
+          "source_property": "source.login",
+          "expression": "source.login",
+          "format": "urn:oasis:names:tc:SAML:1.0:nameid-format:unspecified"
+        }
+      ],
+      "expected": {
+        "match_values": ["alice.saml@example.test"],
+        "email_match_values": ["alice.saml@example.test"],
+        "scoped_exact_match_values": ["alice.saml@example.test"],
+        "incomplete_match_value_fields": [],
+        "source_properties": ["source.login"]
+      }
+    },
+    {
+      "name": "missing_source_profile_does_not_use_app_username",
+      "source_profile": null,
+      "application_user": {
+        "credentials": {"userName": "alice.saml@example.test"}
+      },
+      "claim_mappings": [
+        {
+          "id": "okta:saml:claim-mapping:0oa_saml:0",
+          "app_id": "0oa_saml",
+          "claim_name": "NameID",
+          "mapping_type": "name_id",
+          "mapping_origin": "application_user_name",
+          "claim_type": "name_id",
+          "source_property": "source.login",
+          "expression": "source.login",
+          "format": "urn:oasis:names:tc:SAML:1.0:nameid-format:unspecified"
+        }
+      ],
+      "expected": {
+        "match_values": [],
+        "email_match_values": [],
+        "scoped_exact_match_values": [],
+        "incomplete_match_value_fields": ["scoped_exact_match_values"],
+        "source_properties": []
+      }
+    },
+    {
+      "name": "appuser_username_is_not_source_profile_email",
+      "source_profile": {
+        "login": "alice.saml@example.test",
+        "email": "alice.saml@example.test"
+      },
+      "application_user": {
+        "credentials": {"userName": "alice.saml@example.test"}
+      },
+      "claim_mappings": [
+        {
+          "id": "okta:saml:claim-mapping:0oa_saml:0",
+          "app_id": "0oa_saml",
+          "claim_name": "NameID",
+          "mapping_type": "name_id",
+          "mapping_origin": "application_user_name",
+          "claim_type": "name_id",
+          "source_property": "appuser.userName",
+          "expression": "appuser.userName",
+          "format": "urn:oasis:names:tc:SAML:1.0:nameid-format:unspecified"
+        }
+      ],
+      "expected": {
+        "match_values": ["alice.saml@example.test"],
+        "email_match_values": [],
+        "scoped_exact_match_values": ["alice.saml@example.test"],
+        "incomplete_match_value_fields": [],
+        "source_properties": ["appuser.userName"]
+      }
+    },
+    {
+      "name": "transformed_source_login_is_not_promoted",
+      "source_profile": {
+        "login": "alice.saml@example.test",
+        "email": "alice.saml@example.test"
+      },
+      "claim_mappings": [
+        {
+          "id": "okta:saml:claim-mapping:0oa_saml:0",
+          "app_id": "0oa_saml",
+          "claim_name": "NameID",
+          "mapping_type": "name_id",
+          "mapping_origin": "application_user_name",
+          "claim_type": "name_id",
+          "source_property": "String.toLowerCase(source.login)",
+          "expression": "String.toLowerCase(source.login)",
+          "format": "urn:oasis:names:tc:SAML:1.0:nameid-format:unspecified"
+        }
+      ],
+      "expected": {
+        "match_values": [],
+        "email_match_values": [],
+        "scoped_exact_match_values": [],
+        "incomplete_match_value_fields": ["scoped_exact_match_values"],
+        "source_properties": []
+      }
+    },
+    {
+      "name": "conflicting_declared_source_is_not_promoted",
+      "source_profile": {
+        "login": "alice.saml@example.test",
+        "email": "alice.saml@example.test"
+      },
+      "claim_mappings": [
+        {
+          "id": "okta:saml:claim-mapping:0oa_saml:0",
+          "app_id": "0oa_saml",
+          "claim_name": "NameID",
+          "mapping_type": "name_id",
+          "mapping_origin": "application_user_name",
+          "claim_type": "name_id",
+          "source_property": "source.email",
+          "expression": "source.login",
+          "format": "urn:oasis:names:tc:SAML:1.0:nameid-format:unspecified"
+        }
+      ],
+      "expected": {
+        "match_values": [],
+        "email_match_values": [],
+        "scoped_exact_match_values": [],
+        "incomplete_match_value_fields": ["scoped_exact_match_values"],
+        "source_properties": []
+      }
+    },
+    {
+      "name": "transient_nameid_remains_explanatory_only",
+      "source_profile": {
+        "login": "alice.saml@example.test",
+        "email": "alice.saml@example.test"
+      },
+      "claim_mappings": [
+        {
+          "id": "okta:saml:claim-mapping:0oa_saml:0",
+          "app_id": "0oa_saml",
+          "claim_name": "NameID",
+          "mapping_type": "name_id",
+          "mapping_origin": "application_user_name",
+          "claim_type": "name_id",
+          "source_property": "source.login",
+          "expression": "source.login",
+          "format": "urn:oasis:names:tc:SAML:2.0:nameid-format:transient"
+        }
+      ],
+      "expected": {
+        "match_values": [],
+        "email_match_values": [],
+        "scoped_exact_match_values": [],
+        "incomplete_match_value_fields": [],
+        "source_properties": []
+      }
+    },
+    {
+      "name": "explicit_email_nameid_remains_email_only",
+      "source_profile": {
+        "login": "Alice.SAML@Example.TEST",
+        "email": "alice.saml@example.test"
+      },
+      "claim_mappings": [
+        {
+          "id": "okta:saml:claim-mapping:0oa_saml:0",
+          "app_id": "0oa_saml",
+          "claim_name": "NameID",
+          "mapping_type": "name_id",
+          "mapping_origin": "subject_name_id",
+          "claim_type": "name_id",
+          "source_property": "source.login",
+          "expression": "source.login",
+          "format": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+        }
+      ],
+      "expected": {
+        "match_values": ["Alice.SAML@Example.TEST"],
+        "email_match_values": ["alice.saml@example.test"],
+        "scoped_exact_match_values": [],
+        "incomplete_match_value_fields": [],
+        "source_properties": ["source.login"]
+      }
+    },
+    {
+      "name": "duplicate_mappings_are_deduplicated",
+      "source_profile": {
+        "login": "alice.saml@example.test",
+        "email": "alice.saml@example.test"
+      },
+      "claim_mappings": [
+        {
+          "id": "okta:saml:claim-mapping:0oa_saml:0",
+          "app_id": "0oa_saml",
+          "claim_name": "NameID",
+          "mapping_type": "name_id",
+          "mapping_origin": "application_user_name",
+          "claim_type": "name_id",
+          "source_property": "source.login",
+          "expression": "source.login",
+          "format": "urn:oasis:names:tc:SAML:1.0:nameid-format:unspecified"
+        },
+        {
+          "id": "okta:saml:claim-mapping:0oa_saml:1",
+          "app_id": "0oa_saml",
+          "claim_name": "NameID duplicate control",
+          "mapping_type": "name_id",
+          "mapping_origin": "application_user_name",
+          "claim_type": "name_id",
+          "source_property": "source.login",
+          "expression": "source.login",
+          "format": "urn:oasis:names:tc:SAML:1.0:nameid-format:unspecified"
+        }
+      ],
+      "expected": {
+        "match_values": ["alice.saml@example.test"],
+        "email_match_values": ["alice.saml@example.test"],
+        "scoped_exact_match_values": ["alice.saml@example.test"],
+        "incomplete_match_value_fields": [],
+        "source_properties": ["source.login"]
+      }
+    }
+  ]
+}

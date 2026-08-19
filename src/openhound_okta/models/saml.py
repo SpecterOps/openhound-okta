@@ -615,6 +615,34 @@ def _application_user_direct_values(
     return _source_exact_values(_profile_field(profile, field_name))
 
 
+def _source_login_email_values(
+    direct_field: tuple[str, str] | None,
+    values: list[str],
+    source_profile: Any,
+) -> list[str]:
+    if (
+        source_profile is _MISSING
+        or direct_field is None
+        or direct_field[0] != "source"
+        or direct_field[1].casefold() != "login"
+    ):
+        return []
+
+    result: list[str] = []
+    for value in values:
+        if any(
+            ord(character) < 32 or 127 <= ord(character) <= 159 for character in value
+        ):
+            continue
+        trimmed = value.strip()
+        if any(character.isspace() for character in trimmed):
+            continue
+        if trimmed.count("@") != 1 or not all(trimmed.split("@", 1)):
+            continue
+        result.append(trimmed.casefold())
+    return result
+
+
 def _claim_family(mapping: Any, direct_field: tuple[str, str] | None) -> str:
     claim_type = _clean(_mapping_get(mapping, "claim_type"))
     if claim_type == "name_id":
@@ -731,6 +759,17 @@ def saml_application_assertion_evidence(
             else []
         )
         family = _claim_family(mapping, direct_field)
+        source_login_email_values = (
+            _source_login_email_values(
+                direct_field,
+                values,
+                source_profile,
+            )
+            if resolvable
+            and _clean(_mapping_get(mapping, "claim_type")) == "name_id"
+            and family != "transient"
+            else []
+        )
         mapping_id = _clean(_mapping_get(mapping, "id"))
         source_property = (
             f"{direct_field[0]}.{direct_field[1]}" if direct_field else None
@@ -746,12 +785,14 @@ def saml_application_assertion_evidence(
                 incomplete_fields.add(family)
             evidence["match_values"].extend(values)
             evidence[family].extend(canonical_values)
+            evidence["email_match_values"].extend(source_login_email_values)
             if values and source_property:
                 evidence["source_properties"].append(source_property)
             continue
 
         if family == "raw_name_id" and values:
             evidence["match_values"].extend(values)
+            evidence["email_match_values"].extend(source_login_email_values)
             if source_property:
                 evidence["source_properties"].append(source_property)
             continue

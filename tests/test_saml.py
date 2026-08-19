@@ -1,6 +1,7 @@
 from dataclasses import asdict
 from itertools import islice
 import json
+from pathlib import Path
 
 import duckdb
 
@@ -1067,6 +1068,44 @@ def test_saml_eligible_for_promotes_standard_email_nameid() -> None:
     assert eligible.properties.match_values == ["alice.saml@example.test"]
     assert eligible.properties.email_match_values == ["alice.saml@example.test"]
     assert eligible.properties.scoped_exact_match_values == []
+
+
+def test_source_login_email_normalization_fixture() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "test_data"
+        / "saml"
+        / "source_login_email_corroboration.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+    for case in fixture["cases"]:
+        app_user = _application_user(
+            app_status="ACTIVE",
+            **case.get("application_user", {}),
+        )
+        app_user._lookup = _SamlLookup(
+            status="ACTIVE",
+            source_profile=case.get("source_profile"),
+            claim_mappings=tuple(case["claim_mappings"]),
+        )
+
+        eligible = next(
+            edge for edge in app_user.edges if edge.kind == ek.SAML_ELIGIBLE_FOR
+        )
+        actual = {
+            "match_values": eligible.properties.match_values,
+            "email_match_values": eligible.properties.email_match_values,
+            "scoped_exact_match_values": (
+                eligible.properties.scoped_exact_match_values
+            ),
+            "incomplete_match_value_fields": (
+                eligible.properties.incomplete_match_value_fields
+            ),
+            "source_properties": eligible.properties.source_properties,
+        }
+
+        assert actual == case["expected"], case["name"]
 
 
 def test_saml_assignment_materializes_all_resolvable_claim_values() -> None:
