@@ -64,11 +64,14 @@ is exhausted. HTTP 429 responses retry the same request and pagination cursor un
 reached. Transport failures and HTTP 5xx responses retain DLT's retry coverage.
 
 Fan-out resources use explicit page sizes where Okta documents safe maxima. Expanded group collection requests 200
-rows per page, application-user collection requests 500 rows per page, group-push mapping collection requests 1,000
-rows per page, and identity-provider user collection requests 200 rows per page. Rows stream to DLT; an exhausted
-required request fails the collection so DLT does not publish an incomplete replacement.
-If the initial expanded group page repeatedly times out, the collector retries that first page with successively halved
-limits before failing. With the default configuration, that sequence is 200, 100, then 50.
+rows per page, application-user collection requests 500 rows per page, application-group assignment collection
+requests 200 rows per page, group-push mapping collection requests 1,000 rows per page, and identity-provider user
+collection requests 200 rows per page. Application-group assignments are collected from each application's public
+assignment endpoint and retain Okta's assignment timestamp, priority, and profile field names without publishing
+assignment profile values to the graph. Rows stream to DLT; an exhausted required request fails the collection so DLT
+does not publish an incomplete replacement. If the initial expanded group page repeatedly times out, the collector
+retries that first page with successively halved limits before failing. With the default configuration, that sequence
+is 200, 100, then 50.
 
 The defaults can be adjusted with DLT source configuration environment variables:
 
@@ -76,6 +79,7 @@ The defaults can be adjusted with DLT source configuration environment variables
 | --- | ---: | --- |
 | `SOURCES__SOURCE__OKTA__APPLICATION_USERS_PAGE_SIZE` | `500` | Application users per page, from 1 through 500 |
 | `SOURCES__SOURCE__OKTA__GROUPS_PAGE_SIZE` | `200` | Expanded groups per page, from 1 through 200 |
+| `SOURCES__SOURCE__OKTA__APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE` | `200` | Application-group assignments per page, from 20 through 200 |
 | `SOURCES__SOURCE__OKTA__GROUP_PUSH_MAPPINGS_PAGE_SIZE` | `1000` | Group push mappings per page, from 1 through 1,000 |
 | `SOURCES__SOURCE__OKTA__IDENTITY_PROVIDER_USERS_PAGE_SIZE` | `200` | Identity-provider users per page, from 1 through 200 |
 | `SOURCES__SOURCE__OKTA__ENDPOINT_CONCURRENCY` | `2` | Maximum simultaneous requests per endpoint family |

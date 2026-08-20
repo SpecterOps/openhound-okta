@@ -14,6 +14,7 @@ from dlt.sources.helpers.requests.session import Session
 
 from openhound_okta.models.token import Token
 from openhound_okta.source import (
+    APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE,
     APPLICATION_USERS_PAGE_SIZE,
     GROUPS_PAGE_SIZE,
     GROUP_PUSH_MAPPINGS_PAGE_SIZE,
@@ -24,6 +25,7 @@ from openhound_okta.source import (
     _saml_idp_metadata_fields,
     _saml_metadata_fields,
     application_grants,
+    application_group_assignment_rows,
     application_group_push_mapping_row,
     application_group_push_mappings,
     application_jwk_rows,
@@ -276,6 +278,54 @@ def test_initial_read_timeout_retry_budget_does_not_limit_other_transient_errors
     assert response.status_code == 200
     assert client.requested_urls == [url, url, url]
     assert clock.sleeps == [1.0, 2.0]
+
+
+def test_application_group_assignments_follow_opaque_next_link_without_query_expansion():
+    first_url = "https://example.okta.test/api/v1/apps/0oa123/groups?limit=200"
+    cursor_url = (
+        "https://example.okta.test/api/v1/apps/0oa123/groups"
+        "?after=opaque%2Fcursor%3Dvalue&limit=200"
+    )
+    first_page = _response(
+        200,
+        first_url,
+        {"Link": f'<{cursor_url}>; rel="next"'},
+        b'[{"id":"00g-first","priority":0}]',
+    )
+    second_page = _response(
+        200,
+        cursor_url,
+        content=b'[{"id":"00g-second","priority":1}]',
+    )
+    adapter = SequencedAdapter([first_page, second_page])
+    session = Session(raise_for_status=False)
+    session.mount("https://", adapter)
+    client = OktaRESTClient(
+        base_url="https://example.okta.test",
+        endpoint_family="/api/v1/apps*",
+        throttle=EndpointThrottle(),
+        paginator=HeaderLinkPaginator(),
+        session=session,
+    )
+    ctx = SimpleNamespace(
+        pool=client,
+        application_group_assignments_page_size=(
+            APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE
+        ),
+    )
+    application = SimpleNamespace(
+        id="0oa123",
+        name="example_app",
+        label="Example App",
+        status="ACTIVE",
+        last_updated=None,
+        sign_on_mode="SAML_2_0",
+    )
+
+    rows = list(application_group_assignment_rows(application, ctx))
+
+    assert [row["group_id"] for row in rows] == ["00g-first", "00g-second"]
+    assert adapter.requested_urls == [first_url, cursor_url]
 
 
 def test_dlt_paginator_refreshes_expired_bearer_token_between_pages():
