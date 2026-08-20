@@ -1,4 +1,3 @@
-import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import ClassVar
@@ -20,6 +19,10 @@ from openhound_okta.models.hybrid_auth import (
     hybrid_target_edge_path,
     outbound_trust_target,
 )
+from openhound_okta.oin_routes.settings_contract import (
+    SAML_ROUTE_APP_SETTING_PROPERTIES,
+    canonical_app_setting_property_name,
+)
 
 
 @dataclass
@@ -32,6 +35,19 @@ class ApplicationProperties(OktaNodeProperties):
         created: Timestamp when the application was created.
         last_updated: Timestamp when the application was last updated.
         sign_on_mode: Authentication mode configured for the application.
+        audience: Explicit SAML audience from application settings.
+        audience_restriction: Explicit SAML audience restriction from settings.
+        audience_uri: Explicit SAML audience URI from application settings.
+        custom_acs_url: OIN-specific custom SAML ACS URL, when configured.
+        custom_entity_id: OIN-specific custom SAML entity ID, when configured.
+        destination: Explicit SAML destination from application settings.
+        enterprise_name: OIN route selector for an enterprise instance.
+        org_name: OIN route selector for an organization instance.
+        recipient: Explicit SAML recipient from application settings.
+        saml_route_setting_fields: Canonical safe route fields present in the
+            source application settings, including fields whose value is null.
+        sp_entity_id: Explicit SAML service-provider entity ID from settings.
+        sso_url: Explicit SAML SSO URL from application settings.
         orn: Okta Resource Name for the application.
         idp_id: Native inbound identity-provider ID referenced by the application.
     """
@@ -59,14 +75,21 @@ class ApplicationProperties(OktaNodeProperties):
     afw_only: bool | None = None
     app_filter: str | None = None
     aud_restriction: str | None = None
+    audience: str | None = None
+    audience_restriction: str | None = None
+    audience_uri: str | None = None
     aws_environment_type: str | None = None
     base_url: str | None = None
     button_field: str | None = None
     checkbox: str | None = None
+    custom_acs_url: str | None = None
+    custom_entity_id: str | None = None
     datacenter_location: str | None = None
+    destination: str | None = None
     domain: str | None = None
     domain_name: str | None = None
     domains: list[str | bool | int] | None = None
+    enterprise_name: str | None = None
     entity_id: str | None = None
     filter_groups_by_ou: bool | None = None
     github_org: str | None = None
@@ -86,11 +109,13 @@ class ApplicationProperties(OktaNodeProperties):
     naming_context: str | None = None
     office365_flexible_provisioning_mode: str | None = None
     office365_provisioning_type: str | None = None
+    org_name: str | None = None
     override_acs_url: str | None = None
     password: str | None = None
     password_field: str | None = None
     redirect_uri: str | None = None
     redirect_url: str | None = None
+    recipient: str | None = None
     region_type: str | None = None
     request_integration: bool | None = None
     require_admin_consent: bool | None = None
@@ -103,6 +128,9 @@ class ApplicationProperties(OktaNodeProperties):
     service_domain: str | None = None
     session_duration: int | None = None
     site_url: str | None = None
+    saml_route_setting_fields: list[str] | None = None
+    sp_entity_id: str | None = None
+    sso_url: str | None = None
     sub_domain: str | None = None
     tenant_type: str | None = None
     use_group_mapping: bool | None = None
@@ -170,14 +198,7 @@ APP_SETTING_PROPERTY_NAMES = {
     "web_sso_allowed_client",
     "windows_transport_enabled",
     "ws_fed_configure_type",
-}
-
-
-def _snake_case_property_name(name: str) -> str:
-    name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
-    name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)
-    return name.replace("-", "_").lower()
-
+} | SAML_ROUTE_APP_SETTING_PROPERTIES
 
 def _is_primitive_app_setting(value) -> bool:
     return isinstance(value, (str, bool, int))
@@ -504,15 +525,22 @@ class Application(BaseAsset):
         else:
             return {}
 
+        is_saml = self.sign_on_mode in {"SAML_2_0", "SAML_1_1"}
+        present_route_fields: set[str] = set()
         properties: dict[str, object] = {}
         for key, value in app_settings.items():
-            property_name = _snake_case_property_name(key)
+            property_name = canonical_app_setting_property_name(key)
+            if is_saml and property_name in SAML_ROUTE_APP_SETTING_PROPERTIES:
+                present_route_fields.add(property_name)
             if property_name not in allowed_property_names:
                 continue
             if _is_primitive_app_setting(value) or _is_homogeneous_primitive_list(
                 value
             ):
                 properties[property_name] = value
+
+        if present_route_fields:
+            properties["saml_route_setting_fields"] = sorted(present_route_fields)
 
         return properties
 

@@ -37,6 +37,8 @@ dev = [
     "mypy>=1.19.1",
     "zensical>=0.0.27",
 ]
-
 [project.entry-points."openhound.sources"]
 okta = "openhound_okta.main:app"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

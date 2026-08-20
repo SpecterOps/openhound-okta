@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import duckdb
+import pytest
 
 from openhound_okta.lookup import USER_SAML_CONTEXT_CACHE_MAXSIZE, OktaLookup
 from openhound_okta.kinds import edges as ek
@@ -36,6 +37,18 @@ from openhound_okta.models.saml import (
     saml_sp_acs_rows,
     saml_trusted_issuer_row,
 )
+from openhound_okta.oin_routes import registry as oin_route_registry
+from openhound_okta.oin_routes.contract import (
+    CallableRouteProvider,
+    SamlRouteEvidence,
+    route_resolution,
+)
+from openhound_okta.oin_routes.declarative import (
+    RouteProfile,
+    RouteTemplate,
+    RouteVariable,
+)
+from openhound_okta.oin_routes.validators import present_string
 
 
 def _application(**overrides) -> Application:
@@ -848,7 +861,7 @@ def test_claim_mapping_accepts_pre_v03_rows_without_claim_type():
     assert claim.claim_type == "name_id"
 
 
-def test_saml_acs_rows_dedup_repeated_acs_url_and_entity():
+def test_saml_acs_rows_dedup_exact_repeated_route():
     app = _application(
         settings={
             "app": {},
@@ -857,7 +870,11 @@ def test_saml_acs_rows_dedup_repeated_acs_url_and_entity():
                 "ssoAcsUrl": "https://sp.example.test/saml/consume",
                 "audience": "https://sp.example.test/saml",
                 "acsEndpoints": [
-                    {"url": "https://sp.example.test/saml/consume"},
+                    {
+                        "url": "https://sp.example.test/saml/consume",
+                        "index": 0,
+                        "isDefault": True,
+                    },
                     {
                         "url": "https://sp.example.test/saml/consume/alternate",
                         "index": 5,
@@ -1095,6 +1112,225 @@ def test_jamf_oin_route_fails_closed_for_absent_or_malformed_domain():
         )
 
 
+def test_globalprotect_oin_route_uses_documented_base_url():
+    app = _application(
+        name="panw_globalprotect",
+        settings={
+            "app": {"baseURL": "https://vpn.example.test:443"},
+            "signOn": {"idpIssuer": "http://www.okta.com/exk_globalprotect"},
+        },
+    )
+
+    rows = saml_acs_rows(app)
+
+    assert len(rows) == 1
+    assert rows[0]["acs_url"] == ("https://vpn.example.test:443/SAML20/SP/ACS")
+    assert rows[0]["sp_entity_id"] == ("https://vpn.example.test:443/SAML20/SP")
+    assert rows[0]["route_source"] == ("settings.app+documented_globalprotect_route")
+    assert rows[0]["extraction_mode"] == "allowlisted_deterministic_route"
+    assert rows[0]["acs_source_field"] == "settings.app.baseURL"
+    assert rows[0]["sp_entity_source_field"] == "settings.app.baseURL"
+    assert rows[0]["target_product_family"] == "palo_alto_globalprotect"
+
+
+def test_globalprotect_oin_route_fails_closed_for_invalid_base_url():
+    invalid_base_urls = [
+        None,
+        "",
+        "vpn.example.test",
+        "http://vpn.example.test",
+        "https://user@vpn.example.test",
+        "https://vpn.example.test/SAML20/SP/ACS",
+        "https://vpn.example.test?tenant=example",
+        "https://vpn.example.test:",
+        " https://vpn.example.test",
+        "\x00https://vpn.example.test",
+        "https://vpn.example.test\x7f",
+        "https://${org.baseURL}",
+    ]
+
+    for base_url in invalid_base_urls:
+        app = _application(
+            name="panw_globalprotect",
+            settings={
+                "app": {"baseURL": base_url},
+                "signOn": {"idpIssuer": "http://www.okta.com/exk_globalprotect"},
+            },
+        )
+
+        assert saml_acs_rows(app) == []
+        provider = saml_federation_provider_row(app)
+        assert provider is not None
+        assert provider["acs_ids"] == []
+        assert provider["route_diagnostics"] == [
+            "missing_or_malformed_settings.app.baseURL"
+        ]
+
+
+@pytest.mark.parametrize(
+    ("domain", "expected_acs"),
+    [
+        ("example-workspace", "https://example-workspace.slack.com/sso/saml"),
+        (
+            "example-org.enterprise",
+            "https://example-org.enterprise.slack.com/sso/saml",
+        ),
+    ],
+)
+def test_slack_oin_route_uses_documented_domain_contract(domain, expected_acs):
+    app = _application(
+        name="slack",
+        settings={
+            "app": {"domain": domain},
+            "signOn": {"idpIssuer": "http://www.okta.com/exk_slack"},
+        },
+    )
+
+    rows = saml_acs_rows(app)
+
+    assert len(rows) == 1
+    assert rows[0]["acs_url"] == expected_acs
+    assert rows[0]["sp_entity_id"] == "https://slack.com"
+    assert rows[0]["acs_source_field"] == "settings.app.domain"
+    assert rows[0]["sp_entity_source_field"] == ("documented_static_slack_sp_entity")
+    assert rows[0]["target_product_family"] == "slack"
+
+
+@pytest.mark.parametrize(
+    "domain",
+    [None, "", "workspace.slack.com", "workspace.other", " workspace", "bad/path"],
+)
+def test_slack_oin_route_fails_closed_for_invalid_domain(domain):
+    app = _application(
+        name="slack",
+        settings={
+            "app": {"domain": domain},
+            "signOn": {"idpIssuer": "http://www.okta.com/exk_slack"},
+        },
+    )
+
+    assert saml_acs_rows(app) == []
+    provider = saml_federation_provider_row(app)
+    assert provider is not None
+    assert provider["route_diagnostics"] == ["missing_or_malformed_settings.app.domain"]
+
+
+def test_miro_oin_route_uses_documented_default_for_null_custom_fields():
+    app = _application(
+        name="realtime_board",
+        settings={
+            "app": {"customAcsUrl": None, "customEntityId": None},
+            "signOn": {"idpIssuer": "http://www.okta.com/exk_miro"},
+        },
+    )
+
+    rows = saml_acs_rows(app)
+
+    assert len(rows) == 1
+    assert rows[0]["acs_url"] == "https://miro.com/sso/saml"
+    assert rows[0]["sp_entity_id"] == "https://miro.com/"
+    assert rows[0]["target_product_family"] == "miro"
+    assert rows[0]["route_source"] == "documented_miro_default_route"
+    assert rows[0]["extraction_mode"] == "allowlisted_static_default_route"
+
+
+def test_asana_oin_route_uses_observed_default_route():
+    app = _application(
+        name="asana",
+        settings={
+            "app": {},
+            "signOn": {"idpIssuer": "http://www.okta.com/exk_asana"},
+        },
+    )
+
+    rows = saml_acs_rows(app)
+
+    assert len(rows) == 1
+    assert rows[0]["acs_url"] == "https://app.asana.com/-/saml/consume"
+    assert rows[0]["sp_entity_id"] == "https://app.asana.com"
+    assert rows[0]["target_product_family"] == "asana"
+    assert rows[0]["route_source"] == "documented_asana_default_route"
+    assert rows[0]["extraction_mode"] == "allowlisted_static_default_route"
+
+
+@pytest.mark.parametrize(
+    ("route_field", "route_value", "diagnostic"),
+    [
+        (
+            "ssoAcsUrlOverride",
+            "https://app.asana.com/-/saml/consume",
+            "missing_authoritative_sp_entity_evidence",
+        ),
+        (
+            "audienceOverride",
+            "https://app.asana.com",
+            "missing_authoritative_acs_evidence",
+        ),
+    ],
+)
+def test_asana_oin_route_fails_closed_with_partial_explicit_route(
+    route_field,
+    route_value,
+    diagnostic,
+):
+    app = _application(
+        name="asana",
+        settings={
+            "app": {},
+            "signOn": {
+                "idpIssuer": "http://www.okta.com/exk_asana",
+                route_field: route_value,
+            },
+        },
+    )
+
+    assert saml_acs_rows(app) == []
+    provider = saml_federation_provider_row(app)
+    assert provider is not None
+    assert provider["acs_ids"] == []
+    assert provider["route_diagnostics"] == [diagnostic]
+
+
+def test_zoom_single_vanity_oin_route_uses_documented_subdomain_contract():
+    app = _application(
+        name="zoomus",
+        settings={
+            "app": {"subDomain": "example-company"},
+            "signOn": {"idpIssuer": "http://www.okta.com/exk_zoom"},
+        },
+    )
+
+    rows = saml_acs_rows(app)
+
+    assert len(rows) == 1
+    assert rows[0]["acs_url"] == "https://example-company.zoom.us/saml/SSO"
+    assert rows[0]["sp_entity_id"] == "https://example-company.zoom.us"
+    assert rows[0]["acs_source_field"] == "settings.app.subDomain"
+    assert rows[0]["sp_entity_source_field"] == "settings.app.subDomain"
+    assert rows[0]["target_product_family"] == "zoom"
+
+
+@pytest.mark.parametrize(
+    "subdomain",
+    [None, "", "example.zoom.us", " example", "bad/path", "example\x00"],
+)
+def test_zoom_single_vanity_route_fails_closed_without_one_label(subdomain):
+    app = _application(
+        name="zoomus",
+        settings={
+            "app": {"subDomain": subdomain},
+            "signOn": {"idpIssuer": "http://www.okta.com/exk_zoom"},
+        },
+    )
+
+    assert saml_acs_rows(app) == []
+    provider = saml_federation_provider_row(app)
+    assert provider is not None
+    assert provider["route_diagnostics"] == [
+        "missing_or_malformed_settings.app.subDomain"
+    ]
+
+
 def test_github_organization_oin_route_uses_recognized_org_setting():
     app = _application(
         name="githubcloud",
@@ -1197,6 +1433,147 @@ def test_multiple_explicit_acs_endpoints_preserve_one_to_one_route_tuples():
         "settings.signOn.acsEndpoints[0].url",
         "settings.signOn.acsEndpoints[1].url",
     ]
+
+
+def test_explicit_route_dedup_preserves_distinct_endpoint_metadata():
+    acs_url = "https://sp.example.test/saml/acs"
+    post_binding = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
+    redirect_binding = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+    base_endpoint = {
+        "url": acs_url,
+        "index": 0,
+        "binding": post_binding,
+        "isDefault": True,
+    }
+    app = _application(
+        settings={
+            "app": {},
+            "signOn": {
+                "idpIssuer": "http://www.okta.com/exk123",
+                "audience": "https://sp.example.test/saml",
+                "acsEndpoints": [
+                    base_endpoint,
+                    {**base_endpoint, "index": 1},
+                    {**base_endpoint, "binding": redirect_binding},
+                    {**base_endpoint, "isDefault": False},
+                    base_endpoint,
+                ],
+            },
+        }
+    )
+
+    rows = saml_acs_rows(app)
+
+    assert [(row["index"], row["binding"], row["is_default"]) for row in rows] == [
+        (0, post_binding, True),
+        (1, post_binding, True),
+        (0, redirect_binding, True),
+        (0, post_binding, False),
+    ]
+
+
+def test_oin_profile_preserves_multiple_routes_through_normalization(monkeypatch):
+    profile = RouteProfile(
+        profile_id="test_multi_route_normalization",
+        app_keys=("test_multi_route_oin",),
+        variables=(
+            RouteVariable(
+                name="tenant",
+                app_field="tenant",
+                validator=present_string,
+                diagnostic="missing_settings.app.tenant",
+            ),
+        ),
+        routes=(
+            RouteTemplate(
+                acs="https://{tenant}.example.test/saml/primary",
+                sp_entity="https://{tenant}.example.test/saml",
+                acs_variables=("tenant",),
+                sp_entity_variables=("tenant",),
+                index=0,
+            ),
+            RouteTemplate(
+                acs="https://{tenant}.example.test/saml/secondary",
+                sp_entity="https://{tenant}.example.test/saml",
+                acs_variables=("tenant",),
+                sp_entity_variables=("tenant",),
+                index=1,
+                is_default=False,
+            ),
+        ),
+        target_product_family="test_product",
+        route_source="settings.app+test_route",
+        extraction_mode="allowlisted_deterministic_route",
+        evidence_references=("test:evidence",),
+        evidence_reviewed_at="2026-08-13",
+    )
+    monkeypatch.setitem(
+        oin_route_registry.OIN_ROUTE_REGISTRY,
+        "test_multi_route_oin",
+        profile,
+    )
+    app = _application(
+        name="test_multi_route_oin",
+        settings={
+            "app": {"tenant": "acme"},
+            "signOn": {"idpIssuer": "http://www.okta.com/exk_multi"},
+        },
+    )
+
+    rows = saml_acs_rows(app)
+
+    assert [row["acs_url"] for row in rows] == [
+        "https://acme.example.test/saml/primary",
+        "https://acme.example.test/saml/secondary",
+    ]
+    assert [row["id"] for row in rows] == [
+        "okta:saml:acs:0oa_saml:0",
+        "okta:saml:acs:0oa_saml:1",
+    ]
+    assert [row["index"] for row in rows] == [0, 1]
+
+
+def test_oin_routes_preserve_resolver_diagnostics_through_normalization(monkeypatch):
+    route = SamlRouteEvidence(
+        acs_url="https://example.test/saml/acs",
+        sp_entity_id="https://example.test/saml",
+        index=0,
+        binding=None,
+        is_default=True,
+        target_product_family="test_product",
+        route_source="test_route",
+        extraction_mode="test",
+        acs_source_field="test.acs",
+        sp_entity_source_field="test.entity",
+    )
+    provider = CallableRouteProvider(
+        profile_id="test_diagnostic_route",
+        app_keys=("test_diagnostic_route",),
+        app_fields=(),
+        resolver=lambda _: route_resolution(
+            routes=(route,), diagnostics=("resolver_evidence",)
+        ),
+        evidence_references=("test:evidence",),
+        evidence_reviewed_at="2026-08-19",
+    )
+    monkeypatch.setitem(
+        oin_route_registry.OIN_ROUTE_REGISTRY,
+        "test_diagnostic_route",
+        provider,
+    )
+    app = _application(
+        name="test_diagnostic_route",
+        settings={
+            "app": {},
+            "signOn": {"idpIssuer": "http://www.okta.com/exk_diagnostic"},
+        },
+    )
+
+    provider_row = saml_federation_provider_row(app)
+
+    assert provider_row is not None
+    assert provider_row["acs_ids"] == ["okta:saml:acs:0oa_saml:0"]
+    assert provider_row["route_diagnostics"] == ["resolver_evidence"]
 
 
 def test_okta_metadata_is_issuer_evidence_not_downstream_route_evidence():

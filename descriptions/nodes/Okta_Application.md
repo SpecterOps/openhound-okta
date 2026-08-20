@@ -132,6 +132,37 @@ The assertion consumer service (ACS) URLs of generic (non-Catalog) Okta SAML 2.0
 
 ![Okta SAML application in BloodHound](../Images/bloodhound-app-saml.png)
 
+### OIN catalog SAML routes
+
+Okta Integration Network (OIN) applications do not expose their SAML routes in
+one uniform API shape. OpenHound prefers a complete route reported directly in
+`settings.signOn`. When that route is absent, it can use a reviewed, bundled
+resolver for these catalog families:
+
+- Asana
+- GitHub Enterprise Cloud and Enterprise Managed Users
+- Jamf Pro
+- Okta Org2Org
+- Palo Alto Networks GlobalProtect
+- Slack
+- Zoom single-vanity URLs
+- Miro standard and complete custom routes
+
+Resolver-derived routes fail closed when required account, domain, or route
+settings are missing or malformed. OpenHound does not infer a route for an
+unsupported catalog family merely from the application name.
+
+Safe route-related `settings.app` values are exposed as normalized application
+properties. `saml_route_setting_fields` records which supported fields were
+present in the Okta response, including fields whose value was explicitly null.
+The field-presence property is significant: an omitted field is not treated as
+proof that a catalog default was selected. Null values themselves are not
+written as BloodHound properties.
+
+See [Okta OIN SAML route evidence](../../docs/saml-oin-route-evidence.md) for the
+resolver contract, evidence boundaries, supported variants, and deferred
+families.
+
 ## Generic Secure Web Authentication (SWA) Applications
 
 Secure Web Authentication (SWA) is an Okta technology that provides Single Sign-On (SSO) functionality to external web applications that don't support federated protocols. SWA applications store user credentials in Okta and automatically fill them in when users access the application through the Okta dashboard.

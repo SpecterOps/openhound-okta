@@ -2,7 +2,10 @@ import duckdb
 
 from openhound_okta.lookup import OktaLookup
 from openhound_okta.models import Application
-from openhound_okta.models.application import _snake_case_property_name
+from openhound_okta.oin_routes.settings_contract import (
+    canonical_app_setting_property_name,
+    snake_case_app_setting_property_name,
+)
 
 
 class StubLookup:
@@ -109,7 +112,9 @@ def test_application_node_uses_sign_on_mode_specific_url_sources():
         settings={"app": {"url": "https://example.okta.com/bookmark"}},
     )
 
-    assert saml_application.as_node.properties.url == "https://example.okta.com/saml/acs"
+    assert (
+        saml_application.as_node.properties.url == "https://example.okta.com/saml/acs"
+    )
     assert (
         bookmark_application.as_node.properties.url
         == "https://example.okta.com/bookmark"
@@ -130,7 +135,7 @@ def test_application_node_emits_primitive_app_settings_in_snake_case():
                 "occSettings": {"nested": "ignored"},
                 "url": "https://example.okta.com/app",
             }
-        }
+        },
     )
 
     properties = application.as_node.properties
@@ -142,6 +147,65 @@ def test_application_node_emits_primitive_app_settings_in_snake_case():
     assert properties.username_field == "email"
     assert properties.url == "https://example.okta.com/app"
     assert not hasattr(properties, "occ_settings")
+
+
+def test_application_node_emits_canonical_saml_route_settings():
+    application = make_application(
+        signOnMode="SAML_2_0",
+        settings={
+            "app": {
+                "subdomain": "example",
+                "acsurl": "https://example.test/saml/acs",
+                "audURI": "urn:example:test",
+                "customAcsUrl": "https://example.test/saml/custom-acs",
+                "customEntityId": "urn:example:custom-entity",
+                "spEntityId": "https://example.test/saml/metadata",
+                "ssoURL": "https://example.test/saml/sso",
+            }
+        },
+    )
+
+    properties = application.as_node.properties
+
+    assert properties.sub_domain == "example"
+    assert properties.acs_url == "https://example.test/saml/acs"
+    assert properties.audience_uri == "urn:example:test"
+    assert properties.custom_acs_url == "https://example.test/saml/custom-acs"
+    assert properties.custom_entity_id == "urn:example:custom-entity"
+    assert properties.sp_entity_id == "https://example.test/saml/metadata"
+    assert properties.sso_url == "https://example.test/saml/sso"
+    assert properties.saml_route_setting_fields == [
+        "acs_url",
+        "audience_uri",
+        "custom_acs_url",
+        "custom_entity_id",
+        "sp_entity_id",
+        "sso_url",
+        "sub_domain",
+    ]
+
+
+def test_application_node_records_null_saml_route_field_presence():
+    application = make_application(
+        name="realtime_board",
+        label="Miro",
+        signOnMode="SAML_2_0",
+        settings={
+            "app": {
+                "customAcsUrl": None,
+                "customEntityId": None,
+            }
+        },
+    )
+
+    properties = application.as_node.properties
+
+    assert properties.custom_acs_url is None
+    assert properties.custom_entity_id is None
+    assert properties.saml_route_setting_fields == [
+        "custom_acs_url",
+        "custom_entity_id",
+    ]
 
 
 def test_application_node_does_not_emit_credential_bearing_app_settings():
@@ -165,6 +229,7 @@ def test_application_node_does_not_emit_credential_bearing_app_settings():
     assert properties.secret_key is None
     assert properties.secret_key_enc is None
     assert properties.password_field == "password"
+    assert properties.saml_route_setting_fields is None
 
 
 def test_application_node_limits_active_directory_settings_to_oktahound_fields():
@@ -206,17 +271,29 @@ def test_application_node_emits_oauth_scopes_and_ad_domain_sid_from_lookup():
 
 
 def test_application_property_name_conversion_handles_okta_acronyms():
-    assert _snake_case_property_name("githubOrg") == "github_org"
-    assert _snake_case_property_name("filterGroupsByOU") == "filter_groups_by_ou"
-    assert _snake_case_property_name("loginURL") == "login_url"
-    assert _snake_case_property_name("redirectURI") == "redirect_uri"
-    assert _snake_case_property_name("accountID") == "account_id"
+    assert snake_case_app_setting_property_name("githubOrg") == "github_org"
+    assert snake_case_app_setting_property_name("filterGroupsByOU") == (
+        "filter_groups_by_ou"
+    )
+    assert snake_case_app_setting_property_name("loginURL") == "login_url"
+    assert snake_case_app_setting_property_name("redirectURI") == "redirect_uri"
+    assert snake_case_app_setting_property_name("accountID") == "account_id"
+
+
+def test_application_property_aliases_normalize_equivalent_oin_names():
+    assert canonical_app_setting_property_name("subdomain") == "sub_domain"
+    assert canonical_app_setting_property_name("subDomain") == "sub_domain"
+    assert canonical_app_setting_property_name("acsurl") == "acs_url"
+    assert canonical_app_setting_property_name("acsURL") == "acs_url"
+    assert canonical_app_setting_property_name("audURI") == "audience_uri"
 
 
 def test_application_lookup_derives_scopes_and_domain_sid():
     con = duckdb.connect()
     con.execute("CREATE SCHEMA okta")
-    con.execute("CREATE TABLE okta.application_grants (app_id VARCHAR, scope_id VARCHAR)")
+    con.execute(
+        "CREATE TABLE okta.application_grants (app_id VARCHAR, scope_id VARCHAR)"
+    )
     con.execute(
         "INSERT INTO okta.application_grants VALUES "
         "('app-1', 'okta.users.read'), ('app-1', 'okta.groups.read'), "
