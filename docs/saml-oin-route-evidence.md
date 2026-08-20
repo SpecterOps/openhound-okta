@@ -17,8 +17,9 @@ validate every required instance value; an application key or label alone is
 never sufficient route evidence.
 
 Unknown integrations, incomplete inputs, conflicting inputs, and unsupported
-variants fail closed and emit no synthesized ACS. Generated custom integrations
-remain supported only through complete explicit deployed route fields.
+variants fail closed and emit no synthesized route. Both ACS and entity values
+are omitted on every fail-closed path. Generated custom integrations remain
+supported only through complete explicit deployed route fields.
 
 ## Resolver architecture
 
@@ -41,11 +42,11 @@ remove only exact duplicate tuples.
 
 | Okta application key | Required source evidence | Normalized route |
 | --- | --- | --- |
-| `asana` | Standard catalog integration without conflicting explicit route fields | ACS `https://app.asana.com/-/saml/consume`; entity `https://app.asana.com` |
+| `asana` | Standard catalog integration with all explicit ACS and entity route fields absent from `settings.signOn`; incomplete explicit route data fails closed, while complete explicit route data is authoritative | ACS `https://app.asana.com/-/saml/consume`; entity `https://app.asana.com` |
 | `okta_org2org` | `settings.app.acsUrl` and `settings.app.audRestriction` | Exact collected ACS and entity values |
 | `jamfsoftwareserver` | Validated `settings.app.domain` | ACS `https://<domain>/saml/SSO`; entity `https://<domain>/saml/metadata` |
-| `githubenterprisemanageduser` | Validated `settings.app.enterpriseName` | GitHub Enterprise SAML consume and entity routes |
-| `githubcloud` | Validated `settings.app.githubOrg` or `settings.app.orgName` | GitHub organization SAML consume and entity routes |
+| `githubenterprisemanageduser` | Validated `settings.app.enterpriseName` | ACS `https://github.com/enterprises/<enterpriseName>/saml/consume`; entity `https://github.com/enterprises/<enterpriseName>` |
+| `githubcloud` | Validated `settings.app.githubOrg` or `settings.app.orgName` | ACS `https://github.com/orgs/<githubOrg-or-orgName>/saml/consume`; entity `https://github.com/orgs/<githubOrg-or-orgName>` |
 | `panw_globalprotect` | Complete HTTPS origin in `settings.app.baseURL` | ACS `<baseURL>/SAML20/SP/ACS`; entity `<baseURL>/SAML20/SP` |
 | `slack` | Validated workspace or Enterprise Grid value in `settings.app.domain` | ACS `https://<domain>.slack.com/sso/saml`; entity `https://slack.com` |
 | `zoomus` | One validated vanity label in `settings.app.subDomain` | ACS `https://<subDomain>.zoom.us/saml/SSO`; entity `https://<subDomain>.zoom.us` |
@@ -68,7 +69,8 @@ publishes the same ACS and an SP metadata entity ID with a trailing slash. The
 resolver preserves the exact OIN assertion audience without the trailing slash.
 Okta's current [Asana setup guide](https://saml-doc.okta.com/SAML_Docs/How-to-Configure-SAML-2.0-for-Asana.html)
 corroborates the supported Okta-to-Asana flow. Complete explicit deployed route
-fields remain authoritative.
+fields remain authoritative; incomplete explicit route fields suppress default
+promotion.
 
 ### Miro default promotion
 
@@ -108,7 +110,8 @@ A resolver must:
 4. retain multiple authoritative routes and their endpoint metadata;
 5. defer to complete explicit `settings.signOn` evidence;
 6. report conflicts and incomplete evidence diagnostically; and
-7. emit no route for unknown, malformed, partial, or unsupported variants.
+7. emit neither ACS nor entity values for unknown, malformed, partial, or
+   unsupported variants.
 
 For example, the GlobalProtect resolver accepts only a complete HTTPS origin in
 `settings.app.baseURL`. It rejects credentials, whitespace, expressions,

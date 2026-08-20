@@ -1063,6 +1063,44 @@ def test_asana_oin_route_uses_observed_default_route():
     assert rows[0]["extraction_mode"] == "allowlisted_static_default_route"
 
 
+@pytest.mark.parametrize(
+    ("route_field", "route_value", "diagnostic"),
+    [
+        (
+            "ssoAcsUrlOverride",
+            "https://app.asana.com/-/saml/consume",
+            "missing_authoritative_sp_entity_evidence",
+        ),
+        (
+            "audienceOverride",
+            "https://app.asana.com",
+            "missing_authoritative_acs_evidence",
+        ),
+    ],
+)
+def test_asana_oin_route_fails_closed_with_partial_explicit_route(
+    route_field,
+    route_value,
+    diagnostic,
+):
+    app = _application(
+        name="asana",
+        settings={
+            "app": {},
+            "signOn": {
+                "idpIssuer": "http://www.okta.com/exk_asana",
+                route_field: route_value,
+            },
+        },
+    )
+
+    assert saml_acs_rows(app) == []
+    provider = saml_federation_provider_row(app)
+    assert provider is not None
+    assert provider["acs_ids"] == []
+    assert provider["route_diagnostics"] == [diagnostic]
+
+
 def test_zoom_single_vanity_oin_route_uses_documented_subdomain_contract():
     app = _application(
         name="zoomus",

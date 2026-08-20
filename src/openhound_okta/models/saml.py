@@ -305,19 +305,23 @@ def _saml_routes(
         return list(explicit.routes), diagnostics
 
     if oin_routes:
-        partial_conflicts = []
-        if explicit.acs_urls and any(
-            route.acs_url not in explicit.acs_urls for route in oin_routes
-        ):
-            partial_conflicts.append("partial_explicit_acs_conflicts_with_oin_route")
-        if explicit.sp_entity_id and any(
-            explicit.sp_entity_id != route.sp_entity_id for route in oin_routes
-        ):
-            partial_conflicts.append(
-                "partial_explicit_sp_entity_conflicts_with_oin_route"
+        partial_diagnostics = []
+        if explicit.acs_urls:
+            partial_diagnostics.append(
+                "partial_explicit_acs_conflicts_with_oin_route"
+                if any(route.acs_url not in explicit.acs_urls for route in oin_routes)
+                else "missing_authoritative_sp_entity_evidence"
             )
-        if partial_conflicts:
-            return [], partial_conflicts
+        if explicit.sp_entity_id:
+            partial_diagnostics.append(
+                "partial_explicit_sp_entity_conflicts_with_oin_route"
+                if any(
+                    explicit.sp_entity_id != route.sp_entity_id for route in oin_routes
+                )
+                else "missing_authoritative_acs_evidence"
+            )
+        if partial_diagnostics:
+            return [], partial_diagnostics
         return oin_routes, list(oin_resolution.diagnostics)
 
     if oin_resolution.diagnostics:
