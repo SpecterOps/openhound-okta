@@ -1,4 +1,6 @@
+from dataclasses import dataclass, field as dc_field
 from datetime import datetime
+from typing import Any
 
 from openhound.core.asset import BaseAsset, EdgeDef
 from openhound.core.models.entries_dataclass import Edge, EdgeProperties
@@ -25,6 +27,22 @@ class Credentials(BaseModel):
     oauth_client: dict | None = Field(default=None, alias="oauthClient")
 
 
+@dataclass
+class AppAssignmentEdgeProperties(EdgeProperties):
+    """Non-sensitive provenance for a native Okta application assignment.
+
+    Attributes:
+        assignment_last_updated: Timestamp of the native Okta assignment update.
+        assignment_priority: Native Okta group-assignment priority.
+        assignment_profile_fields: Sorted assignment-profile field names. Values
+            are intentionally excluded because they may contain sensitive data.
+    """
+
+    assignment_last_updated: datetime | None = None
+    assignment_priority: int | None = None
+    assignment_profile_fields: list[str] = dc_field(default_factory=list)
+
+
 @app.asset(
     description="Okta assigned application asset",
     edges=[
@@ -45,8 +63,12 @@ class GroupAssignedApp(BaseAsset):
     status: str
     last_updated: datetime | None = Field(default=None, alias="lastUpdated")
 
-    # Additional
     group_id: str
+    # Retained in raw/preprocessed evidence for later SAML compactability checks.
+    app_sign_on_mode: str | None = None
+    assignment_last_updated: datetime | None = None
+    assignment_priority: int | None = None
+    assignment_profile: dict[str, Any] | None = None
 
     @property
     def as_node(self):
@@ -54,9 +76,30 @@ class GroupAssignedApp(BaseAsset):
 
     @property
     def edges(self):
+        lookup = getattr(self, "_lookup", None)
+        group_by_id = getattr(lookup, "group_by_id", None)
+        if not self.group_id:
+            raise ValueError("application-group assignment is missing its group ID")
+        if not callable(group_by_id):
+            raise RuntimeError(
+                "application-group assignment conversion requires group lookup"
+            )
+        if not group_by_id(self.group_id):
+            raise ValueError(
+                "application-group assignment references uncollected Okta group "
+                f"{self.group_id} for application {self.id}"
+            )
+
         yield Edge(
             kind=ek.APP_ASSIGNMENT,
             start=OktaOwnedEdgePath(value=self.group_id, match_by="id"),
             end=OktaOwnedEdgePath(value=self.id, match_by="id"),
-            properties=EdgeProperties(traversable=False),
+            properties=AppAssignmentEdgeProperties(
+                traversable=False,
+                assignment_last_updated=self.assignment_last_updated,
+                assignment_priority=self.assignment_priority,
+                assignment_profile_fields=(
+                    sorted(self.assignment_profile) if self.assignment_profile else []
+                ),
+            ),
         )

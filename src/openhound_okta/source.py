@@ -1,4 +1,6 @@
 import fnmatch
+import hashlib
+import json
 import logging
 from base64 import b64decode
 from collections.abc import Mapping
@@ -220,6 +222,8 @@ APPLICATION_USERS_PAGE_SIZE = 500
 GROUPS_PAGE_SIZE = 200
 GROUPS_PAGE_SIZE_FALLBACK_DIVISORS = (1, 2, 4)
 GROUPS_INITIAL_READ_TIMEOUT_MAX_ATTEMPTS = 2
+APPLICATION_GROUP_ASSIGNMENTS_MIN_PAGE_SIZE = 20
+APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE = 200
 GROUP_PUSH_MAPPINGS_PAGE_SIZE = 1000
 IDENTITY_PROVIDER_USERS_PAGE_SIZE = 200
 
@@ -380,6 +384,9 @@ class SourceContext:
     pool: ClientPool
     application_users_page_size: int = APPLICATION_USERS_PAGE_SIZE
     groups_page_size: int = GROUPS_PAGE_SIZE
+    application_group_assignments_page_size: int = (
+        APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE
+    )
     group_push_mappings_page_size: int = GROUP_PUSH_MAPPINGS_PAGE_SIZE
     identity_provider_users_page_size: int = IDENTITY_PROVIDER_USERS_PAGE_SIZE
 
@@ -511,26 +518,113 @@ def group_memberships(group: Group, ctx: SourceContext):
                 yield {"group_id": group.id, **item}
 
 
-@app.transformer(
-    name="group_assigned_apps", columns=GroupAssignedApp, parallelized=True
+def _application_group_assignment_fingerprint(
+    assignment: Mapping[str, object],
+) -> str:
+    """Return a type-preserving canonical fingerprint for duplicate evidence."""
+    evidence = {
+        "assignment_last_updated": assignment.get("lastUpdated"),
+        "assignment_priority": assignment.get("priority"),
+        "assignment_profile": assignment.get("profile"),
+    }
+    try:
+        canonical_evidence = json.dumps(
+            evidence,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "application-group assignment has non-JSON duplicate evidence"
+        ) from exc
+
+    return hashlib.sha256(canonical_evidence.encode("utf-8")).hexdigest()
+
+
+def application_group_assignment_rows(application: Application, ctx: SourceContext):
+    """Stream authoritative assignments while retaining compact duplicate state."""
+    assignment_fingerprints: dict[str, str] = {}
+    duplicate_count = 0
+
+    for page in ctx.pool.paginate(
+        f"/api/v1/apps/{application.id}/groups",
+        params={"limit": ctx.application_group_assignments_page_size},
+    ):
+        for assignment in page:
+            if not isinstance(assignment, Mapping):
+                raise ValueError(
+                    "application-group assignment without a usable group ID "
+                    f"for application {application.id}"
+                )
+
+            group_id = assignment.get("id")
+            if not isinstance(group_id, str) or not group_id.strip():
+                raise ValueError(
+                    "application-group assignment without a usable group ID "
+                    f"for application {application.id}"
+                )
+            group_id = group_id.strip()
+            fingerprint = _application_group_assignment_fingerprint(assignment)
+
+            row = {
+                "id": application.id,
+                "group_id": group_id,
+                "name": application.name,
+                "label": application.label,
+                "status": application.status,
+                "lastUpdated": application.last_updated,
+                "app_sign_on_mode": application.sign_on_mode,
+                "assignment_last_updated": assignment.get("lastUpdated"),
+                "assignment_priority": assignment.get("priority"),
+                "assignment_profile": assignment.get("profile"),
+            }
+            previous = assignment_fingerprints.get(group_id)
+            if previous is None:
+                assignment_fingerprints[group_id] = fingerprint
+                yield row
+            elif previous == fingerprint:
+                duplicate_count += 1
+            else:
+                raise ValueError(
+                    "conflicting application-group assignments for "
+                    f"application {application.id} and group {group_id}"
+                )
+
+    if duplicate_count:
+        logger.warning(
+            "deduplicated %d identical application-group assignment rows for application %s",
+            duplicate_count,
+            application.id,
+            extra={"resource": "group_assigned_apps", "phase": "collect"},
+        )
+
+
+# This authoritative transformer and its shared parent use DLT directly so
+# OpenHound's best-effort wrapper cannot publish a partial replacement snapshot.
+@dlt.transformer(
+    name="group_assigned_apps",
+    columns=GroupAssignedApp,
+    parallelized=True,
+    write_disposition="replace",
 )
-def group_assigned_apps(group: Group, ctx: SourceContext):
-    """DLT resource, fetches apps assigned to groups via /api/v1/groups/{group_id}/apps
-
-    Args:
-        group (Group): Okta group record.
-        ctx (SourceContext): SourceContext containing the REST client for API calls.
-
-    Yields:
-        _type_: _description_
-    """
-    if group.embedded.stats.apps_count > 0:
-        for page in ctx.pool.paginate(f"/api/v1/groups/{group.id}/apps"):
-            for item in page:
-                yield {"group_id": group.id, **item}
+def group_assigned_apps(application: Application, ctx: SourceContext):
+    """Fetch authoritative group assignments for an Okta application."""
+    try:
+        yield from application_group_assignment_rows(application, ctx)
+    except Exception:
+        logger.error(
+            "authoritative application-group assignment collection failed",
+            extra={"resource": "group_assigned_apps", "phase": "resource_iteration"},
+        )
+        raise
 
 
-@app.resource(name="applications", columns=Application, parallelized=True)
+app.dlt_resources.append(group_assigned_apps)
+
+
+@dlt.resource(name="applications", columns=Application, parallelized=True)
 def applications(ctx: SourceContext):
     """DLT resource, fetches Okta applications via GET /api/v1/apps.
 
@@ -546,6 +640,9 @@ def applications(ctx: SourceContext):
                 item = {**item, **_saml_metadata_fields(ctx, item)}
             item = _office365_tenant_id_fields(item)
             yield item
+
+
+app.dlt_resources.append(applications)
 
 
 def _office365_tenant_id_fields(
@@ -1441,6 +1538,9 @@ def source(
     ] = dlt.secrets.value,
     application_users_page_size: int = APPLICATION_USERS_PAGE_SIZE,
     groups_page_size: int = GROUPS_PAGE_SIZE,
+    application_group_assignments_page_size: int = (
+        APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE
+    ),
     group_push_mappings_page_size: int = GROUP_PUSH_MAPPINGS_PAGE_SIZE,
     identity_provider_users_page_size: int = IDENTITY_PROVIDER_USERS_PAGE_SIZE,
     endpoint_concurrency: int = DEFAULT_ENDPOINT_CONCURRENCY,
@@ -1453,6 +1553,7 @@ def source(
         credentials: Okta API credentials based on key path, encoded key or SSWS for authentication.
         application_users_page_size: Users requested per application-users page.
         groups_page_size: Groups requested per expanded groups page.
+        application_group_assignments_page_size: Groups requested per application page.
         group_push_mappings_page_size: Mappings requested per group-push page.
         identity_provider_users_page_size: Users requested per identity-provider page.
         endpoint_concurrency: Maximum simultaneous requests for each endpoint family.
@@ -1471,6 +1572,16 @@ def source(
         raise ValueError(
             "groups_page_size must be between 1 and "
             f"{GROUPS_PAGE_SIZE}"
+        )
+    if not (
+        APPLICATION_GROUP_ASSIGNMENTS_MIN_PAGE_SIZE
+        <= application_group_assignments_page_size
+        <= APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE
+    ):
+        raise ValueError(
+            "application_group_assignments_page_size must be between "
+            f"{APPLICATION_GROUP_ASSIGNMENTS_MIN_PAGE_SIZE} and "
+            f"{APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE}"
         )
     if not 1 <= group_push_mappings_page_size <= GROUP_PUSH_MAPPINGS_PAGE_SIZE:
         raise ValueError(
@@ -1502,6 +1613,9 @@ def source(
         pool=pool,
         application_users_page_size=application_users_page_size,
         groups_page_size=groups_page_size,
+        application_group_assignments_page_size=(
+            application_group_assignments_page_size
+        ),
         group_push_mappings_page_size=group_push_mappings_page_size,
         identity_provider_users_page_size=identity_provider_users_page_size,
     )
@@ -1523,11 +1637,11 @@ def source(
         users_resource | user_factors(ctx),
         groups_resource,
         groups_resource | group_memberships(ctx),
-        groups_resource | group_assigned_apps(ctx),
         groups_resource | group_role_assignments(ctx),
         client_apps_resource,
         client_apps_resource | client_role_assignments(ctx),
         applications_resource,
+        applications_resource | group_assigned_apps(ctx),
         applications_resource | application_grants(ctx),
         applications_resource | application_users(ctx),
         applications_resource | saml_federation_providers(),

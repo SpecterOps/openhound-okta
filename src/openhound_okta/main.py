@@ -56,14 +56,15 @@ def convert(ctx: ConvertContext):
     return okta_source(), {"tenant": tenant_domain}
 
 
-@app.preproc(transformer=transforms)
-def preprocess(ctx: PreProcContext):
+def preprocessing_resources() -> dict[str, str]:
+    """Map collected Okta resources into their preprocessing tables."""
     return {
         "organization": "organization",
         "users": "users",
         "user_factors": "user_factors",
         "groups": "groups",
         "group_memberships": "group_memberships",
+        "group_assigned_apps": "group_assigned_apps",
         "applications": "applications",
         "application_grants": "application_grants",
         "application_users": "application_users",
@@ -92,3 +93,8 @@ def preprocess(ctx: PreProcContext):
         "client_role_assignments": "client_role_assignments",
         "custom_role_permissions": "custom_role_permissions",
     }
+
+
+@app.preproc(transformer=transforms)
+def preprocess(ctx: PreProcContext):
+    return preprocessing_resources()
