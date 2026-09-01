@@ -15,8 +15,10 @@ from dlt.sources.helpers.requests.session import Session
 from openhound_okta.models.token import Token
 from openhound_okta.source import (
     APPLICATION_USERS_PAGE_SIZE,
+    GROUPS_PAGE_SIZE,
     GROUP_PUSH_MAPPINGS_PAGE_SIZE,
     IDENTITY_PROVIDER_USERS_PAGE_SIZE,
+    OktaTokenCredentials,
     _microsoft_tenant_id_from_onmicrosoft_domain,
     _office365_tenant_id_fields,
     _saml_idp_metadata_fields,
@@ -26,7 +28,9 @@ from openhound_okta.source import (
     application_group_push_mappings,
     application_jwk_rows,
     application_user_rows,
+    groups,
     identity_provider_users,
+    source,
     user_role_assignment_rows,
 )
 from openhound_okta.utils.auth import OktaBearerAuth, UnauthorizedClassification
@@ -793,6 +797,42 @@ class RecordingPool:
     def get(self, path, **kwargs):
         self.get_paths.append(path)
         return SimpleNamespace(json=lambda: self.responses[path])
+
+
+def test_groups_request_the_default_expanded_page_size():
+    pool = RecordingPool(pages=[[{"id": "00g123"}]])
+    ctx = SimpleNamespace(pool=pool, groups_page_size=GROUPS_PAGE_SIZE)
+
+    rows = list(groups.__wrapped__(ctx))
+
+    assert rows == [{"id": "00g123"}]
+    assert pool.path == "/api/v1/groups?expand=stats"
+    assert pool.kwargs == {"params": {"limit": 200}}
+
+
+def test_groups_request_a_custom_expanded_page_size():
+    pool = RecordingPool(pages=[[{"id": "00g123"}]])
+    ctx = SimpleNamespace(pool=pool, groups_page_size=50)
+
+    rows = list(groups.__wrapped__(ctx))
+
+    assert rows == [{"id": "00g123"}]
+    assert pool.path == "/api/v1/groups?expand=stats"
+    assert pool.kwargs == {"params": {"limit": 50}}
+
+
+@pytest.mark.parametrize("groups_page_size", [0, -1, GROUPS_PAGE_SIZE + 1])
+def test_source_rejects_invalid_groups_page_size(groups_page_size):
+    credentials = OktaTokenCredentials(
+        base_url="https://example.okta.test",
+        token="token",
+    )
+
+    with pytest.raises(ValueError, match="groups_page_size must be between 1 and 200"):
+        inspect.unwrap(source)(
+            credentials=credentials,
+            groups_page_size=groups_page_size,
+        )
 
 
 def test_group_push_mappings_request_the_maximum_page_size():

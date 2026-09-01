@@ -216,6 +216,7 @@ def _role_assignment_scope(
 
 
 APPLICATION_USERS_PAGE_SIZE = 500
+GROUPS_PAGE_SIZE = 200
 GROUP_PUSH_MAPPINGS_PAGE_SIZE = 1000
 IDENTITY_PROVIDER_USERS_PAGE_SIZE = 200
 
@@ -375,6 +376,7 @@ class SourceContext:
 
     pool: ClientPool
     application_users_page_size: int = APPLICATION_USERS_PAGE_SIZE
+    groups_page_size: int = GROUPS_PAGE_SIZE
     group_push_mappings_page_size: int = GROUP_PUSH_MAPPINGS_PAGE_SIZE
     identity_provider_users_page_size: int = IDENTITY_PROVIDER_USERS_PAGE_SIZE
 
@@ -438,7 +440,10 @@ def groups(ctx: SourceContext):
     """
     # Example of saving state
     # last_run = dlt.current.resource_state().setdefault("last_run", None)
-    for page in ctx.pool.paginate("/api/v1/groups?expand=stats"):
+    for page in ctx.pool.paginate(
+        "/api/v1/groups?expand=stats",
+        params={"limit": ctx.groups_page_size},
+    ):
         for item in page:
             yield item
 
@@ -1387,6 +1392,7 @@ def source(
         OktaAppCredentials, OktaEncodedAppCredentials, OktaTokenCredentials
     ] = dlt.secrets.value,
     application_users_page_size: int = APPLICATION_USERS_PAGE_SIZE,
+    groups_page_size: int = GROUPS_PAGE_SIZE,
     group_push_mappings_page_size: int = GROUP_PUSH_MAPPINGS_PAGE_SIZE,
     identity_provider_users_page_size: int = IDENTITY_PROVIDER_USERS_PAGE_SIZE,
     endpoint_concurrency: int = DEFAULT_ENDPOINT_CONCURRENCY,
@@ -1398,6 +1404,7 @@ def source(
     Args:
         credentials: Okta API credentials based on key path, encoded key or SSWS for authentication.
         application_users_page_size: Users requested per application-users page.
+        groups_page_size: Groups requested per expanded groups page.
         group_push_mappings_page_size: Mappings requested per group-push page.
         identity_provider_users_page_size: Users requested per identity-provider page.
         endpoint_concurrency: Maximum simultaneous requests for each endpoint family.
@@ -1411,6 +1418,11 @@ def source(
         raise ValueError(
             "application_users_page_size must be between 1 and "
             f"{APPLICATION_USERS_PAGE_SIZE}"
+        )
+    if not 1 <= groups_page_size <= GROUPS_PAGE_SIZE:
+        raise ValueError(
+            "groups_page_size must be between 1 and "
+            f"{GROUPS_PAGE_SIZE}"
         )
     if not 1 <= group_push_mappings_page_size <= GROUP_PUSH_MAPPINGS_PAGE_SIZE:
         raise ValueError(
@@ -1441,6 +1453,7 @@ def source(
     ctx = SourceContext(
         pool=pool,
         application_users_page_size=application_users_page_size,
+        groups_page_size=groups_page_size,
         group_push_mappings_page_size=group_push_mappings_page_size,
         identity_provider_users_page_size=identity_provider_users_page_size,
     )
