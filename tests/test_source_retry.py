@@ -960,7 +960,7 @@ def test_groups_reduce_page_size_after_initial_read_timeout(caplog):
     assert "previous_page_size=100 next_page_size=50" in caplog.text
 
 
-def test_groups_do_not_restart_after_a_later_page_timeout(caplog):
+def test_groups_do_not_restart_after_a_later_page_timeout():
     class LaterPageTimeoutPool:
         def __init__(self):
             self.calls = []
@@ -980,12 +980,10 @@ def test_groups_do_not_restart_after_a_later_page_timeout(caplog):
     pool = LaterPageTimeoutPool()
     ctx = SimpleNamespace(pool=pool, groups_page_size=GROUPS_PAGE_SIZE)
 
-    with caplog.at_level(logging.ERROR):
-        rows = list(groups.__wrapped__(ctx))
+    with pytest.raises(OktaRetryExhaustedError):
+        list(inspect.unwrap(groups)(ctx))
 
-    assert rows == [{"id": "00g123"}]
     assert [call[1]["params"]["limit"] for call in pool.calls] == [200]
-    assert "Error in resource 'groups' during iteration" in caplog.text
 
 
 @pytest.mark.parametrize("groups_page_size", [0, -1, GROUPS_PAGE_SIZE + 1])
