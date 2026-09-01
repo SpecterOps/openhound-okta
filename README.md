@@ -67,6 +67,8 @@ Fan-out resources use explicit page sizes where Okta documents safe maxima. Expa
 rows per page, application-user collection requests 500 rows per page, group-push mapping collection requests 1,000
 rows per page, and identity-provider user collection requests 200 rows per page. Rows stream to DLT; an exhausted
 required request fails the collection so DLT does not publish an incomplete replacement.
+If the initial expanded group page repeatedly times out, the collector retries that first page with successively halved
+limits before failing. With the default configuration, that sequence is 200, 100, then 50.
 
 The defaults can be adjusted with DLT source configuration environment variables:
 

@@ -91,6 +91,7 @@ from .utils.http import (
     DEFAULT_RATE_LIMIT_MAX_ELAPSED_SECONDS,
     DEFAULT_RATE_LIMIT_REMAINING_RESERVE,
     EndpointThrottle,
+    InitialReadTimeoutBudget,
     OktaRESTClient,
     OktaRetryExhaustedError,
 )
@@ -217,6 +218,8 @@ def _role_assignment_scope(
 
 APPLICATION_USERS_PAGE_SIZE = 500
 GROUPS_PAGE_SIZE = 200
+GROUPS_PAGE_SIZE_FALLBACK_DIVISORS = (1, 2, 4)
+GROUPS_INITIAL_READ_TIMEOUT_MAX_ATTEMPTS = 2
 GROUP_PUSH_MAPPINGS_PAGE_SIZE = 1000
 IDENTITY_PROVIDER_USERS_PAGE_SIZE = 200
 
@@ -381,6 +384,22 @@ class SourceContext:
     identity_provider_users_page_size: int = IDENTITY_PROVIDER_USERS_PAGE_SIZE
 
 
+def _group_page_sizes(initial_page_size: int) -> tuple[int, ...]:
+    return tuple(
+        dict.fromkeys(
+            max(initial_page_size // divisor, 1)
+            for divisor in GROUPS_PAGE_SIZE_FALLBACK_DIVISORS
+        )
+    )
+
+
+def _is_read_timeout_retry_exhaustion(error: OktaRetryExhaustedError) -> bool:
+    return (
+        error.context.status_code is None
+        and isinstance(error.__cause__, requests.exceptions.ReadTimeout)
+    )
+
+
 @app.resource(name="organization", columns=Organization, parallelized=True)
 def organization(ctx: SourceContext):
     """DLT resource, fetches Okta organization metadata via GET /api/v1/org.
@@ -440,12 +459,41 @@ def groups(ctx: SourceContext):
     """
     # Example of saving state
     # last_run = dlt.current.resource_state().setdefault("last_run", None)
-    for page in ctx.pool.paginate(
-        "/api/v1/groups?expand=stats",
-        params={"limit": ctx.groups_page_size},
-    ):
-        for item in page:
+    page_sizes = _group_page_sizes(ctx.groups_page_size)
+    for index, page_size in enumerate(page_sizes):
+        pages = iter(
+            ctx.pool.paginate(
+                "/api/v1/groups?expand=stats",
+                params={"limit": page_size},
+                initial_read_timeout_budget=InitialReadTimeoutBudget(
+                    GROUPS_INITIAL_READ_TIMEOUT_MAX_ATTEMPTS
+                ),
+            )
+        )
+        try:
+            first_page = next(pages)
+        except StopIteration:
+            return
+        except OktaRetryExhaustedError as error:
+            has_fallback = index + 1 < len(page_sizes)
+            if not has_fallback or not _is_read_timeout_retry_exhaustion(error):
+                raise
+            logger.warning(
+                "Retrying expanded Okta group collection with smaller page size "
+                "after initial read timeout previous_page_size=%s next_page_size=%s "
+                "url=%s",
+                page_size,
+                page_sizes[index + 1],
+                error.context.url,
+            )
+            continue
+
+        for item in first_page:
             yield item
+        for page in pages:
+            for item in page:
+                yield item
+        return
 
     # dlt.current.resource_state()["last_run"] = str(datetime.now().isoformat())
 
