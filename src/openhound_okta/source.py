@@ -1,4 +1,6 @@
 import fnmatch
+import hashlib
+import json
 import logging
 from base64 import b64decode
 from collections.abc import Mapping
@@ -516,9 +518,34 @@ def group_memberships(group: Group, ctx: SourceContext):
                 yield {"group_id": group.id, **item}
 
 
+def _application_group_assignment_fingerprint(
+    assignment: Mapping[str, object],
+) -> str:
+    """Return a type-preserving canonical fingerprint for duplicate evidence."""
+    evidence = {
+        "assignment_last_updated": assignment.get("lastUpdated"),
+        "assignment_priority": assignment.get("priority"),
+        "assignment_profile": assignment.get("profile"),
+    }
+    try:
+        canonical_evidence = json.dumps(
+            evidence,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "application-group assignment has non-JSON duplicate evidence"
+        ) from exc
+
+    return hashlib.sha256(canonical_evidence.encode("utf-8")).hexdigest()
+
+
 def application_group_assignment_rows(application: Application, ctx: SourceContext):
-    """Return a complete, de-duplicated assignment snapshot for one application."""
-    assignments: dict[str, dict[str, Any]] = {}
+    """Stream authoritative assignments while retaining compact duplicate state."""
+    assignment_fingerprints: dict[str, str] = {}
     duplicate_count = 0
 
     for page in ctx.pool.paginate(
@@ -539,6 +566,7 @@ def application_group_assignment_rows(application: Application, ctx: SourceConte
                     f"for application {application.id}"
                 )
             group_id = group_id.strip()
+            fingerprint = _application_group_assignment_fingerprint(assignment)
 
             row = {
                 "id": application.id,
@@ -552,10 +580,11 @@ def application_group_assignment_rows(application: Application, ctx: SourceConte
                 "assignment_priority": assignment.get("priority"),
                 "assignment_profile": assignment.get("profile"),
             }
-            previous = assignments.get(group_id)
+            previous = assignment_fingerprints.get(group_id)
             if previous is None:
-                assignments[group_id] = row
-            elif previous == row:
+                assignment_fingerprints[group_id] = fingerprint
+                yield row
+            elif previous == fingerprint:
                 duplicate_count += 1
             else:
                 raise ValueError(
@@ -571,8 +600,6 @@ def application_group_assignment_rows(application: Application, ctx: SourceConte
             extra={"resource": "group_assigned_apps", "phase": "collect"},
         )
 
-    yield from assignments.values()
-
 
 # This authoritative transformer and its shared parent use DLT directly so
 # OpenHound's best-effort wrapper cannot publish a partial replacement snapshot.
@@ -586,10 +613,9 @@ def group_assigned_apps(application: Application, ctx: SourceContext):
     """Fetch authoritative group assignments for an Okta application."""
     try:
         yield from application_group_assignment_rows(application, ctx)
-    except Exception as exc:
+    except Exception:
         logger.error(
-            "authoritative application-group assignment collection failed: %s",
-            exc,
+            "authoritative application-group assignment collection failed",
             extra={"resource": "group_assigned_apps", "phase": "resource_iteration"},
         )
         raise

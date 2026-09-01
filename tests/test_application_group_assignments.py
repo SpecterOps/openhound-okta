@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import dlt
 import pytest
 from dlt.extract.exceptions import ResourceExtractionError
+from dlt.pipeline.exceptions import PipelineStepFailed
 
 from openhound_okta.main import preprocessing_resources
 from openhound_okta.models.group_assigned_apps import GroupAssignedApp
@@ -93,7 +94,7 @@ def test_application_group_assignments_consume_every_page_and_deduplicate_identi
     pool = RecordingPool(
         [
             [duplicate, assignment("00g-second", priority=None)],
-            [duplicate, assignment("00g-third", priority=3)],
+            [duplicate, duplicate, assignment("00g-third", priority=3)],
         ]
     )
     ctx = SimpleNamespace(
@@ -109,7 +110,16 @@ def test_application_group_assignments_consume_every_page_and_deduplicate_identi
         "00g-third",
     ]
     assert rows[1]["assignment_priority"] is None
-    assert "deduplicated 1 identical application-group assignment" in caplog.text
+    duplicate_diagnostics = [
+        record
+        for record in caplog.records
+        if "deduplicated" in record.message
+        and "application-group assignment" in record.message
+    ]
+    assert len(duplicate_diagnostics) == 1
+    assert "deduplicated 2 identical application-group assignment" in caplog.text
+    assert "administrator" not in caplog.text
+    assert "must-not-reach-the-graph" not in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -164,7 +174,7 @@ def test_application_group_assignments_fail_on_conflicting_duplicate():
         list(application_group_assignment_rows(application(), ctx))
 
 
-def test_application_group_assignments_do_not_yield_partial_application_on_page_failure():
+def test_application_group_assignments_stream_first_row_before_later_page_failure():
     class FailingPool(RecordingPool):
         def paginate(self, path, **kwargs):
             self.path = path
@@ -178,8 +188,53 @@ def test_application_group_assignments_do_not_yield_partial_application_on_page_
     )
     rows = application_group_assignment_rows(application(), ctx)
 
+    assert next(rows)["group_id"] == "00g-group"
     with pytest.raises(RuntimeError, match="opaque continuation failed"):
         next(rows)
+
+
+def test_application_group_assignments_ignore_mapping_key_order_in_duplicates():
+    pool = RecordingPool(
+        [
+            [
+                assignment(
+                    profile={"role": "administrator", "nested": {"a": 1, "b": 2}}
+                ),
+                assignment(
+                    profile={"nested": {"b": 2, "a": 1}, "role": "administrator"}
+                ),
+            ]
+        ]
+    )
+    ctx = SimpleNamespace(pool=pool, application_group_assignments_page_size=200)
+
+    rows = list(application_group_assignment_rows(application(), ctx))
+
+    assert [row["group_id"] for row in rows] == ["00g-group"]
+
+
+@pytest.mark.parametrize(
+    "conflicting_assignment",
+    [
+        assignment(priority=None),
+        assignment(lastUpdated="2026-08-19T12:34:57.000Z"),
+        assignment(profile={"role": "user"}),
+    ],
+)
+def test_application_group_assignments_fail_on_different_duplicate_evidence(
+    conflicting_assignment,
+    caplog,
+):
+    pool = RecordingPool([[assignment(), conflicting_assignment]])
+    ctx = SimpleNamespace(pool=pool, application_group_assignments_page_size=200)
+
+    rows = application_group_assignment_rows(application(), ctx)
+
+    assert next(rows)["assignment_priority"] == 0
+    with pytest.raises(ValueError, match="conflicting application-group assignments"):
+        next(rows)
+    assert "administrator" not in caplog.text
+    assert "must-not-reach-the-graph" not in caplog.text
 
 
 def test_application_group_assignment_pipeline_propagates_page_failure(caplog):
@@ -402,3 +457,40 @@ def test_group_assignment_table_replaces_stale_rows(tmp_path):
 
     run_snapshot([])
     assert stored_group_ids() == []
+
+
+def test_group_assignment_failed_continuation_preserves_prior_replacement_snapshot(tmp_path):
+    pipeline = dlt.pipeline(
+        pipeline_name="group_assignment_atomic_replace_test",
+        pipelines_dir=str(tmp_path / "pipelines"),
+        destination=dlt.destinations.duckdb(
+            credentials=str(tmp_path / "assignments.duckdb")
+        ),
+        dataset_name="okta",
+    )
+
+    def run_snapshot(pool):
+        parent = dlt.resource([application()], name="atomic_applications")
+        ctx = SimpleNamespace(
+            pool=pool,
+            application_group_assignments_page_size=200,
+        )
+        return pipeline.run(parent | group_assigned_apps(ctx))
+
+    def stored_group_ids():
+        with pipeline.sql_client() as client:
+            return client.execute_sql(
+                "SELECT group_id FROM group_assigned_apps ORDER BY group_id"
+            )
+
+    run_snapshot(RecordingPool([[assignment("00g-prior")]]))
+
+    class FailingPool(RecordingPool):
+        def paginate(self, path, **kwargs):
+            yield [assignment("00g-new")]
+            raise RuntimeError("opaque continuation failed")
+
+    with pytest.raises(PipelineStepFailed, match="opaque continuation failed"):
+        run_snapshot(FailingPool([]))
+
+    assert stored_group_ids() == [("00g-prior",)]
