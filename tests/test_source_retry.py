@@ -15,8 +15,10 @@ from dlt.sources.helpers.requests.session import Session
 from openhound_okta.models.token import Token
 from openhound_okta.source import (
     APPLICATION_USERS_PAGE_SIZE,
+    GROUPS_PAGE_SIZE,
     GROUP_PUSH_MAPPINGS_PAGE_SIZE,
     IDENTITY_PROVIDER_USERS_PAGE_SIZE,
+    OktaTokenCredentials,
     _microsoft_tenant_id_from_onmicrosoft_domain,
     _office365_tenant_id_fields,
     _saml_idp_metadata_fields,
@@ -26,12 +28,16 @@ from openhound_okta.source import (
     application_group_push_mappings,
     application_jwk_rows,
     application_user_rows,
+    _group_page_sizes,
+    groups,
     identity_provider_users,
+    source,
     user_role_assignment_rows,
 )
 from openhound_okta.utils.auth import OktaBearerAuth, UnauthorizedClassification
 from openhound_okta.utils.http import (
     EndpointThrottle,
+    InitialReadTimeoutBudget,
     OktaRESTClient,
     OktaRetryContext,
     OktaRetryExhaustedError,
@@ -189,6 +195,87 @@ def test_dlt_paginator_retries_the_same_cursor_through_the_real_session_path():
     ]
     assert adapter.requested_urls == [first_url, cursor_url, cursor_url]
     assert clock.sleeps == [1.0]
+
+
+def test_initial_read_timeout_retry_budget_only_applies_to_the_first_page():
+    clock = FakeClock()
+    first_url = "https://example.okta.test/api/v1/groups?expand=stats&limit=200"
+    cursor_url = f"{first_url}&after=00g456"
+    first_page = _response(
+        200,
+        first_url,
+        {"Link": f'<{cursor_url}>; rel="next"'},
+    )
+    first_page._content = b'[{"id":"00g123"}]'
+    second_page = _response(200, cursor_url)
+    second_page._content = b'[{"id":"00g456"}]'
+    client, _ = _client(
+        [
+            first_page,
+            requests.ReadTimeout("timed out"),
+            requests.ReadTimeout("timed out"),
+            second_page,
+        ],
+        max_attempts=5,
+        clock=clock,
+    )
+
+    pages = list(
+        client.paginate(
+            first_url,
+            paginator=HeaderLinkPaginator(),
+            initial_read_timeout_budget=InitialReadTimeoutBudget(2),
+        )
+    )
+
+    assert [list(page) for page in pages] == [
+        [{"id": "00g123"}],
+        [{"id": "00g456"}],
+    ]
+    assert client.requested_urls == [first_url, cursor_url, cursor_url, cursor_url]
+    assert clock.sleeps == [1.0, 2.0]
+
+
+def test_initial_read_timeout_retry_budget_limits_the_first_page():
+    url = "https://example.okta.test/api/v1/groups?expand=stats&limit=200"
+    client, clock = _client(
+        [
+            requests.ReadTimeout("timed out"),
+            requests.ReadTimeout("timed out"),
+            _response(200, url),
+        ],
+        max_attempts=5,
+    )
+
+    with pytest.raises(OktaRetryExhaustedError):
+        client._send_request(
+            Request("GET", url),
+            initial_read_timeout_budget=InitialReadTimeoutBudget(2),
+        )
+
+    assert client.requested_urls == [url, url]
+    assert clock.sleeps == [1.0]
+
+
+def test_initial_read_timeout_retry_budget_does_not_limit_other_transient_errors():
+    url = "https://example.okta.test/api/v1/groups?expand=stats&limit=200"
+    client, clock = _client(
+        [
+            requests.ConnectionError("connection failed"),
+            requests.ConnectionError("connection failed"),
+            _response(200, url),
+        ],
+        max_attempts=5,
+    )
+
+    response = client._send_request(
+        Request("GET", url),
+        initial_read_timeout_budget=InitialReadTimeoutBudget(2),
+    )
+
+    assert response.status_code == 200
+    assert client.requested_urls == [url, url, url]
+    assert clock.sleeps == [1.0, 2.0]
 
 
 def test_dlt_paginator_refreshes_expired_bearer_token_between_pages():
@@ -793,6 +880,124 @@ class RecordingPool:
     def get(self, path, **kwargs):
         self.get_paths.append(path)
         return SimpleNamespace(json=lambda: self.responses[path])
+
+
+def test_groups_request_the_default_expanded_page_size():
+    pool = RecordingPool(pages=[[{"id": "00g123"}]])
+    ctx = SimpleNamespace(pool=pool, groups_page_size=GROUPS_PAGE_SIZE)
+
+    rows = list(groups.__wrapped__(ctx))
+
+    assert rows == [{"id": "00g123"}]
+    assert pool.path == "/api/v1/groups?expand=stats"
+    assert pool.kwargs == {
+        "params": {"limit": 200},
+        "initial_read_timeout_budget": InitialReadTimeoutBudget(2),
+    }
+
+
+def test_groups_request_a_custom_expanded_page_size():
+    pool = RecordingPool(pages=[[{"id": "00g123"}]])
+    ctx = SimpleNamespace(pool=pool, groups_page_size=50)
+
+    rows = list(groups.__wrapped__(ctx))
+
+    assert rows == [{"id": "00g123"}]
+    assert pool.path == "/api/v1/groups?expand=stats"
+    assert pool.kwargs == {
+        "params": {"limit": 50},
+        "initial_read_timeout_budget": InitialReadTimeoutBudget(2),
+    }
+
+
+@pytest.mark.parametrize(
+    ("initial_page_size", "expected"),
+    [
+        (GROUPS_PAGE_SIZE, (200, 100, 50)),
+        (80, (80, 40, 20)),
+        (3, (3, 1)),
+        (1, (1,)),
+    ],
+)
+def test_group_page_sizes_scale_from_the_configured_start(initial_page_size, expected):
+    assert _group_page_sizes(initial_page_size) == expected
+
+
+class AdaptiveGroupsPool:
+    def __init__(self, *, fail_limits=(), pages_by_limit=None):
+        self.fail_limits = set(fail_limits)
+        self.pages_by_limit = pages_by_limit or {}
+        self.calls = []
+
+    def paginate(self, path, **kwargs):
+        self.calls.append((path, kwargs))
+        page_size = kwargs["params"]["limit"]
+        if page_size in self.fail_limits:
+            raise OktaRetryExhaustedError(
+                OktaRetryContext(
+                    endpoint_family="/api/v1/groups*",
+                    url=f"https://example.okta.test{path}&limit={page_size}",
+                    status_code=None,
+                    attempts=2,
+                )
+            ) from requests.ReadTimeout("timed out")
+        yield from self.pages_by_limit.get(page_size, [])
+
+
+def test_groups_reduce_page_size_after_initial_read_timeout(caplog):
+    pool = AdaptiveGroupsPool(
+        fail_limits={GROUPS_PAGE_SIZE, 100},
+        pages_by_limit={50: [[{"id": "00g123"}]]},
+    )
+    ctx = SimpleNamespace(pool=pool, groups_page_size=GROUPS_PAGE_SIZE)
+
+    with caplog.at_level(logging.WARNING):
+        rows = list(groups.__wrapped__(ctx))
+
+    assert rows == [{"id": "00g123"}]
+    assert [call[1]["params"]["limit"] for call in pool.calls] == [200, 100, 50]
+    assert "previous_page_size=200 next_page_size=100" in caplog.text
+    assert "previous_page_size=100 next_page_size=50" in caplog.text
+
+
+def test_groups_do_not_restart_after_a_later_page_timeout():
+    class LaterPageTimeoutPool:
+        def __init__(self):
+            self.calls = []
+
+        def paginate(self, path, **kwargs):
+            self.calls.append((path, kwargs))
+            yield [{"id": "00g123"}]
+            raise OktaRetryExhaustedError(
+                OktaRetryContext(
+                    endpoint_family="/api/v1/groups*",
+                    url=f"https://example.okta.test{path}&limit=200&after=00g123",
+                    status_code=None,
+                    attempts=15,
+                )
+            ) from requests.ReadTimeout("timed out")
+
+    pool = LaterPageTimeoutPool()
+    ctx = SimpleNamespace(pool=pool, groups_page_size=GROUPS_PAGE_SIZE)
+
+    with pytest.raises(OktaRetryExhaustedError):
+        list(inspect.unwrap(groups)(ctx))
+
+    assert [call[1]["params"]["limit"] for call in pool.calls] == [200]
+
+
+@pytest.mark.parametrize("groups_page_size", [0, -1, GROUPS_PAGE_SIZE + 1])
+def test_source_rejects_invalid_groups_page_size(groups_page_size):
+    credentials = OktaTokenCredentials(
+        base_url="https://example.okta.test",
+        token="token",
+    )
+
+    with pytest.raises(ValueError, match="groups_page_size must be between 1 and 200"):
+        inspect.unwrap(source)(
+            credentials=credentials,
+            groups_page_size=groups_page_size,
+        )
 
 
 def test_group_push_mappings_request_the_maximum_page_size():

@@ -44,6 +44,16 @@ class OktaRetryContext:
     cursor: str | None = None
 
 
+@dataclass
+class InitialReadTimeoutBudget:
+    max_attempts: int
+    consumed: bool = False
+
+    def __post_init__(self) -> None:
+        if self.max_attempts < 1:
+            raise ValueError("max_attempts must be at least 1")
+
+
 class OktaRetryExhaustedError(RuntimeError):
     def __init__(self, context: OktaRetryContext):
         self.context = context
@@ -232,10 +242,25 @@ class OktaRESTClient(RESTClient):
     def _send_request(
         self, request: requests.Request, **kwargs: Any
     ) -> requests.Response:
+        initial_read_timeout_budget = kwargs.pop(
+            "initial_read_timeout_budget",
+            None,
+        )
+        read_timeout_max_attempts = self._max_attempts
+        if (
+            initial_read_timeout_budget is not None
+            and not initial_read_timeout_budget.consumed
+        ):
+            read_timeout_max_attempts = min(
+                initial_read_timeout_budget.max_attempts,
+                self._max_attempts,
+            )
+
         started_at = self._elapsed_clock()
         attempt = 0
         rate_limit_attempt = 0
         transient_attempt = 0
+        read_timeout_attempt = 0
         unauthorized_retry_attempted = False
         while True:
             attempt += 1
@@ -245,6 +270,8 @@ class OktaRESTClient(RESTClient):
                 response.raise_for_status()
                 self._throttle.observe_response(response)
                 self._throttle.release()
+                if initial_read_timeout_budget is not None:
+                    initial_read_timeout_budget.consumed = True
                 return response
             except requests.HTTPError as exc:
                 response = exc.response
@@ -320,6 +347,9 @@ class OktaRESTClient(RESTClient):
             except RETRYABLE_REQUEST_EXCEPTIONS as exc:
                 self._throttle.release()
                 transient_attempt += 1
+                is_read_timeout = isinstance(exc, requests.exceptions.ReadTimeout)
+                if is_read_timeout:
+                    read_timeout_attempt += 1
                 context = self._retry_context(
                     None,
                     None,
@@ -327,7 +357,17 @@ class OktaRESTClient(RESTClient):
                     started_at,
                     request,
                 )
-                if transient_attempt >= self._max_attempts:
+                transient_max_attempts = (
+                    read_timeout_max_attempts
+                    if is_read_timeout
+                    else self._max_attempts
+                )
+                exhausted = (
+                    read_timeout_attempt >= read_timeout_max_attempts
+                    if is_read_timeout
+                    else transient_attempt >= self._max_attempts
+                )
+                if exhausted:
                     raise OktaRetryExhaustedError(context) from exc
                 delay = self._retry_delay(None, transient_attempt)
                 logger.warning(
@@ -338,7 +378,7 @@ class OktaRESTClient(RESTClient):
                     self.endpoint_family,
                     attempt,
                     transient_attempt,
-                    self._max_attempts,
+                    transient_max_attempts,
                     context.elapsed_seconds,
                     delay,
                     context.url,
