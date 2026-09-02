@@ -20,6 +20,7 @@ from dlt.sources.helpers.rest_client.client import RESTClient
 from dlt.sources.helpers.rest_client.paginators import HeaderLinkPaginator
 
 from .main import app
+from .saml_eligibility import configured_saml_group_eligibility_mode
 from .models import (
     Agent,
     AgentPool,
@@ -1562,6 +1563,11 @@ def source(
     Returns:
         Tuple of DLT resources and transformers registered for Okta.
     """
+
+    # Validate the shared collect/convert setting here as well as in conversion.
+    # Collection remains graph-shape neutral, but an invalid value must not allow
+    # a raw snapshot to proceed under an accidental future cutover configuration.
+    configured_saml_group_eligibility_mode(dlt.config.get)
 
     if not 1 <= application_users_page_size <= APPLICATION_USERS_PAGE_SIZE:
         raise ValueError(

@@ -8,6 +8,7 @@ from openhound.core.convert import ConvertContext
 from openhound.core.preproc import PreProcContext
 
 from openhound_okta.lookup import OktaLookup
+from openhound_okta.saml_eligibility import configured_saml_group_eligibility_mode
 from openhound_okta.transforms import transforms
 
 app = OpenHound("okta", source_kind="Okta", help="OpenGraph collector for Okta")
@@ -27,6 +28,12 @@ def _tenant_domain_from_config() -> str:
     if not tenant_domain:
         raise ValueError("Okta base URL must include a URL scheme and hostname")
     return tenant_domain
+
+
+def _saml_group_eligibility_mode_from_config() -> str:
+    """Return the explicit producer mode used for conversion extras."""
+
+    return configured_saml_group_eligibility_mode(dlt.config.get)
 
 
 @app.collect()
@@ -51,9 +58,13 @@ def convert(ctx: ConvertContext):
     from openhound_okta.source import source as okta_source
 
     tenant_domain = _tenant_domain_from_config()
+    saml_group_eligibility_mode = _saml_group_eligibility_mode_from_config()
     if ctx.lookup:
         ctx.lookup.tenant_domain = tenant_domain
-    return okta_source(), {"tenant": tenant_domain}
+    return okta_source(), {
+        "tenant": tenant_domain,
+        "saml_group_eligibility_mode": saml_group_eligibility_mode,
+    }
 
 
 def preprocessing_resources() -> dict[str, str]:

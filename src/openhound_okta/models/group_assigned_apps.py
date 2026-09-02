@@ -9,6 +9,16 @@ from pydantic import BaseModel, ConfigDict, Field
 from openhound_okta.graph import OktaOwnedEdgePath
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
+from openhound_okta.models.saml import (
+    SamlPrincipalSetEligibilityEdgeProperties,
+    saml_provider_id,
+)
+from openhound_okta.saml_eligibility import (
+    SAML_GROUP_ELIGIBILITY_MODE_SHADOW,
+    SAML_GROUP_ELIGIBILITY_PROFILE,
+    SAML_V0_4_CONTRACT_VERSION,
+    derive_saml_group_eligibility_identity,
+)
 
 
 class Settings(BaseModel):
@@ -51,7 +61,13 @@ class AppAssignmentEdgeProperties(EdgeProperties):
             start=nk.GROUP,
             end=nk.APPLICATION,
             description="Group is assigned to an application",
-        )
+        ),
+        EdgeDef(
+            kind=ek.SAML_ELIGIBLE_FOR,
+            start=nk.GROUP,
+            end=nk.SAML_FEDERATION_PROVIDER,
+            description="Group is eligible for an Okta SAML federation provider",
+        ),
     ],
 )
 class GroupAssignedApp(BaseAsset):
@@ -101,5 +117,82 @@ class GroupAssignedApp(BaseAsset):
                 assignment_profile_fields=(
                     sorted(self.assignment_profile) if self.assignment_profile else []
                 ),
+            ),
+        )
+
+        if (
+            getattr(self, "_extras", {}).get("saml_group_eligibility_mode")
+            != SAML_GROUP_ELIGIBILITY_MODE_SHADOW
+        ):
+            return
+        if self.app_sign_on_mode != "SAML_2_0" or self.status != "ACTIVE":
+            return
+
+        group_ids_lookup = getattr(lookup, "saml_group_assignment_group_ids", None)
+        org_id_lookup = getattr(lookup, "org_id", None)
+        if not callable(group_ids_lookup) or not callable(org_id_lookup):
+            raise RuntimeError(
+                "SAML group eligibility conversion requires assignment and organization lookups"
+            )
+        assigned_group_ids = tuple(
+            str(group_id).upper() for group_id in group_ids_lookup(self.id)
+        )
+        group_id = self.group_id.upper()
+        if group_id not in assigned_group_ids:
+            raise ValueError(
+                "application-group assignment is absent from its authoritative "
+                f"assignment set for application {self.id}"
+            )
+        org_id = org_id_lookup()
+        if not org_id:
+            raise RuntimeError(
+                "SAML group eligibility conversion requires an Okta organization ID"
+            )
+        tenant_domain = getattr(self, "_extras", {}).get("tenant")
+        if not isinstance(tenant_domain, str) or not tenant_domain:
+            raise RuntimeError(
+                "SAML group eligibility conversion requires an Okta tenant domain"
+            )
+        identity = derive_saml_group_eligibility_identity(
+            source_id=f"source://openhound-okta/{str(org_id).upper()}",
+            authority_id=f"https://{tenant_domain.lower()}",
+            federation_provider_id=saml_provider_id(self.id).upper(),
+            assigned_group_ids=assigned_group_ids,
+            group_id=group_id,
+        )
+        coverage = "unproven"
+        yield Edge(
+            kind=ek.SAML_ELIGIBLE_FOR,
+            start=OktaOwnedEdgePath(value=self.group_id, match_by="id"),
+            end=OktaOwnedEdgePath(
+                value=saml_provider_id(self.id), match_by="id"
+            ),
+            properties=SamlPrincipalSetEligibilityEdgeProperties(
+                traversable=False,
+                schema_contract_version=SAML_V0_4_CONTRACT_VERSION,
+                eligibility_subject_type="principal_set",
+                eligibility_expansion_profile=SAML_GROUP_ELIGIBILITY_PROFILE,
+                eligibility_identity_mode="contract_uuidv5",
+                eligibility_source_id=f"source://openhound-okta/{str(org_id).upper()}",
+                eligibility_authority_id=f"https://{tenant_domain.lower()}",
+                canonical_policy_identity=identity.canonical_policy_identity,
+                canonical_branch_identity=identity.canonical_branch_identity,
+                eligibility_policy_key=identity.policy_key,
+                eligibility_branch_key=identity.branch_key,
+                eligibility_partition_key=identity.partition_key,
+                eligibility_evidence_key=identity.evidence_key,
+                eligibility_basis="group_assignment",
+                selector_operator=identity.selector_operator,
+                operand_role="positive_set",
+                policy_evaluability="static_incomplete",
+                policy_branch_count=1,
+                branch_positive_operand_count=(
+                    identity.branch_positive_operand_count
+                ),
+                membership_coverage=coverage,
+                principal_reachability_coverage=coverage,
+                principal_exclusion_coverage=coverage,
+                policy_evaluation_coverage=coverage,
+                claim_evidence_coverage=coverage,
             ),
         )

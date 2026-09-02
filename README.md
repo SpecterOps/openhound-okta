@@ -73,6 +73,12 @@ does not publish an incomplete replacement. If the initial expanded group page r
 retries that first page with successively halved limits before failing. With the default configuration, that sequence
 is 200, 100, then 50.
 
+`saml_group_eligibility_mode` defaults to `expanded`, which preserves the existing per-user SAML eligibility output.
+`shadow` additionally emits non-traversable v0.4 `SAML_EligibleFor` evidence from native `Okta_Group` nodes to the
+corresponding `SAML_FederationProvider`. Shadow facts reuse the authoritative public application-group assignment
+collection and the existing one-hop `Okta_MemberOf` topology; they deliberately declare all coverage dimensions as
+`unproven` and cannot replace the expanded user facts or become authoritative.
+
 The defaults can be adjusted with DLT source configuration environment variables:
 
 | Environment variable | Default | Purpose |
@@ -80,6 +86,7 @@ The defaults can be adjusted with DLT source configuration environment variables
 | `SOURCES__SOURCE__OKTA__APPLICATION_USERS_PAGE_SIZE` | `500` | Application users per page, from 1 through 500 |
 | `SOURCES__SOURCE__OKTA__GROUPS_PAGE_SIZE` | `200` | Expanded groups per page, from 1 through 200 |
 | `SOURCES__SOURCE__OKTA__APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE` | `200` | Application-group assignments per page, from 20 through 200 |
+| `SOURCES__SOURCE__OKTA__SAML_GROUP_ELIGIBILITY_MODE` | `expanded` | `expanded` preserves current output; `shadow` adds non-authoritative v0.4 group eligibility evidence |
 | `SOURCES__SOURCE__OKTA__GROUP_PUSH_MAPPINGS_PAGE_SIZE` | `1000` | Group push mappings per page, from 1 through 1,000 |
 | `SOURCES__SOURCE__OKTA__IDENTITY_PROVIDER_USERS_PAGE_SIZE` | `200` | Identity-provider users per page, from 1 through 200 |
 | `SOURCES__SOURCE__OKTA__ENDPOINT_CONCURRENCY` | `2` | Maximum simultaneous requests per endpoint family |

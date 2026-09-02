@@ -10,6 +10,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from openhound_okta.graph import OktaOwnedEdgePath, OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
+from openhound_okta.saml_eligibility import (
+    SAML_GROUP_ELIGIBILITY_MODE_SHADOW,
+    saml_principal_reachability_state,
+)
 
 
 @dataclass
@@ -43,6 +47,17 @@ class UserProperties(OktaNodeProperties):
     manager_id: str | None = None
     credential_provider_type: str | None = None
     credential_provider_name: str | None = None
+
+
+@dataclass
+class SamlShadowUserProperties(UserProperties):
+    """Additional v0.4 eligibility state emitted only during shadow collection.
+
+    Attributes:
+        saml_principal_reachability_state: Profile-normalized SAML lifecycle state.
+    """
+
+    saml_principal_reachability_state: str = "unknown"
 
 
 class Provider(BaseModel):
@@ -129,51 +144,62 @@ class User(BaseAsset):
     @property
     def as_node(self):
         display_name = self.profile.display_name or self.profile.login or self.id
+        properties = dict(
+            tenant=self._lookup.org_id(),
+            tenant_domain=self._extras["tenant"],
+            id=self.id,
+            name=self.profile.login,
+            displayname=display_name,
+            okta_domain=self._extras["tenant"],
+            enabled=self.enabled,
+            has_role_assignments=self._lookup.has_role_assignments(
+                self.id, "user"
+            ),
+            authentication_factors=self._lookup.user_authentication_factors_count(
+                self.id
+            ),
+            login=self.profile.login,
+            email=self.profile.email,
+            first_name=self.profile.first_name,
+            last_name=self.profile.last_name,
+            status=self.status,
+            created=self.created,
+            password_changed=self.password_changed,
+            last_login=self.last_login,
+            last_updated=self.last_updated,
+            activated=self.activated,
+            title=self.profile.title,
+            department=self.profile.department,
+            city=self.profile.city,
+            state=self.profile.state,
+            country_code=self.profile.country_code,
+            organization=self.profile.organization,
+            user_type=self.profile.user_type,
+            employee_number=self.profile.employee_number,
+            division=self.profile.division,
+            realm_id=self.realm_id,
+            manager_id=self.profile.manager_id,
+            credential_provider_type=self.credentials.provider.type
+            if self.credentials and self.credentials.provider
+            else None,
+            credential_provider_name=self.credentials.provider.name
+            if self.credentials and self.credentials.provider
+            else None,
+            environmentid=self._lookup.org_id(),
+        )
+        if (
+            getattr(self, "_extras", {}).get("saml_group_eligibility_mode")
+            == SAML_GROUP_ELIGIBILITY_MODE_SHADOW
+        ):
+            properties["saml_principal_reachability_state"] = (
+                saml_principal_reachability_state(self.status)
+            )
+            node_properties = SamlShadowUserProperties(**properties)
+        else:
+            node_properties = UserProperties(**properties)
         return OktaNode(
             kinds=[nk.USER],
-            properties=UserProperties(
-                tenant=self._lookup.org_id(),
-                tenant_domain=self._extras["tenant"],
-                id=self.id,
-                name=self.profile.login,
-                displayname=display_name,
-                okta_domain=self._extras["tenant"],
-                enabled=self.enabled,
-                has_role_assignments=self._lookup.has_role_assignments(
-                    self.id, "user"
-                ),
-                authentication_factors=self._lookup.user_authentication_factors_count(
-                    self.id
-                ),
-                login=self.profile.login,
-                email=self.profile.email,
-                first_name=self.profile.first_name,
-                last_name=self.profile.last_name,
-                status=self.status,
-                created=self.created,
-                password_changed=self.password_changed,
-                last_login=self.last_login,
-                last_updated=self.last_updated,
-                activated=self.activated,
-                title=self.profile.title,
-                department=self.profile.department,
-                city=self.profile.city,
-                state=self.profile.state,
-                country_code=self.profile.country_code,
-                organization=self.profile.organization,
-                user_type=self.profile.user_type,
-                employee_number=self.profile.employee_number,
-                division=self.profile.division,
-                realm_id=self.realm_id,
-                manager_id=self.profile.manager_id,
-                credential_provider_type=self.credentials.provider.type
-                if self.credentials and self.credentials.provider
-                else None,
-                credential_provider_name=self.credentials.provider.name
-                if self.credentials and self.credentials.provider
-                else None,
-                environmentid=self._lookup.org_id(),
-            ),
+            properties=node_properties,
         )
 
     @property

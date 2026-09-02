@@ -1578,6 +1578,61 @@ class SamlMatchValuesEdgeProperties(EdgeProperties):
 
 
 @dataclass
+class SamlPrincipalSetEligibilityEdgeProperties(EdgeProperties):
+    """Non-traversable v0.4 evidence for a native Okta group assignment.
+
+    Attributes:
+        schema_contract_version: Fact-local SAML contract version.
+        eligibility_subject_type: Declares that this fact starts at a principal set.
+        eligibility_expansion_profile: Immutable profile governing native membership.
+        eligibility_identity_mode: Contract identity algorithm used for all keys.
+        eligibility_source_id: Stable source-scoped Okta collection identifier.
+        eligibility_authority_id: Stable Okta authority scope.
+        canonical_policy_identity: Canonical selector and positive operand identity.
+        canonical_branch_identity: Canonical branch identity for the positive selector.
+        eligibility_policy_key: Contract-derived policy UUIDv5 key.
+        eligibility_branch_key: Contract-derived branch UUIDv5 key.
+        eligibility_partition_key: Contract-derived partition UUIDv5 key.
+        eligibility_evidence_key: Contract-derived operand UUIDv5 key.
+        eligibility_basis: Native source of the eligibility decision.
+        selector_operator: Registered positive selector operator.
+        operand_role: Registered policy operand role.
+        policy_evaluability: Current static evaluation capability.
+        policy_branch_count: Number of branches represented by this policy.
+        branch_positive_operand_count: Number of positive operands in this branch.
+        membership_coverage: Completeness of the membership evidence.
+        principal_reachability_coverage: Completeness of lifecycle state evidence.
+        principal_exclusion_coverage: Completeness of principal-specific exceptions.
+        policy_evaluation_coverage: Completeness of policy evaluation evidence.
+        claim_evidence_coverage: Completeness of claim evidence.
+    """
+
+    schema_contract_version: str
+    eligibility_subject_type: str
+    eligibility_expansion_profile: str
+    eligibility_identity_mode: str
+    eligibility_source_id: str
+    eligibility_authority_id: str
+    canonical_policy_identity: str
+    canonical_branch_identity: str
+    eligibility_policy_key: str
+    eligibility_branch_key: str
+    eligibility_partition_key: str
+    eligibility_evidence_key: str
+    eligibility_basis: str
+    selector_operator: str
+    operand_role: str
+    policy_evaluability: str
+    policy_branch_count: int
+    branch_positive_operand_count: int
+    membership_coverage: str
+    principal_reachability_coverage: str
+    principal_exclusion_coverage: str
+    policy_evaluation_coverage: str
+    claim_evidence_coverage: str
+
+
+@dataclass
 class SamlAccountEdgeProperties(SamlMatchValuesEdgeProperties):
     """Properties for normalized Okta SAML service-provider account edges.
 

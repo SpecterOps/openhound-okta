@@ -93,6 +93,27 @@ class OktaLookup(LookupManager):
         return res
 
     @lru_cache
+    def saml_group_assignment_group_ids(self, app_id: str) -> tuple[str, ...]:
+        """Return one app's authoritative group assignments in canonical order."""
+
+        try:
+            rows = self._find_all_objects(
+                f"""
+                SELECT DISTINCT group_id
+                FROM {self.schema}.group_assigned_apps
+                WHERE id = ?
+                ORDER BY group_id
+                """,
+                [app_id],
+            )
+        except DuckDBError as exc:
+            raise RuntimeError(
+                "SAML group eligibility conversion requires authoritative "
+                "application-group assignments"
+            ) from exc
+        return tuple(group_id for (group_id,) in rows)
+
+    @lru_cache
     def application_settings(self, app_id: str) -> bool:
         res = self._find_single_object(
             f"""SELECT settings FROM {self.schema}.applications WHERE id = ?""",

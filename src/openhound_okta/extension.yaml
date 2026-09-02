@@ -32,6 +32,10 @@ credentials:
     description: Classic Okta API token
     required: false
 parameters:
+  - name: saml_group_eligibility_mode
+    description: Emit additive v0.4 Okta group eligibility evidence in shadow mode.
+    required: false
+    default: expanded
   - name: size
     description: An example parameter specifying batch size for fetching data
     required: false
