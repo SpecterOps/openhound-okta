@@ -57,3 +57,39 @@ def test_tenant_domain_rejects_urls_without_scheme_or_hostname(monkeypatch, base
 
     with pytest.raises(ValueError, match="URL scheme and hostname"):
         main._tenant_domain_from_config()
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        (
+            {
+                "sources.okta.saml_group_eligibility_mode": "shadow",
+                "sources.source.okta.saml_group_eligibility_mode": "expanded",
+            },
+            "shadow",
+        ),
+        (
+            {"sources.source.okta.saml_group_eligibility_mode": "shadow"},
+            "shadow",
+        ),
+        ({}, "expanded"),
+    ],
+)
+def test_saml_group_eligibility_mode_supports_canonical_and_legacy_config(
+    monkeypatch, values, expected
+):
+    monkeypatch.setattr(main.dlt.config, "get", values.get)
+
+    assert main._saml_group_eligibility_mode_from_config() == expected
+
+
+def test_saml_group_eligibility_mode_rejects_unknown_config(monkeypatch):
+    monkeypatch.setattr(
+        main.dlt.config,
+        "get",
+        {"sources.okta.saml_group_eligibility_mode": "authoritative"}.get,
+    )
+
+    with pytest.raises(ValueError, match="expanded or shadow"):
+        main._saml_group_eligibility_mode_from_config()

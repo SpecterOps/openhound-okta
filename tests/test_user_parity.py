@@ -1,4 +1,6 @@
 import duckdb
+import pytest
+from dataclasses import asdict
 
 from openhound_okta.lookup import OktaLookup
 from openhound_okta.models import User
@@ -74,6 +76,33 @@ def test_user_node_falls_back_to_login_when_display_name_is_missing():
     user = make_user(profile={"login": "alice@example.com"})
 
     assert user.as_node.properties.displayname == "alice@example.com"
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        ("ACTIVE", "enabled"),
+        ("PASSWORD_EXPIRED", "enabled"),
+        ("LOCKED_OUT", "blocked"),
+        ("SUSPENDED", "blocked"),
+        ("UNRECOGNIZED", "unknown"),
+    ],
+)
+def test_user_shadow_mode_emits_contract_reachability_state(status, expected):
+    user = make_user(status=status)
+    user._extras["saml_group_eligibility_mode"] = "shadow"
+
+    properties = user.as_node.properties
+
+    assert properties.saml_principal_reachability_state == expected
+    assert asdict(properties)["saml_principal_reachability_state"] == expected
+
+
+def test_user_expanded_mode_has_no_v0_4_reachability_property():
+    user = make_user()
+
+    assert not hasattr(user.as_node.properties, "saml_principal_reachability_state")
+    assert "saml_principal_reachability_state" not in asdict(user.as_node.properties)
 
 
 def test_user_lookup_counts_factors_and_defaults_to_zero_without_table(caplog):

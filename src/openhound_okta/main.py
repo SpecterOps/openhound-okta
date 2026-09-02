@@ -12,6 +12,7 @@ from openhound.core.convert import ConvertContext
 from openhound.core.preproc import PreProcContext
 
 from openhound_okta.lookup import OktaLookup
+from openhound_okta.saml_eligibility import configured_saml_group_eligibility_mode
 from openhound_okta.telemetry import TelemetrySettings, build_telemetry
 from openhound_okta.transforms import transforms
 
@@ -81,6 +82,12 @@ def _tenant_domain_from_config() -> str:
     return tenant_domain.casefold()
 
 
+def _saml_group_eligibility_mode_from_config() -> str:
+    """Return the explicit producer mode used for conversion extras."""
+
+    return configured_saml_group_eligibility_mode(dlt.config.get)
+
+
 @app.collect()
 def collect(ctx: CollectContext) -> DltSource:
     """Register a Typer CLI command that collects Okta resources and stores them (filtered) on disk.
@@ -134,12 +141,16 @@ def convert(ctx: ConvertContext):
     from openhound_okta.source import source as okta_source
 
     tenant_domain = _tenant_domain_from_config()
+    saml_group_eligibility_mode = _saml_group_eligibility_mode_from_config()
     # ConvertContext.lookup is annotated as Callable upstream, but openhound
     # assigns the instantiated lookup session (or None) to it.
     lookup = cast("OktaLookup | None", ctx.lookup)
     if lookup is not None:
         lookup.tenant_domain = tenant_domain
-    return okta_source(), {"tenant": tenant_domain}
+    return okta_source(), {
+        "tenant": tenant_domain,
+        "saml_group_eligibility_mode": saml_group_eligibility_mode,
+    }
 
 
 def preprocessing_resources() -> dict[str, str]:
