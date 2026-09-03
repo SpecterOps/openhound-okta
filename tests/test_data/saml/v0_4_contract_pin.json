@@ -1,0 +1,29 @@
+{
+  "consumer": {
+    "repository": "SpecterOps/openhound_saml",
+    "revision": "c9ae37a76b8b7a873fa77aeb22b24ac40a53e3d4"
+  },
+  "contract": {
+    "id": "opengraph-saml-v0.4.0",
+    "artifacts": {
+      "contract.json": "2c3a79288580a189602aceceb20acbb2957ec756ecbc2fd12a0acfdce1736465",
+      "registry.json": "e10154dc19fcb443538b9543d9349bfe668dc2e5ede143bc10194f92240051b9",
+      "identity-vectors.json": "f47f958351a1c9fa3604cdca388cb2cc85d98c46c75a2a4f6731253f521e2a7c",
+      "normalized-fact.schema.json": "ba9161847279489ee59c32a7a58fe8d9e776173660974210faf3fd666caadec2",
+      "openhound_okta_group_membership_v1.json": "f7ffd0a1601056a0701c5702fe733de0ff162503d3a83c382096cbe2dc471131",
+      "claim-projection-tuples.json": "1887667cd1e108f4f62e37e971a7ae15393759ce27a18cbd8ec60d29016f5dbd",
+      "contract-vectors.json": "cb03b56d7130642cdd3c8297c8787803eab0370eb52681a8b6cf11550220299c",
+      "observable-output-examples.json": "1da75f0ef5c660748870e494aff630a4212de563b9d80b89863d8bcb9554a00e"
+    }
+  },
+  "profile": "openhound_okta_group_membership_v1",
+  "projection": {
+    "profile": "openhound_okta_principal_property_v1",
+    "source": "source.login",
+    "property": "login",
+    "predicate": "email_address_nameid",
+    "output": "email_match_values",
+    "normalizer": "email_v1",
+    "scope": "provider_mapping"
+  }
+}
