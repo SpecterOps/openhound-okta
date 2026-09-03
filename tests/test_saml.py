@@ -14,6 +14,7 @@ from openhound_okta.models.idp import IdentityProvider
 from openhound_okta.models.idp_user import IDPUser
 from openhound_okta.models.saml import (
     ACCOUNT_RESOLUTION_PROFILE,
+    EMAIL_NAME_ID_FORMAT,
     SAML_CONTRACT_VERSION,
     SamlAccountResolutionField,
     SamlAccountResolutionRule,
@@ -34,9 +35,11 @@ from openhound_okta.models.saml import (
     saml_idp_user_match_values,
     saml_issuer_row,
     saml_service_provider_row,
+    saml_claim_projection,
     saml_sp_acs_rows,
     saml_trusted_issuer_row,
 )
+from openhound_okta.saml_eligibility import SAML_V0_4_CONTRACT_VERSION
 from openhound_okta.oin_routes import registry as oin_route_registry
 from openhound_okta.oin_routes.contract import (
     CallableRouteProvider,
@@ -859,6 +862,72 @@ def test_claim_mapping_accepts_pre_v03_rows_without_claim_type():
     )
 
     assert claim.claim_type == "name_id"
+
+
+def test_shadow_claim_mapping_declares_only_an_exact_native_projection():
+    claim = SamlClaimMapping.model_validate(
+        {
+            "id": "okta:saml:claim-mapping:0oa_saml:0",
+            "app_id": "0oa_saml",
+            "app_name": "custom_saml",
+            "app_label": "Custom SAML",
+            "claim_name": "NameID",
+            "mapping_type": "name_id",
+            "claim_type": "name_id",
+            "source_property": "source.login",
+            "expression": "${source.login}",
+            "format": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+        }
+    )
+    claim._lookup = _ApplicationLookup()
+    claim._extras = {
+        "tenant": "example.okta.test",
+        "saml_group_eligibility_mode": "shadow",
+    }
+
+    properties = asdict(claim.as_node.properties)
+
+    assert properties["schema_contract_version"] == SAML_V0_4_CONTRACT_VERSION
+    assert properties["principal_value_projection_profile"] == (
+        "openhound_okta_principal_property_v1"
+    )
+    assert properties["principal_value_source_type"] == "native_principal_property"
+    assert properties["projection_source"] == "source.login"
+    assert properties["principal_node_property"] == "login"
+    assert properties["projection_predicate"] == "email_address_nameid"
+    assert properties["projected_match_value_field"] == "email_match_values"
+    assert properties["projection_normalization_profile"] == "email_v1"
+    assert properties["projection_scope"] == "provider_mapping"
+    assert properties["projection_complete"] is True
+
+    claim._extras["saml_group_eligibility_mode"] = "expanded"
+    expanded_properties = asdict(claim.as_node.properties)
+
+    assert expanded_properties["schema_contract_version"] == SAML_CONTRACT_VERSION
+    assert expanded_properties["principal_value_projection_profile"] is None
+    assert expanded_properties["projection_complete"] is None
+
+
+@pytest.mark.parametrize(
+    ("source_property", "expression"),
+    [
+        ("appuser.userName", "appuser.userName"),
+        ("source.login", "String.toLowerCase(source.login)"),
+        ("source.login", "user.login"),
+    ],
+)
+def test_claim_projection_rejects_unapproved_or_ambiguous_sources(
+    source_property, expression
+):
+    assert (
+        saml_claim_projection(
+            source_property=source_property,
+            expression=expression,
+            claim_type="name_id",
+            name_id_format=EMAIL_NAME_ID_FORMAT,
+        )
+        is None
+    )
 
 
 def test_saml_acs_rows_dedup_exact_repeated_route():
