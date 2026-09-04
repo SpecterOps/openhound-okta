@@ -1,0 +1,8 @@
+{
+  "name": "Okta: Operational Directory Agents with Delegated Authentication",
+  "description": "Operational Okta AD and LDAP agents associated with applications configured for outbound delegated authentication.",
+  "cypher": "MATCH (agent:Okta_Agent {operational_status: 'OPERATIONAL'})-[:Okta_AgentMemberOf]->(:Okta_AgentPool)-[:Okta_AgentPoolFor]->(app:Okta_Application)\nWHERE 'OUTBOUND_DEL_AUTH' IN app.features\nAND agent.type IN ['AD', 'LDAP']\nRETURN agent",
+  "enabled": true,
+  "zone": "Tier Zero",
+  "allow_disable": true
+}
