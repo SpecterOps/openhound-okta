@@ -15,11 +15,18 @@ from openhound_okta.models.hybrid_auth import (
     hybrid_user_target,
 )
 from openhound_okta.models.saml import (
+    SamlEligibilityExceptionEdgeProperties,
     SamlMatchValuesEdgeProperties,
     SamlResolutionValueEdgeProperties,
     saml_application_assertion_evidence,
     saml_match_source,
     saml_provider_id,
+)
+from openhound_okta.saml_eligibility import (
+    SAML_GROUP_ELIGIBILITY_MODE_SHADOW,
+    SAML_V0_4_CONTRACT_VERSION,
+    derive_saml_eligibility_exception_key,
+    derive_saml_group_eligibility_identity,
 )
 
 # To ignore system apps optionally
@@ -219,6 +226,13 @@ class Profile(BaseModel):
             end=nk.SAML_CLAIM_MAPPING,
             traversable=False,
             description="Okta user has a value for an exceptional SAML claim",
+        ),
+        EdgeDef(
+            kind=ek.SAML_ELIGIBILITY_EXCEPTION,
+            start=nk.USER,
+            end=nk.SAML_FEDERATION_PROVIDER,
+            traversable=False,
+            description="User is excluded from inherited Okta group SAML eligibility",
         ),
     ],
 )
@@ -505,6 +519,68 @@ class ApplicationUser(BaseAsset):
             )
 
     @property
+    def _saml_eligibility_exception_edges(self):
+        """Emit only a complete, exact inherited-support exclusion fact."""
+
+        if (
+            getattr(self, "_extras", {}).get("saml_group_eligibility_mode")
+            != SAML_GROUP_ELIGIBILITY_MODE_SHADOW
+            or self.scope != "GROUP"
+            or self.app_sign_on_mode != "SAML_2_0"
+            or (self.app_status is not None and self.app_status != "ACTIVE")
+        ):
+            return
+        lookup = getattr(self, "_lookup", None)
+        exception_lookup = getattr(lookup, "saml_eligibility_exception_applies", None)
+        group_ids_lookup = getattr(lookup, "saml_group_assignment_group_ids", None)
+        org_id_lookup = getattr(lookup, "org_id", None)
+        if not (
+            callable(exception_lookup)
+            and callable(group_ids_lookup)
+            and callable(org_id_lookup)
+            and exception_lookup(self.app_id, self.id)
+        ):
+            return
+
+        org_id = org_id_lookup()
+        tenant_domain = getattr(self, "_extras", {}).get("tenant")
+        if not org_id or not isinstance(tenant_domain, str) or not tenant_domain:
+            raise RuntimeError(
+                "SAML eligibility exception conversion requires Okta authority identity"
+            )
+        assigned_group_ids = tuple(
+            str(group_id).upper() for group_id in group_ids_lookup(self.app_id)
+        )
+        if not assigned_group_ids:
+            raise RuntimeError(
+                "SAML eligibility exception lacks authoritative group assignments"
+            )
+        provider_id = saml_provider_id(self.app_id).upper()
+        identity = derive_saml_group_eligibility_identity(
+            source_id=f"source://openhound-okta/{str(org_id).upper()}",
+            authority_id=f"https://{tenant_domain.lower()}",
+            federation_provider_id=provider_id,
+            assigned_group_ids=assigned_group_ids,
+            group_id=assigned_group_ids[0],
+        )
+        principal_id = self.id.upper()
+        yield Edge(
+            kind=ek.SAML_ELIGIBILITY_EXCEPTION,
+            start=OktaOwnedEdgePath(value=self.id, match_by="id"),
+            end=OktaOwnedEdgePath(value=saml_provider_id(self.app_id), match_by="id"),
+            properties=SamlEligibilityExceptionEdgeProperties(
+                traversable=False,
+                schema_contract_version=SAML_V0_4_CONTRACT_VERSION,
+                eligibility_partition_key=identity.partition_key,
+                residual_evidence_key=derive_saml_eligibility_exception_key(
+                    partition_key=identity.partition_key,
+                    principal_id=principal_id,
+                    federation_provider_id=provider_id,
+                ),
+            ),
+        )
+
+    @property
     def edges(self):
         yield from self._app_assignment_edge
         yield from self._read_password_updates_edge
@@ -512,4 +588,5 @@ class ApplicationUser(BaseAsset):
         yield from self._password_sync_edge
         yield from self._okta_org2org_edges
         yield from self._hybrid_sign_on_edges
+        yield from self._saml_eligibility_exception_edges
         yield from self._saml_assertion_edges

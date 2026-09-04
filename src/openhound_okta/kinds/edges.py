@@ -48,6 +48,7 @@ PASSWORD_SYNC = "Okta_PasswordSync"
 
 # Normalized OpenGraph-SAML edges
 SAML_ELIGIBLE_FOR = "SAML_EligibleFor"
+SAML_ELIGIBILITY_EXCEPTION = "SAML_EligibilityException"
 SAML_HAS_ASSERTION_CONSUMER_SERVICE = "SAML_HasAssertionConsumerService"
 SAML_HAS_ACCOUNT = "SAML_HasAccount"
 SAML_HAS_ACCOUNT_RESOLUTION_RULE = "SAML_HasAccountResolutionRule"

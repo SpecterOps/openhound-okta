@@ -20,6 +20,18 @@ SAML_GROUP_ELIGIBILITY_MODES = frozenset(
 SAML_ELIGIBILITY_ROOT_NAMESPACE = UUID("18bc451f-b58c-58e2-87e3-2e93b0c77581")
 
 
+def parse_saml_eligibility_preflight(value: object) -> bool:
+    """Return a strict boolean from DLT config or an environment setting."""
+
+    if type(value) is bool:
+        return value
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise ValueError("saml_eligibility_preflight must be true or false")
+
+
 def parse_saml_group_eligibility_mode(value: object) -> str:
     """Return one supported producer mode, rejecting accidental cutover values."""
 
@@ -41,6 +53,17 @@ def configured_saml_group_eligibility_mode(
     return parse_saml_group_eligibility_mode(
         SAML_GROUP_ELIGIBILITY_MODE_EXPANDED if value is None else value
     )
+
+
+def configured_saml_eligibility_preflight(
+    config_get: Callable[[str], object | None],
+) -> bool:
+    """Read the opt-in v0.4 producer proof-ledger switch."""
+
+    value = config_get("sources.okta.saml_eligibility_preflight")
+    if value is None:
+        value = config_get("sources.source.okta.saml_eligibility_preflight")
+    return parse_saml_eligibility_preflight(False if value is None else value)
 
 
 def saml_principal_reachability_state(status: str | None) -> str:
@@ -77,6 +100,47 @@ class SamlGroupEligibilityIdentity:
     evidence_key: str
     selector_operator: str
     branch_positive_operand_count: int
+
+
+@dataclass(frozen=True)
+class SamlEligibilityPreflight:
+    """One app partition's conservative v0.4 coverage ledger.
+
+    This deliberately contains only the contract coverage vocabulary.  It is
+    not a policy evaluator: the collector keeps the existing expanded facts
+    whenever any eligibility-expansion dimension is not complete.
+    """
+
+    membership_coverage: str
+    principal_reachability_coverage: str
+    principal_exclusion_coverage: str
+    policy_evaluation_coverage: str
+    claim_evidence_coverage: str
+
+    @property
+    def policy_evaluability(self) -> str:
+        return (
+            "static_complete"
+            if self.policy_evaluation_coverage == "complete"
+            else "static_incomplete"
+        )
+
+
+def derive_saml_eligibility_exception_key(
+    *,
+    partition_key: str,
+    principal_id: str,
+    federation_provider_id: str,
+) -> str:
+    """Derive the fixed v0.4 inherited-support exclusion key.
+
+    Inputs must be the exact normalized graph endpoint IDs.  The derivation is
+    intentionally identical to the shared SAML contract's residual hierarchy.
+    """
+
+    residual_namespace = uuid5(UUID(partition_key), "residual")
+    principal_namespace = uuid5(residual_namespace, principal_id)
+    return str(uuid5(principal_namespace, federation_provider_id))
 
 
 def derive_saml_group_eligibility_identity(

@@ -36,6 +36,10 @@ parameters:
     description: Emit additive v0.4 Okta group eligibility evidence in shadow mode.
     required: false
     default: expanded
+  - name: saml_eligibility_preflight
+    description: Build development-only v0.4 proof evidence for shadow coverage and fixed inherited-support exclusions.
+    required: false
+    default: false
   - name: size
     description: An example parameter specifying batch size for fetching data
     required: false

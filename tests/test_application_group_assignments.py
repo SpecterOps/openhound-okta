@@ -18,7 +18,10 @@ from openhound_okta.source import (
     group_assigned_apps,
     source,
 )
-from openhound_okta.saml_eligibility import derive_saml_group_eligibility_identity
+from openhound_okta.saml_eligibility import (
+    SamlEligibilityPreflight,
+    derive_saml_group_eligibility_identity,
+)
 
 
 class RecordingPool:
@@ -440,6 +443,49 @@ def test_shadow_mode_emits_non_traversable_group_eligibility_operand():
         eligibility.properties.policy_evaluation_coverage,
         eligibility.properties.claim_evidence_coverage,
     } == {"unproven"}
+
+
+def test_shadow_mode_consumes_only_contract_coverage_from_a_preflight_ledger():
+    class PreflightLookup(GroupLookup):
+        def saml_group_assignment_group_ids(self, app_id):
+            assert app_id == "0oa-app"
+            return ("00g-group",)
+
+        def org_id(self):
+            return "00o-org"
+
+        def saml_eligibility_preflight(self, app_id):
+            assert app_id == "0oa-app"
+            return SamlEligibilityPreflight(
+                membership_coverage="complete",
+                principal_reachability_coverage="complete",
+                principal_exclusion_coverage="complete",
+                policy_evaluation_coverage="complete",
+                claim_evidence_coverage="incomplete",
+            )
+
+    model = GroupAssignedApp(
+        id="0oa-app",
+        group_id="00g-group",
+        name="example_saml",
+        label="Example SAML",
+        status="ACTIVE",
+        app_sign_on_mode="SAML_2_0",
+    )
+    model._lookup = PreflightLookup(group_ids=("00g-group",))
+    model._extras = {
+        "tenant": "preview1.example.invalid",
+        "saml_group_eligibility_mode": "shadow",
+    }
+
+    eligibility = list(model.edges)[1]
+
+    assert eligibility.properties.policy_evaluability == "static_complete"
+    assert eligibility.properties.membership_coverage == "complete"
+    assert eligibility.properties.principal_reachability_coverage == "complete"
+    assert eligibility.properties.principal_exclusion_coverage == "complete"
+    assert eligibility.properties.policy_evaluation_coverage == "complete"
+    assert eligibility.properties.claim_evidence_coverage == "incomplete"
 
 
 def test_group_eligibility_identity_matches_the_published_contract_vector():

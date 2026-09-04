@@ -130,11 +130,20 @@ def test_transforms_creates_users_index_after_derived_tables(monkeypatch) -> Non
         "non_admin_groups",
         "non_admin_apps",
         "ensure_users_id_index",
+        "configured_saml_eligibility_preflight",
+        "_has_saml_eligibility_preflight_marker",
+        "create_saml_eligibility_preflight",
     ):
         monkeypatch.setattr(
             transforms_module,
             name,
-            lambda connection, schema, name=name: calls.append(name),
+            (
+                (lambda _config_get: False)
+                if name == "configured_saml_eligibility_preflight"
+                else (lambda _connection, _schema: False)
+                if name == "_has_saml_eligibility_preflight_marker"
+                else lambda connection, schema, name=name: calls.append(name)
+            ),
         )
 
     transforms_module.transforms(object(), "tenant_schema")
@@ -147,3 +156,75 @@ def test_transforms_creates_users_index_after_derived_tables(monkeypatch) -> Non
         "non_admin_apps",
         "ensure_users_id_index",
     ]
+
+
+def test_transforms_builds_preflight_only_when_explicitly_enabled(monkeypatch) -> None:
+    calls = []
+    for name in (
+        "principals_with_admin_roles",
+        "insert_principals_with_admin_roles",
+        "non_admin_users",
+        "non_admin_groups",
+        "non_admin_apps",
+        "ensure_users_id_index",
+        "create_saml_eligibility_preflight",
+    ):
+        monkeypatch.setattr(
+            transforms_module,
+            name,
+            lambda connection, schema, name=name: calls.append(name),
+        )
+    monkeypatch.setattr(
+        transforms_module,
+        "configured_saml_eligibility_preflight",
+        lambda _config_get: True,
+    )
+    monkeypatch.setattr(
+        transforms_module,
+        "_has_saml_eligibility_preflight_marker",
+        lambda _connection, _schema: False,
+    )
+
+    transforms_module.transforms(object(), "tenant_schema")
+
+    assert calls == [
+        "principals_with_admin_roles",
+        "insert_principals_with_admin_roles",
+        "non_admin_users",
+        "non_admin_groups",
+        "non_admin_apps",
+        "ensure_users_id_index",
+        "create_saml_eligibility_preflight",
+    ]
+
+
+def test_transforms_builds_preflight_for_a_marked_fresh_snapshot(monkeypatch) -> None:
+    calls = []
+    for name in (
+        "principals_with_admin_roles",
+        "insert_principals_with_admin_roles",
+        "non_admin_users",
+        "non_admin_groups",
+        "non_admin_apps",
+        "ensure_users_id_index",
+        "create_saml_eligibility_preflight",
+    ):
+        monkeypatch.setattr(
+            transforms_module,
+            name,
+            lambda connection, schema, name=name: calls.append(name),
+        )
+    monkeypatch.setattr(
+        transforms_module,
+        "configured_saml_eligibility_preflight",
+        lambda _config_get: False,
+    )
+    monkeypatch.setattr(
+        transforms_module,
+        "_has_saml_eligibility_preflight_marker",
+        lambda _connection, _schema: True,
+    )
+
+    transforms_module.transforms(object(), "tenant_schema")
+
+    assert calls[-1] == "create_saml_eligibility_preflight"

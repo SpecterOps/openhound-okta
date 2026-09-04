@@ -138,6 +138,7 @@ class Group(BaseAsset):
     profile: GroupProfile | None = None
     embedded: Embedded = Field(alias="_embedded")
     source: Source | None = None
+    saml_membership_expected_count: int | None = None
 
     @property
     def as_node(self):
