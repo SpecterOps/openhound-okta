@@ -3,11 +3,18 @@ from openhound_okta.models import Agent, AgentPool
 
 
 class StubLookup:
+    def __init__(self, *, has_backing_application: bool = True):
+        self.has_backing_application = has_backing_application
+
     def org_id(self):
         return "org-1"
 
+    def application_by_id(self, app_id):
+        assert app_id == "app-or-pool-1"
+        return app_id if self.has_backing_application else None
 
-def make_agent_pool(*, pool_type: str = "AD"):
+
+def make_agent_pool(*, pool_type: str = "AD", has_backing_application: bool = True):
     agent_pool = AgentPool.model_validate(
         {
             "id": "app-or-pool-1",
@@ -17,7 +24,7 @@ def make_agent_pool(*, pool_type: str = "AD"):
             "agents": [],
         }
     )
-    agent_pool._lookup = StubLookup()
+    agent_pool._lookup = StubLookup(has_backing_application=has_backing_application)
     agent_pool._extras = {"tenant": "example.okta.com"}
     return agent_pool
 
@@ -41,7 +48,22 @@ def test_ad_agent_pool_for_edges_target_the_backing_application():
     assert edge.end.value == "APP-OR-POOL-1"
 
 
-def test_non_ad_agent_pools_do_not_emit_agent_pool_for_edges():
+def test_ldap_agent_pool_for_edges_target_the_backing_application():
+    agent_pool = make_agent_pool(pool_type="LDAP")
+
+    edge = next(edge for edge in agent_pool.edges if edge.kind == ek.AGENT_POOL_FOR)
+
+    assert edge.start.value == "APP-OR-POOL-1_POOL"
+    assert edge.end.value == "APP-OR-POOL-1"
+
+
+def test_ldap_agent_pools_without_backing_apps_do_not_emit_agent_pool_for_edges():
+    agent_pool = make_agent_pool(pool_type="LDAP", has_backing_application=False)
+
+    assert [edge for edge in agent_pool.edges if edge.kind == ek.AGENT_POOL_FOR] == []
+
+
+def test_non_directory_agent_pools_do_not_emit_agent_pool_for_edges():
     agent_pool = make_agent_pool(pool_type="RADIUS")
 
     assert [edge for edge in agent_pool.edges if edge.kind == ek.AGENT_POOL_FOR] == []
