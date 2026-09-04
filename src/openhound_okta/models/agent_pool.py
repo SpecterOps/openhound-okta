@@ -12,11 +12,14 @@ from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 
 
+LDAP_AGENT_POOL_TYPE = "LDAP"
+
+
 def agent_pool_graph_id(agent_pool_id: str) -> str:
     """Return the graph-safe ID for an agent pool.
 
-    Active Directory agent pools share their Okta IDs with their backing
-    applications, so the graph ID needs its own namespace.
+    Directory agent pools share their Okta IDs with their backing applications,
+    so the graph ID needs its own namespace.
     """
     return f"{agent_pool_id}_pool"
 
@@ -111,7 +114,10 @@ class AgentPool(BaseAsset):
 
     @property
     def _agent_pool_for_edges(self):
-        if self.type == "AD":
+        if self.type == "AD" or (
+            self.type == LDAP_AGENT_POOL_TYPE
+            and self._lookup.application_by_id(self.id)
+        ):
             yield Edge(
                 kind=ek.AGENT_POOL_FOR,
                 start=OktaOwnedEdgePath(
