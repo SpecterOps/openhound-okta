@@ -160,7 +160,31 @@ class GroupAssignedApp(BaseAsset):
             assigned_group_ids=assigned_group_ids,
             group_id=group_id,
         )
-        coverage = "unproven"
+        preflight_lookup = getattr(lookup, "saml_eligibility_preflight", None)
+        preflight = preflight_lookup(self.id) if callable(preflight_lookup) else None
+        policy_evaluability = "static_incomplete"
+        if preflight is not None:
+            coverage_values = {
+                "membership_coverage": preflight.membership_coverage,
+                "principal_reachability_coverage": (
+                    preflight.principal_reachability_coverage
+                ),
+                "principal_exclusion_coverage": (
+                    preflight.principal_exclusion_coverage
+                ),
+                "policy_evaluation_coverage": preflight.policy_evaluation_coverage,
+                "claim_evidence_coverage": preflight.claim_evidence_coverage,
+            }
+            policy_evaluability = preflight.policy_evaluability
+        else:
+            coverage = "unproven"
+            coverage_values = {
+                "membership_coverage": coverage,
+                "principal_reachability_coverage": coverage,
+                "principal_exclusion_coverage": coverage,
+                "policy_evaluation_coverage": coverage,
+                "claim_evidence_coverage": coverage,
+            }
         yield Edge(
             kind=ek.SAML_ELIGIBLE_FOR,
             start=OktaOwnedEdgePath(value=self.group_id, match_by="id"),
@@ -184,15 +208,21 @@ class GroupAssignedApp(BaseAsset):
                 eligibility_basis="group_assignment",
                 selector_operator=identity.selector_operator,
                 operand_role="positive_set",
-                policy_evaluability="static_incomplete",
+                policy_evaluability=policy_evaluability,
                 policy_branch_count=1,
                 branch_positive_operand_count=(
                     identity.branch_positive_operand_count
                 ),
-                membership_coverage=coverage,
-                principal_reachability_coverage=coverage,
-                principal_exclusion_coverage=coverage,
-                policy_evaluation_coverage=coverage,
-                claim_evidence_coverage=coverage,
+                membership_coverage=coverage_values["membership_coverage"],
+                principal_reachability_coverage=coverage_values[
+                    "principal_reachability_coverage"
+                ],
+                principal_exclusion_coverage=coverage_values[
+                    "principal_exclusion_coverage"
+                ],
+                policy_evaluation_coverage=coverage_values[
+                    "policy_evaluation_coverage"
+                ],
+                claim_evidence_coverage=coverage_values["claim_evidence_coverage"],
             ),
         )

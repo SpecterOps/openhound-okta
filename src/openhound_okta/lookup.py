@@ -8,6 +8,8 @@ import duckdb
 from duckdb import DuckDBPyConnection, Error as DuckDBError
 from openhound.core.lookup import LookupManager
 
+from openhound_okta.saml_eligibility import SamlEligibilityPreflight
+
 
 USER_SAML_CONTEXT_CACHE_MAXSIZE = 128
 
@@ -112,6 +114,98 @@ class OktaLookup(LookupManager):
                 "application-group assignments"
             ) from exc
         return tuple(group_id for (group_id,) in rows)
+
+    @lru_cache
+    def saml_eligibility_preflight(
+        self, app_id: str
+    ) -> SamlEligibilityPreflight | None:
+        """Return an opt-in app partition ledger, or no proof for old snapshots."""
+
+        table_name = "saml_eligibility_preflight"
+        required_columns = (
+            "app_id",
+            "membership_coverage",
+            "principal_reachability_coverage",
+            "principal_exclusion_coverage",
+            "policy_evaluation_coverage",
+            "claim_evidence_coverage",
+        )
+        if not self._table_exists(table_name) or not all(
+            self._column_exists(table_name, column) for column in required_columns
+        ):
+            return None
+        try:
+            row = self.client.execute(
+                f"""
+                SELECT membership_coverage,
+                       principal_reachability_coverage,
+                       principal_exclusion_coverage,
+                       policy_evaluation_coverage,
+                       claim_evidence_coverage
+                FROM {self.schema}.{table_name}
+                WHERE app_id = ?
+                """,
+                [app_id],
+            ).fetchone()
+        except DuckDBError as exc:
+            raise RuntimeError(
+                "SAML eligibility preflight ledger could not be read"
+            ) from exc
+        if row is None or any(
+            value not in {"complete", "incomplete", "unproven"} for value in row
+        ):
+            return None
+        return SamlEligibilityPreflight(*row)
+
+    @lru_cache
+    def _saml_eligibility_exception_inventory(self) -> frozenset[tuple[str, str]]:
+        """Load the residual inventory once; conversion must not point-query users."""
+
+        table_name = "saml_eligibility_preflight_exceptions"
+        if not self._table_exists(table_name) or not all(
+            self._column_exists(table_name, column) for column in ("app_id", "user_id")
+        ):
+            return frozenset()
+        ledger_table = "saml_eligibility_preflight"
+        required_ledger_columns = (
+            "app_id",
+            "membership_coverage",
+            "principal_reachability_coverage",
+            "principal_exclusion_coverage",
+            "policy_evaluation_coverage",
+        )
+        if not self._table_exists(ledger_table) or not all(
+            self._column_exists(ledger_table, column)
+            for column in required_ledger_columns
+        ):
+            return frozenset()
+        try:
+            rows = self.client.execute(
+                f"""
+                SELECT exceptions.app_id, exceptions.user_id
+                FROM {self.schema}.{table_name} AS exceptions
+                JOIN {self.schema}.{ledger_table} AS ledger
+                    ON ledger.app_id = exceptions.app_id
+                WHERE ledger.membership_coverage = 'complete'
+                  AND ledger.principal_reachability_coverage = 'complete'
+                  AND ledger.principal_exclusion_coverage = 'complete'
+                  AND ledger.policy_evaluation_coverage = 'complete'
+                """
+            ).fetchall()
+        except DuckDBError as exc:
+            raise RuntimeError(
+                "SAML eligibility exception inventory could not be read"
+            ) from exc
+        return frozenset((str(app_id), str(user_id)) for app_id, user_id in rows)
+
+    def saml_eligibility_exception_applies(self, app_id: str, user_id: str) -> bool:
+        """Return whether a complete ledger proves one inherited exception.
+
+        This is an in-memory test over the one-time residual inventory. It must
+        remain free of per-application-user DuckDB queries on large tenants.
+        """
+
+        return (app_id, user_id) in self._saml_eligibility_exception_inventory()
 
     @lru_cache
     def application_settings(self, app_id: str) -> bool:

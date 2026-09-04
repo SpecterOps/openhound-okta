@@ -39,7 +39,11 @@ from openhound_okta.models.saml import (
     saml_sp_acs_rows,
     saml_trusted_issuer_row,
 )
-from openhound_okta.saml_eligibility import SAML_V0_4_CONTRACT_VERSION
+from openhound_okta.saml_eligibility import (
+    SAML_V0_4_CONTRACT_VERSION,
+    derive_saml_eligibility_exception_key,
+    derive_saml_group_eligibility_identity,
+)
 from openhound_okta.oin_routes import registry as oin_route_registry
 from openhound_okta.oin_routes.contract import (
     CallableRouteProvider,
@@ -496,6 +500,68 @@ def test_application_user_does_not_fall_back_when_combined_context_is_missing() 
     assert lookup.user_saml_context_calls == 1
     assert lookup.user_status_calls == 0
     assert lookup.user_profile_calls == 0
+
+
+def test_group_application_user_emits_only_a_proven_v0_4_eligibility_exception() -> (
+    None
+):
+    class ExceptionLookup:
+        def saml_eligibility_exception_applies(self, app_id: str, user_id: str) -> bool:
+            assert (app_id, user_id) == ("0oa_saml", "00u_saml_user")
+            return True
+
+        def saml_group_assignment_group_ids(self, app_id: str) -> tuple[str, ...]:
+            assert app_id == "0oa_saml"
+            return ("00g_group", "00g_second")
+
+        def org_id(self) -> str:
+            return "00o_example"
+
+    app_user = _application_user(
+        app_status="ACTIVE",
+        scope="GROUP",
+        status="STAGED",
+    )
+    app_user._lookup = ExceptionLookup()
+    app_user._extras = {
+        "tenant": "preview1.example.invalid",
+        "saml_group_eligibility_mode": "shadow",
+    }
+
+    edge = next(
+        edge for edge in app_user.edges if edge.kind == ek.SAML_ELIGIBILITY_EXCEPTION
+    )
+    identity = derive_saml_group_eligibility_identity(
+        source_id="source://openhound-okta/00O_EXAMPLE",
+        authority_id="https://preview1.example.invalid",
+        federation_provider_id="OKTA:SAML:PROVIDER:0OA_SAML",
+        assigned_group_ids=("00G_GROUP", "00G_SECOND"),
+        group_id="00G_GROUP",
+    )
+
+    assert edge.start.value == "00U_SAML_USER"
+    assert edge.end.value == "OKTA:SAML:PROVIDER:0OA_SAML"
+    assert edge.properties.traversable is False
+    assert edge.properties.schema_contract_version == SAML_V0_4_CONTRACT_VERSION
+    assert edge.properties.eligibility_partition_key == identity.partition_key
+    assert edge.properties.residual_evidence_key == (
+        derive_saml_eligibility_exception_key(
+            partition_key=identity.partition_key,
+            principal_id="00U_SAML_USER",
+            federation_provider_id="OKTA:SAML:PROVIDER:0OA_SAML",
+        )
+    )
+
+
+def test_group_application_user_without_exception_proof_emits_no_exception() -> None:
+    app_user = _application_user(app_status="ACTIVE", scope="GROUP", status="STAGED")
+    app_user._lookup = object()
+    app_user._extras = {
+        "tenant": "preview1.example.invalid",
+        "saml_group_eligibility_mode": "shadow",
+    }
+
+    assert ek.SAML_ELIGIBILITY_EXCEPTION not in {edge.kind for edge in app_user.edges}
 
 
 def test_application_user_supports_legacy_saml_context_lookup() -> None:

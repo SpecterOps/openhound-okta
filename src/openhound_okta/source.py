@@ -20,7 +20,10 @@ from dlt.sources.helpers.rest_client.client import RESTClient
 from dlt.sources.helpers.rest_client.paginators import HeaderLinkPaginator
 
 from .main import app
-from .saml_eligibility import configured_saml_group_eligibility_mode
+from .saml_eligibility import (
+    configured_saml_eligibility_preflight,
+    configured_saml_group_eligibility_mode,
+)
 from .models import (
     Agent,
     AgentPool,
@@ -390,6 +393,7 @@ class SourceContext:
     )
     group_push_mappings_page_size: int = GROUP_PUSH_MAPPINGS_PAGE_SIZE
     identity_provider_users_page_size: int = IDENTITY_PROVIDER_USERS_PAGE_SIZE
+    saml_eligibility_preflight: bool = False
 
 
 def _group_page_sizes(initial_page_size: int) -> tuple[int, ...]:
@@ -497,13 +501,34 @@ def groups(ctx: SourceContext):
             continue
 
         for item in first_page:
-            yield item
+            yield (
+                _group_with_saml_membership_expected_count(item)
+                if getattr(ctx, "saml_eligibility_preflight", False)
+                else item
+            )
         for page in pages:
             for item in page:
-                yield item
+                yield (
+                    _group_with_saml_membership_expected_count(item)
+                    if getattr(ctx, "saml_eligibility_preflight", False)
+                    else item
+                )
         return
 
     # dlt.current.resource_state()["last_run"] = str(datetime.now().isoformat())
+
+
+def _group_with_saml_membership_expected_count(
+    item: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project native group stats for the opt-in SAML membership reconciliation."""
+
+    embedded = item.get("_embedded")
+    stats = embedded.get("stats") if isinstance(embedded, Mapping) else None
+    users_count = stats.get("usersCount") if isinstance(stats, Mapping) else None
+    if not isinstance(users_count, int) or users_count < 0:
+        return dict(item)
+    return {**item, "saml_membership_expected_count": users_count}
 
 
 @app.transformer(
@@ -1568,6 +1593,7 @@ def source(
     # Collection remains graph-shape neutral, but an invalid value must not allow
     # a raw snapshot to proceed under an accidental future cutover configuration.
     configured_saml_group_eligibility_mode(dlt.config.get)
+    saml_eligibility_preflight = configured_saml_eligibility_preflight(dlt.config.get)
 
     if not 1 <= application_users_page_size <= APPLICATION_USERS_PAGE_SIZE:
         raise ValueError(
@@ -1624,6 +1650,7 @@ def source(
         ),
         group_push_mappings_page_size=group_push_mappings_page_size,
         identity_provider_users_page_size=identity_provider_users_page_size,
+        saml_eligibility_preflight=saml_eligibility_preflight,
     )
     custom_roles_resource = custom_roles(ctx)
     built_in_roles_resource = built_in_roles()

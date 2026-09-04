@@ -1737,6 +1737,20 @@ class SamlPrincipalSetEligibilityEdgeProperties(EdgeProperties):
 
 
 @dataclass
+class SamlEligibilityExceptionEdgeProperties(EdgeProperties):
+    """Fixed v0.4 exclusion of inherited group-assignment support.
+
+    The relationship is intentionally value-free.  Its exact principal,
+    provider, and partition identity provide all allowed subtraction scope.
+    """
+
+    schema_contract_version: str
+    eligibility_partition_key: str
+    residual_evidence_key: str
+    eligibility_residual_mode: str = "exclude_inherited_support"
+
+
+@dataclass
 class SamlAccountEdgeProperties(SamlMatchValuesEdgeProperties):
     """Properties for normalized Okta SAML service-provider account edges.
 

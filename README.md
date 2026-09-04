@@ -76,8 +76,22 @@ is 200, 100, then 50.
 `saml_group_eligibility_mode` defaults to `expanded`, which preserves the existing per-user SAML eligibility output.
 `shadow` additionally emits non-traversable v0.4 `SAML_EligibleFor` evidence from native `Okta_Group` nodes to the
 corresponding `SAML_FederationProvider`. Shadow facts reuse the authoritative public application-group assignment
-collection and the existing one-hop `Okta_MemberOf` topology; they deliberately declare all coverage dimensions as
-`unproven` and cannot replace the expanded user facts or become authoritative.
+collection and the existing one-hop `Okta_MemberOf` topology. Without the optional
+preflight ledger they declare all coverage dimensions as `unproven`; with a fresh
+ledger they carry its contract coverage dimensions. Shadow output cannot replace
+the expanded user facts or become authoritative.
+
+`saml_eligibility_preflight` is disabled by default. When explicitly enabled on
+the development branch, preprocessing creates DuckDB proof-ledger tables that
+compare native group membership with the independent application-user
+`scope=GROUP` assignment view. The ledger contains no profile or claim values.
+It can mark policy evaluation `static_complete` and inventory only fixed,
+per-principal inherited-support exclusions; in shadow mode those exclusions are
+emitted as non-traversable `SAML_EligibilityException` facts. Missing,
+duplicate, unknown, or otherwise unreconciled inputs remain incomplete and emit
+no exception. A marked fresh snapshot remains eligible for the ledger during a
+separate preprocessing invocation, because DLT does not consistently preserve
+source-scoped configuration for that invocation.
 
 The defaults can be adjusted with DLT source configuration environment variables:
 
@@ -87,6 +101,7 @@ The defaults can be adjusted with DLT source configuration environment variables
 | `SOURCES__SOURCE__OKTA__GROUPS_PAGE_SIZE` | `200` | Expanded groups per page, from 1 through 200 |
 | `SOURCES__SOURCE__OKTA__APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE` | `200` | Application-group assignments per page, from 20 through 200 |
 | `SOURCES__SOURCE__OKTA__SAML_GROUP_ELIGIBILITY_MODE` | `expanded` | `expanded` preserves current output; `shadow` adds non-authoritative v0.4 group eligibility evidence |
+| `SOURCES__SOURCE__OKTA__SAML_ELIGIBILITY_PREFLIGHT` | `false` | Development-only proof ledger for shadow coverage and fixed inherited-support exceptions |
 | `SOURCES__SOURCE__OKTA__GROUP_PUSH_MAPPINGS_PAGE_SIZE` | `1000` | Group push mappings per page, from 1 through 1,000 |
 | `SOURCES__SOURCE__OKTA__IDENTITY_PROVIDER_USERS_PAGE_SIZE` | `200` | Identity-provider users per page, from 1 through 200 |
 | `SOURCES__SOURCE__OKTA__ENDPOINT_CONCURRENCY` | `2` | Maximum simultaneous requests per endpoint family |
