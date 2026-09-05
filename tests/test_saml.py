@@ -1994,6 +1994,44 @@ def test_saml_service_provider_links_only_to_resolved_route_nodes():
     ]
 
 
+def test_saml_trusted_issuer_is_shared_by_entity_id_without_scalar_idp_owner():
+    first_idp = _identity_provider(id="0oa_first", name="First inbound SAML")
+    second_idp = _identity_provider(id="0oa_second", name="Second inbound SAML")
+
+    first_issuer = saml_trusted_issuer_row(first_idp)
+    second_issuer = saml_trusted_issuer_row(second_idp)
+    first_service_provider = saml_service_provider_row(first_idp)
+    second_service_provider = saml_service_provider_row(second_idp)
+
+    assert first_issuer is not None
+    assert second_issuer is not None
+    assert first_service_provider is not None
+    assert second_service_provider is not None
+
+    expected_issuer_id = (
+        "okta:saml:trusted-issuer:"
+        "a0537a16962f58cb4a7567c9c7824b3fd400ffeda7ca7918a4e17186aa595358"
+    )
+    assert first_issuer == {
+        "id": expected_issuer_id,
+        "entity_id": "https://idp.example.test/saml/issuer",
+    }
+    assert second_issuer == first_issuer
+    assert SamlTrustedIssuer.model_validate(first_issuer).model_dump() == first_issuer
+    assert first_service_provider["issuer_id"] == expected_issuer_id
+    assert second_service_provider["issuer_id"] == expected_issuer_id
+
+    first_edges = list(SamlServiceProvider.model_validate(first_service_provider).edges)
+    second_edges = list(SamlServiceProvider.model_validate(second_service_provider).edges)
+    first_trust = next(edge for edge in first_edges if edge.kind == ek.SAML_TRUSTS_ISSUER)
+    second_trust = next(
+        edge for edge in second_edges if edge.kind == ek.SAML_TRUSTS_ISSUER
+    )
+    assert first_trust.start.value == "OKTA:SAML:SERVICE-PROVIDER:0OA_FIRST"
+    assert second_trust.start.value == "OKTA:SAML:SERVICE-PROVIDER:0OA_SECOND"
+    assert first_trust.end.value == second_trust.end.value == expected_issuer_id.upper()
+
+
 def test_saml_service_provider_prefers_inbound_idp_metadata_routes():
     idp = _identity_provider(
         _links={

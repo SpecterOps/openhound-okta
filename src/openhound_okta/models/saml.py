@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field as dc_field, replace
+import hashlib
 import json
 import re
 from typing import Any
@@ -71,8 +72,18 @@ def saml_service_provider_id(idp_id: str) -> str:
     return f"okta:saml:service-provider:{idp_id}"
 
 
-def saml_trusted_issuer_id(idp_id: str) -> str:
-    return f"okta:saml:trusted-issuer:{idp_id}"
+def saml_trusted_issuer_id(entity_id: str) -> str:
+    """Return the shared graph ID for an inbound SAML issuer entity ID.
+
+    Okta permits multiple inbound IdPs in one environment to trust the same
+    issuer.  The issuer is therefore identified by its byte-exact entity ID,
+    rather than by any one IdP that happens to reference it.  A digest keeps
+    the graph ID safe and stable while preserving case-sensitive entity-ID
+    identity before ``OktaNode`` applies its graph-wide ID normalization.
+    """
+
+    digest = hashlib.sha256(entity_id.encode("utf-8")).hexdigest()
+    return f"okta:saml:trusted-issuer:{digest}"
 
 
 def saml_sp_acs_id(idp_id: str, index: int = 0) -> str:
@@ -1193,7 +1204,7 @@ def saml_service_provider_row(identity_provider) -> dict[str, Any] | None:
         "idp_type": identity_provider.type,
         "idp_status": identity_provider.status,
         "sp_entity_id": _idp_sp_entity_id(identity_provider),
-        "issuer_id": saml_trusted_issuer_id(identity_provider.id) if issuer else None,
+        "issuer_id": saml_trusted_issuer_id(issuer) if issuer else None,
         "acs_ids": [row["id"] for row in acs_rows],
         "account_resolution_rule_id": rule_id,
         "account_resolution_field_id": (
@@ -1243,11 +1254,7 @@ def saml_trusted_issuer_row(identity_provider) -> dict[str, Any] | None:
     if not entity_id:
         return None
     return {
-        "id": saml_trusted_issuer_id(identity_provider.id),
-        "app_id": identity_provider.id,
-        "app_name": identity_provider.name,
-        "app_label": identity_provider.name,
-        "source_object_kind": nk.IDP,
+        "id": saml_trusted_issuer_id(entity_id),
         "entity_id": entity_id,
     }
 
@@ -1408,6 +1415,20 @@ class SamlIssuerProperties(OktaNodeProperties):
     app_label: str
     entity_id: str
     source_object_kind: str = nk.APPLICATION
+    schema_contract_version: str = SAML_CONTRACT_VERSION
+
+
+@dataclass
+class SamlTrustedIssuerProperties(OktaNodeProperties):
+    """Properties for a shared issuer trusted by one or more Okta IdPs.
+
+    Per-IdP provenance is represented by the owning ``SAML_ServiceProvider``
+    nodes and their ``SAML_TrustsIssuer`` edges.  This node intentionally has
+    no scalar IdP owner fields because a single issuer can be trusted by more
+    than one IdP in the same Okta environment.
+    """
+
+    entity_id: str
     schema_contract_version: str = SAML_CONTRACT_VERSION
 
 
@@ -1839,13 +1860,38 @@ class SamlIssuer(BaseAsset):
         properties=SamlIssuerProperties,
     ),
 )
-class SamlTrustedIssuer(SamlIssuer):
+class SamlTrustedIssuer(BaseAsset):
     """Distinct conversion asset for inbound trusted issuers.
 
     OpenHound derives output filenames from the asset class name. Keeping inbound
     and outbound issuer streams on the same class causes the later stream to
     overwrite the earlier ``samlissuer`` graph file during conversion.
     """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    entity_id: str
+
+    @property
+    def as_node(self):
+        return OktaNode(
+            kinds=[nk.SAML_ISSUER],
+            properties=SamlTrustedIssuerProperties(
+                tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
+                id=self.id,
+                name=self.entity_id,
+                displayname=self.entity_id,
+                environmentid=self._lookup.org_id(),
+                entity_id=self.entity_id,
+                schema_contract_version=SAML_CONTRACT_VERSION,
+            ),
+        )
+
+    @property
+    def edges(self):
+        return iter(())
 
 
 @app.asset(
