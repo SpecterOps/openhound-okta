@@ -72,17 +72,26 @@ def saml_service_provider_id(idp_id: str) -> str:
     return f"okta:saml:service-provider:{idp_id}"
 
 
-def saml_trusted_issuer_id(entity_id: str) -> str:
+def saml_trusted_issuer_id(entity_id: str, tenant_domain: str) -> str:
     """Return the shared graph ID for an inbound SAML issuer entity ID.
 
     Okta permits multiple inbound IdPs in one environment to trust the same
-    issuer.  The issuer is therefore identified by its byte-exact entity ID,
-    rather than by any one IdP that happens to reference it.  A digest keeps
-    the graph ID safe and stable while preserving case-sensitive entity-ID
-    identity before ``OktaNode`` applies its graph-wide ID normalization.
+    issuer.  The issuer is therefore identified by its byte-exact entity ID
+    within the collecting Okta tenant, rather than by any one IdP that happens
+    to reference it.  A digest keeps the graph ID safe and stable while
+    preserving case-sensitive entity-ID identity before ``OktaNode`` applies
+    its graph-wide ID normalization.
     """
 
-    digest = hashlib.sha256(entity_id.encode("utf-8")).hexdigest()
+    if not isinstance(tenant_domain, str) or not tenant_domain.strip():
+        raise ValueError("tenant_domain is required for trusted issuer identity")
+
+    identity = json.dumps(
+        [tenant_domain.strip().casefold(), entity_id],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(identity.encode("ascii")).hexdigest()
     return f"okta:saml:trusted-issuer:{digest}"
 
 
@@ -1186,7 +1195,10 @@ def _saml_acs_rows(
     return rows
 
 
-def saml_service_provider_row(identity_provider) -> dict[str, Any] | None:
+def saml_service_provider_row(
+    identity_provider,
+    tenant_domain: str,
+) -> dict[str, Any] | None:
     if not is_saml_identity_provider(identity_provider):
         return None
 
@@ -1205,7 +1217,11 @@ def saml_service_provider_row(identity_provider) -> dict[str, Any] | None:
         "idp_type": identity_provider.type,
         "idp_status": identity_provider.status,
         "sp_entity_id": _idp_sp_entity_id(identity_provider),
-        "issuer_id": (saml_trusted_issuer_id(issuer) if issuer is not None else None),
+        "issuer_id": (
+            saml_trusted_issuer_id(issuer, tenant_domain)
+            if issuer is not None
+            else None
+        ),
         "acs_ids": [row["id"] for row in acs_rows],
         "account_resolution_rule_id": rule_id,
         "account_resolution_field_id": (
@@ -1248,14 +1264,17 @@ def saml_account_resolution_field_row(
     }
 
 
-def saml_trusted_issuer_row(identity_provider) -> dict[str, Any] | None:
+def saml_trusted_issuer_row(
+    identity_provider,
+    tenant_domain: str,
+) -> dict[str, Any] | None:
     if not is_saml_identity_provider(identity_provider):
         return None
     entity_id = _raw_trusted_issuer(identity_provider)
     if entity_id is None:
         return None
     return {
-        "id": saml_trusted_issuer_id(entity_id),
+        "id": saml_trusted_issuer_id(entity_id, tenant_domain),
         "entity_id": entity_id,
     }
 
