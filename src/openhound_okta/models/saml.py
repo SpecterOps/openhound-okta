@@ -1858,7 +1858,7 @@ class SamlIssuer(BaseAsset):
         icon="stamp",
         kind=nk.SAML_ISSUER,
         description="Normalized SAML issuer trusted by an Okta inbound IdP",
-        properties=SamlIssuerProperties,
+        properties=SamlTrustedIssuerProperties,
     ),
 )
 class SamlTrustedIssuer(BaseAsset):

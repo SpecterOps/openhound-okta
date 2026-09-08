@@ -8,6 +8,7 @@ import pytest
 
 from openhound_okta.lookup import USER_SAML_CONTEXT_CACHE_MAXSIZE, OktaLookup
 from openhound_okta.kinds import edges as ek
+from openhound_okta.main import app as openhound_app
 from openhound_okta.models.application import Application
 from openhound_okta.models.application_users import ApplicationUser
 from openhound_okta.models.idp import IdentityProvider
@@ -24,6 +25,7 @@ from openhound_okta.models.saml import (
     SamlServiceProviderAssertionConsumerService,
     SamlServiceProvider,
     SamlTrustedIssuer,
+    SamlTrustedIssuerProperties,
     normalize_okta_account_state,
     saml_account_resolution_field_row,
     saml_account_resolution_rule_row,
@@ -735,6 +737,26 @@ def test_inbound_and_outbound_route_assets_have_distinct_conversion_names():
         SamlAssertionConsumerService.__name__
         != SamlServiceProviderAssertionConsumerService.__name__
     )
+
+
+def test_saml_trusted_issuer_registers_its_emitted_properties():
+    trusted_issuer_node = next(
+        node
+        for node in openhound_app.nodes
+        if node.kind == "SAML_Issuer"
+        and node.description == "Normalized SAML issuer trusted by an Okta inbound IdP"
+    )
+    trusted_issuer = SamlTrustedIssuer.model_validate(
+        {
+            "id": "okta:saml:trusted-issuer:example",
+            "entity_id": "https://idp.example.test/saml/issuer",
+        }
+    )
+    trusted_issuer._lookup = _ApplicationLookup()
+    trusted_issuer._extras = {"tenant": "example.okta.test"}
+
+    assert trusted_issuer_node.properties is SamlTrustedIssuerProperties
+    assert type(trusted_issuer.as_node.properties) is SamlTrustedIssuerProperties
 
 
 def test_saml_provider_emits_claim_mapping_explanation():
