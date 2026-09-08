@@ -35,6 +35,7 @@ from openhound_okta.models.saml import (
     saml_issuer_row,
     saml_service_provider_row,
     saml_sp_acs_rows,
+    saml_trusted_issuer_id,
     saml_trusted_issuer_row,
 )
 from openhound_okta.oin_routes import registry as oin_route_registry
@@ -2030,6 +2031,41 @@ def test_saml_trusted_issuer_is_shared_by_entity_id_without_scalar_idp_owner():
     assert first_trust.start.value == "OKTA:SAML:SERVICE-PROVIDER:0OA_FIRST"
     assert second_trust.start.value == "OKTA:SAML:SERVICE-PROVIDER:0OA_SECOND"
     assert first_trust.end.value == second_trust.end.value == expected_issuer_id.upper()
+
+
+def test_saml_trusted_issuer_preserves_source_whitespace_in_identity():
+    exact_issuer = "https://idp.example.test/saml/issuer"
+    padded_issuer = f" {exact_issuer} "
+    exact_idp = _identity_provider(id="0oa_exact")
+    padded_idp = _identity_provider(id="0oa_padded")
+    exact_idp.protocol.credentials.trust.issuer = exact_issuer
+    padded_idp.protocol.credentials.trust.issuer = padded_issuer
+
+    exact_row = saml_trusted_issuer_row(exact_idp)
+    padded_row = saml_trusted_issuer_row(padded_idp)
+    padded_service_provider = saml_service_provider_row(padded_idp)
+
+    assert exact_row is not None
+    assert padded_row is not None
+    assert padded_service_provider is not None
+    assert exact_row["entity_id"] == exact_issuer
+    assert padded_row["entity_id"] == padded_issuer
+    assert exact_row["id"] == saml_trusted_issuer_id(exact_issuer)
+    assert padded_row["id"] == saml_trusted_issuer_id(padded_issuer)
+    assert exact_row["id"] != padded_row["id"]
+    assert padded_service_provider["issuer_id"] == padded_row["id"]
+
+    whitespace_only_idp = _identity_provider(id="0oa_whitespace_only")
+    whitespace_only_idp.protocol.credentials.trust.issuer = "   "
+    whitespace_only_row = saml_trusted_issuer_row(whitespace_only_idp)
+
+    assert whitespace_only_row is not None
+    assert whitespace_only_row["entity_id"] == "   "
+
+    for empty_issuer in (None, ""):
+        empty_idp = _identity_provider(id=f"0oa_empty_{empty_issuer is None}")
+        empty_idp.protocol.credentials.trust.issuer = empty_issuer
+        assert saml_trusted_issuer_row(empty_idp) is None
 
 
 def test_saml_service_provider_prefers_inbound_idp_metadata_routes():

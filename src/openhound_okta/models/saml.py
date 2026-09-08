@@ -941,8 +941,9 @@ def _idp_trust(identity_provider) -> Any:
     return getattr(credentials, "trust", None)
 
 
-def _trusted_issuer(identity_provider) -> str | None:
-    return _clean(getattr(_idp_trust(identity_provider), "issuer", None))
+def _raw_trusted_issuer(identity_provider) -> str | None:
+    issuer = getattr(_idp_trust(identity_provider), "issuer", None)
+    return issuer if issuer is not None and issuer != "" else None
 
 
 def _trusted_audience(identity_provider) -> str | None:
@@ -1189,7 +1190,7 @@ def saml_service_provider_row(identity_provider) -> dict[str, Any] | None:
     if not is_saml_identity_provider(identity_provider):
         return None
 
-    issuer = _trusted_issuer(identity_provider)
+    issuer = _raw_trusted_issuer(identity_provider)
     acs_rows = saml_sp_acs_rows(identity_provider)
     resolution = _account_resolution_evidence(identity_provider)
     rule_id = (
@@ -1204,7 +1205,7 @@ def saml_service_provider_row(identity_provider) -> dict[str, Any] | None:
         "idp_type": identity_provider.type,
         "idp_status": identity_provider.status,
         "sp_entity_id": _idp_sp_entity_id(identity_provider),
-        "issuer_id": saml_trusted_issuer_id(issuer) if issuer else None,
+        "issuer_id": (saml_trusted_issuer_id(issuer) if issuer is not None else None),
         "acs_ids": [row["id"] for row in acs_rows],
         "account_resolution_rule_id": rule_id,
         "account_resolution_field_id": (
@@ -1250,8 +1251,8 @@ def saml_account_resolution_field_row(
 def saml_trusted_issuer_row(identity_provider) -> dict[str, Any] | None:
     if not is_saml_identity_provider(identity_provider):
         return None
-    entity_id = _trusted_issuer(identity_provider)
-    if not entity_id:
+    entity_id = _raw_trusted_issuer(identity_provider)
+    if entity_id is None:
         return None
     return {
         "id": saml_trusted_issuer_id(entity_id),
