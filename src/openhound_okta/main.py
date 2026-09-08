@@ -23,10 +23,17 @@ def _tenant_domain_from_config() -> str:
     if not isinstance(tenant_url, str) or not tenant_url.strip():
         raise ValueError("Okta base URL is unavailable during conversion")
 
-    tenant_domain = urlparse(tenant_url.strip()).netloc
-    if not tenant_domain:
+    try:
+        parsed = urlparse(tenant_url.strip())
+        _ = parsed.port
+        tenant_domain = parsed.hostname
+    except ValueError as error:
+        raise ValueError(
+            "Okta base URL must include a URL scheme and hostname"
+        ) from error
+    if not parsed.scheme or not tenant_domain:
         raise ValueError("Okta base URL must include a URL scheme and hostname")
-    return tenant_domain
+    return tenant_domain.casefold()
 
 
 @app.collect()

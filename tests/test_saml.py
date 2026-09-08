@@ -8,6 +8,7 @@ import pytest
 
 from openhound_okta.lookup import USER_SAML_CONTEXT_CACHE_MAXSIZE, OktaLookup
 from openhound_okta.kinds import edges as ek
+from openhound_okta.main import app as openhound_app
 from openhound_okta.models.application import Application
 from openhound_okta.models.application_users import ApplicationUser
 from openhound_okta.models.idp import IdentityProvider
@@ -24,6 +25,7 @@ from openhound_okta.models.saml import (
     SamlServiceProviderAssertionConsumerService,
     SamlServiceProvider,
     SamlTrustedIssuer,
+    SamlTrustedIssuerProperties,
     normalize_okta_account_state,
     saml_account_resolution_field_row,
     saml_account_resolution_rule_row,
@@ -35,6 +37,7 @@ from openhound_okta.models.saml import (
     saml_issuer_row,
     saml_service_provider_row,
     saml_sp_acs_rows,
+    saml_trusted_issuer_id,
     saml_trusted_issuer_row,
 )
 from openhound_okta.oin_routes import registry as oin_route_registry
@@ -49,6 +52,9 @@ from openhound_okta.oin_routes.declarative import (
     RouteVariable,
 )
 from openhound_okta.oin_routes.validators import present_string
+
+
+TEST_TENANT_DOMAIN = "example.okta.test"
 
 
 def _application(**overrides) -> Application:
@@ -736,6 +742,26 @@ def test_inbound_and_outbound_route_assets_have_distinct_conversion_names():
     )
 
 
+def test_saml_trusted_issuer_registers_its_emitted_properties():
+    trusted_issuer_node = next(
+        node
+        for node in openhound_app.nodes
+        if node.kind == "SAML_Issuer"
+        and node.description == "Normalized SAML issuer trusted by an Okta inbound IdP"
+    )
+    trusted_issuer = SamlTrustedIssuer.model_validate(
+        {
+            "id": "okta:saml:trusted-issuer:example",
+            "entity_id": "https://idp.example.test/saml/issuer",
+        }
+    )
+    trusted_issuer._lookup = _ApplicationLookup()
+    trusted_issuer._extras = {"tenant": "example.okta.test"}
+
+    assert trusted_issuer_node.properties is SamlTrustedIssuerProperties
+    assert type(trusted_issuer.as_node.properties) is SamlTrustedIssuerProperties
+
+
 def test_saml_provider_emits_claim_mapping_explanation():
     app = _application(
         credentials={
@@ -1054,8 +1080,8 @@ def test_inbound_normalization_requires_saml_idp_type_and_protocol():
             idp_protocol_type=protocol_type,
         )
 
-        assert saml_service_provider_row(idp) is None
-        assert saml_trusted_issuer_row(idp) is None
+        assert saml_service_provider_row(idp, TEST_TENANT_DOMAIN) is None
+        assert saml_trusted_issuer_row(idp, TEST_TENANT_DOMAIN) is None
         assert saml_sp_acs_rows(idp) == []
         edge_kinds = {edge.kind for edge in idp_user.edges}
         assert ek.IDENTITY_PROVIDER_FOR in edge_kinds
@@ -1959,8 +1985,8 @@ def test_saml_assertion_edges_respect_provider_and_principal_lifecycle() -> None
 def test_saml_service_provider_links_only_to_resolved_route_nodes():
     idp = _identity_provider()
 
-    service_provider = saml_service_provider_row(idp)
-    issuer = saml_trusted_issuer_row(idp)
+    service_provider = saml_service_provider_row(idp, TEST_TENANT_DOMAIN)
+    issuer = saml_trusted_issuer_row(idp, TEST_TENANT_DOMAIN)
     acs_rows = saml_sp_acs_rows(idp)
 
     assert service_provider is not None
@@ -1994,6 +2020,114 @@ def test_saml_service_provider_links_only_to_resolved_route_nodes():
     ]
 
 
+def test_saml_trusted_issuer_is_shared_by_entity_id_without_scalar_idp_owner():
+    first_idp = _identity_provider(id="0oa_first", name="First inbound SAML")
+    second_idp = _identity_provider(id="0oa_second", name="Second inbound SAML")
+
+    first_issuer = saml_trusted_issuer_row(first_idp, TEST_TENANT_DOMAIN)
+    second_issuer = saml_trusted_issuer_row(second_idp, TEST_TENANT_DOMAIN)
+    first_service_provider = saml_service_provider_row(first_idp, TEST_TENANT_DOMAIN)
+    second_service_provider = saml_service_provider_row(second_idp, TEST_TENANT_DOMAIN)
+
+    assert first_issuer is not None
+    assert second_issuer is not None
+    assert first_service_provider is not None
+    assert second_service_provider is not None
+
+    expected_issuer_id = (
+        "okta:saml:trusted-issuer:"
+        "4849dbd45967548db08ee7b0cdd4fb3e34447775746e4656cadaf598bd979e08"
+    )
+    assert first_issuer == {
+        "id": expected_issuer_id,
+        "entity_id": "https://idp.example.test/saml/issuer",
+    }
+    assert second_issuer == first_issuer
+    assert SamlTrustedIssuer.model_validate(first_issuer).model_dump() == first_issuer
+    assert first_service_provider["issuer_id"] == expected_issuer_id
+    assert second_service_provider["issuer_id"] == expected_issuer_id
+
+    first_edges = list(SamlServiceProvider.model_validate(first_service_provider).edges)
+    second_edges = list(SamlServiceProvider.model_validate(second_service_provider).edges)
+    first_trust = next(edge for edge in first_edges if edge.kind == ek.SAML_TRUSTS_ISSUER)
+    second_trust = next(
+        edge for edge in second_edges if edge.kind == ek.SAML_TRUSTS_ISSUER
+    )
+    assert first_trust.start.value == "OKTA:SAML:SERVICE-PROVIDER:0OA_FIRST"
+    assert second_trust.start.value == "OKTA:SAML:SERVICE-PROVIDER:0OA_SECOND"
+    assert first_trust.end.value == second_trust.end.value == expected_issuer_id.upper()
+
+
+def test_saml_trusted_issuer_id_isolated_between_tenants():
+    first_idp = _identity_provider(id="0oa_preview1")
+    second_idp = _identity_provider(id="0oa_preview2")
+    first_tenant = "preview1.okta.test"
+    second_tenant = "preview2.okta.test"
+
+    first_issuer = saml_trusted_issuer_row(first_idp, first_tenant)
+    second_issuer = saml_trusted_issuer_row(second_idp, second_tenant)
+    first_service_provider = saml_service_provider_row(first_idp, first_tenant)
+    second_service_provider = saml_service_provider_row(second_idp, second_tenant)
+
+    assert first_issuer is not None
+    assert second_issuer is not None
+    assert first_service_provider is not None
+    assert second_service_provider is not None
+    assert first_issuer["entity_id"] == second_issuer["entity_id"]
+    assert first_issuer["id"] != second_issuer["id"]
+    assert first_issuer["id"] == saml_trusted_issuer_id(
+        first_issuer["entity_id"], first_tenant
+    )
+    assert second_issuer["id"] == saml_trusted_issuer_id(
+        second_issuer["entity_id"], second_tenant
+    )
+    assert first_service_provider["issuer_id"] == first_issuer["id"]
+    assert second_service_provider["issuer_id"] == second_issuer["id"]
+
+
+def test_saml_trusted_issuer_preserves_source_whitespace_in_identity():
+    exact_issuer = "https://idp.example.test/saml/issuer"
+    padded_issuer = f" {exact_issuer} "
+    exact_idp = _identity_provider(id="0oa_exact")
+    padded_idp = _identity_provider(id="0oa_padded")
+    exact_idp.protocol.credentials.trust.issuer = exact_issuer
+    padded_idp.protocol.credentials.trust.issuer = padded_issuer
+
+    exact_row = saml_trusted_issuer_row(exact_idp, TEST_TENANT_DOMAIN)
+    padded_row = saml_trusted_issuer_row(padded_idp, TEST_TENANT_DOMAIN)
+    padded_service_provider = saml_service_provider_row(
+        padded_idp, TEST_TENANT_DOMAIN
+    )
+
+    assert exact_row is not None
+    assert padded_row is not None
+    assert padded_service_provider is not None
+    assert exact_row["entity_id"] == exact_issuer
+    assert padded_row["entity_id"] == padded_issuer
+    assert exact_row["id"] == saml_trusted_issuer_id(
+        exact_issuer, TEST_TENANT_DOMAIN
+    )
+    assert padded_row["id"] == saml_trusted_issuer_id(
+        padded_issuer, TEST_TENANT_DOMAIN
+    )
+    assert exact_row["id"] != padded_row["id"]
+    assert padded_service_provider["issuer_id"] == padded_row["id"]
+
+    whitespace_only_idp = _identity_provider(id="0oa_whitespace_only")
+    whitespace_only_idp.protocol.credentials.trust.issuer = "   "
+    whitespace_only_row = saml_trusted_issuer_row(
+        whitespace_only_idp, TEST_TENANT_DOMAIN
+    )
+
+    assert whitespace_only_row is not None
+    assert whitespace_only_row["entity_id"] == "   "
+
+    for empty_issuer in (None, ""):
+        empty_idp = _identity_provider(id=f"0oa_empty_{empty_issuer is None}")
+        empty_idp.protocol.credentials.trust.issuer = empty_issuer
+        assert saml_trusted_issuer_row(empty_idp, TEST_TENANT_DOMAIN) is None
+
+
 def test_saml_service_provider_prefers_inbound_idp_metadata_routes():
     idp = _identity_provider(
         _links={
@@ -2019,7 +2153,7 @@ def test_saml_service_provider_prefers_inbound_idp_metadata_routes():
         ],
     )
 
-    service_provider = saml_service_provider_row(idp)
+    service_provider = saml_service_provider_row(idp, TEST_TENANT_DOMAIN)
     acs_rows = saml_sp_acs_rows(idp)
 
     assert service_provider is not None
@@ -2099,7 +2233,7 @@ def test_org_shared_inbound_idp_adds_exact_trust_specific_acs_alias():
         ),
         "sp_entity_source_field": "metadata.EntityDescriptor.entityID",
     }
-    service_provider = saml_service_provider_row(idp)
+    service_provider = saml_service_provider_row(idp, TEST_TENANT_DOMAIN)
     assert service_provider is not None
     assert service_provider["acs_ids"] == [row["id"] for row in rows]
 
@@ -2287,7 +2421,7 @@ def test_saml_service_provider_is_emitted_when_route_metadata_is_partial():
         _links={},
     )
 
-    row = saml_service_provider_row(idp)
+    row = saml_service_provider_row(idp, TEST_TENANT_DOMAIN)
 
     assert row is not None
     assert row["issuer_id"] is None
@@ -2363,7 +2497,7 @@ def test_inbound_automatic_username_policy_emits_canonical_rule_and_accounts():
 
     rule_row = saml_account_resolution_rule_row(idp)
     field_row = saml_account_resolution_field_row(idp)
-    service_provider_row = saml_service_provider_row(idp)
+    service_provider_row = saml_service_provider_row(idp, TEST_TENANT_DOMAIN)
 
     assert rule_row == {
         "id": "okta:saml:account-resolution-rule:0oa_idp",
@@ -2426,7 +2560,7 @@ def test_inbound_automatic_username_policy_emits_canonical_rule_and_accounts():
 
 def test_inbound_rule_candidates_do_not_overwrite_direct_account_binding():
     idp = _identity_provider(policy=_automatic_username_policy())
-    service_provider_row = saml_service_provider_row(idp)
+    service_provider_row = saml_service_provider_row(idp, TEST_TENANT_DOMAIN)
     assert service_provider_row is not None
 
     lookup = _SamlLookup(
@@ -2517,7 +2651,7 @@ def test_incomplete_or_conflicting_inbound_policy_fails_closed_with_diagnostic()
 
     for policy in invalid_policies:
         idp = _identity_provider(policy=policy)
-        service_provider = saml_service_provider_row(idp)
+        service_provider = saml_service_provider_row(idp, TEST_TENANT_DOMAIN)
 
         assert saml_account_resolution_rule_row(idp) is None
         assert saml_account_resolution_field_row(idp) is None

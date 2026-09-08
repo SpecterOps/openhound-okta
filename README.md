@@ -38,6 +38,20 @@ contract](docs/saml-oin-route-evidence.md). The collector prefers explicit
 deployed routes and otherwise fails closed unless a reviewed catalog resolver
 has the complete settings it requires.
 
+## Trusted SAML issuer identity
+
+Inbound trusted SAML issuer object IDs are scoped by the collecting Okta tenant
+domain and the issuer's byte-exact entity ID. Multiple inbound identity
+providers in one Okta tenant that trust the same issuer therefore share one
+`SAML_Issuer` node, while identical entity IDs observed in different Okta
+tenants remain separate. The entity ID remains available as the semantic value
+for cross-collector correlation.
+
+The shared-issuer ID change is additive in BloodHound. Existing IdP-keyed issuer
+nodes and trust edges are not removed immediately by an upload; they age out
+under the instance's normal retention behavior. Operators testing this change
+may purge their BloodHound instance when a clean graph is needed.
+
 [![Python Version](https://img.shields.io/badge/Python-3.13-brightgreen.svg)](#about)
 
 ## Getting Started

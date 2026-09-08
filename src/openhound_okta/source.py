@@ -382,6 +382,7 @@ class SourceContext:
     """Context for Okta API operations."""
 
     pool: ClientPool
+    tenant_domain: str
     application_users_page_size: int = APPLICATION_USERS_PAGE_SIZE
     groups_page_size: int = GROUPS_PAGE_SIZE
     application_group_assignments_page_size: int = (
@@ -389,6 +390,22 @@ class SourceContext:
     )
     group_push_mappings_page_size: int = GROUP_PUSH_MAPPINGS_PAGE_SIZE
     identity_provider_users_page_size: int = IDENTITY_PROVIDER_USERS_PAGE_SIZE
+
+
+def _tenant_domain_from_base_url(base_url: str) -> str:
+    if not isinstance(base_url, str) or not base_url.strip():
+        raise ValueError("Okta base URL is unavailable during collection")
+    try:
+        parsed = urlparse(base_url.strip())
+        _ = parsed.port
+        tenant_domain = parsed.hostname
+    except ValueError as error:
+        raise ValueError(
+            "Okta base URL must include a URL scheme and hostname"
+        ) from error
+    if not parsed.scheme or not tenant_domain:
+        raise ValueError("Okta base URL must include a URL scheme and hostname")
+    return tenant_domain.casefold()
 
 
 def _group_page_sizes(initial_page_size: int) -> tuple[int, ...]:
@@ -1126,8 +1143,8 @@ def saml_claim_mappings(application: Application):
     columns=SamlServiceProvider,
     parallelized=True,
 )
-def saml_service_providers(identity_provider: IdentityProvider):
-    row = saml_service_provider_row(identity_provider)
+def saml_service_providers(identity_provider: IdentityProvider, ctx: SourceContext):
+    row = saml_service_provider_row(identity_provider, ctx.tenant_domain)
     if row:
         yield row
 
@@ -1157,8 +1174,8 @@ def saml_account_resolution_fields(identity_provider: IdentityProvider):
 @app.transformer(
     name="saml_trusted_issuers", columns=SamlTrustedIssuer, parallelized=True
 )
-def saml_trusted_issuers(identity_provider: IdentityProvider):
-    row = saml_trusted_issuer_row(identity_provider)
+def saml_trusted_issuers(identity_provider: IdentityProvider, ctx: SourceContext):
+    row = saml_trusted_issuer_row(identity_provider, ctx.tenant_domain)
     if row:
         yield row
 
@@ -1611,6 +1628,7 @@ def source(
 
     ctx = SourceContext(
         pool=pool,
+        tenant_domain=_tenant_domain_from_base_url(credentials.base_url),
         application_users_page_size=application_users_page_size,
         groups_page_size=groups_page_size,
         application_group_assignments_page_size=(
@@ -1656,10 +1674,10 @@ def source(
         policies_resource | policy_mappings(ctx),
         realms(ctx),
         identity_providers_resource,
-        identity_providers_resource | saml_service_providers(),
+        identity_providers_resource | saml_service_providers(ctx),
         identity_providers_resource | saml_account_resolution_rules(),
         identity_providers_resource | saml_account_resolution_fields(),
-        identity_providers_resource | saml_trusted_issuers(),
+        identity_providers_resource | saml_trusted_issuers(ctx),
         identity_providers_resource | saml_sp_assertion_consumer_services(),
         identity_providers_resource | identity_provider_users(ctx),
         authorization_servers(ctx),

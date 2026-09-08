@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field as dc_field, replace
+import hashlib
 import json
 import re
 from typing import Any
@@ -71,8 +72,27 @@ def saml_service_provider_id(idp_id: str) -> str:
     return f"okta:saml:service-provider:{idp_id}"
 
 
-def saml_trusted_issuer_id(idp_id: str) -> str:
-    return f"okta:saml:trusted-issuer:{idp_id}"
+def saml_trusted_issuer_id(entity_id: str, tenant_domain: str) -> str:
+    """Return the shared graph ID for an inbound SAML issuer entity ID.
+
+    Okta permits multiple inbound IdPs in one environment to trust the same
+    issuer.  The issuer is therefore identified by its byte-exact entity ID
+    within the collecting Okta tenant, rather than by any one IdP that happens
+    to reference it.  A digest keeps the graph ID safe and stable while
+    preserving case-sensitive entity-ID identity before ``OktaNode`` applies
+    its graph-wide ID normalization.
+    """
+
+    if not isinstance(tenant_domain, str) or not tenant_domain.strip():
+        raise ValueError("tenant_domain is required for trusted issuer identity")
+
+    identity = json.dumps(
+        [tenant_domain.strip().casefold(), entity_id],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(identity.encode("ascii")).hexdigest()
+    return f"okta:saml:trusted-issuer:{digest}"
 
 
 def saml_sp_acs_id(idp_id: str, index: int = 0) -> str:
@@ -930,8 +950,9 @@ def _idp_trust(identity_provider) -> Any:
     return getattr(credentials, "trust", None)
 
 
-def _trusted_issuer(identity_provider) -> str | None:
-    return _clean(getattr(_idp_trust(identity_provider), "issuer", None))
+def _raw_trusted_issuer(identity_provider) -> str | None:
+    issuer = getattr(_idp_trust(identity_provider), "issuer", None)
+    return issuer if issuer is not None and issuer != "" else None
 
 
 def _trusted_audience(identity_provider) -> str | None:
@@ -1174,11 +1195,14 @@ def _saml_acs_rows(
     return rows
 
 
-def saml_service_provider_row(identity_provider) -> dict[str, Any] | None:
+def saml_service_provider_row(
+    identity_provider,
+    tenant_domain: str,
+) -> dict[str, Any] | None:
     if not is_saml_identity_provider(identity_provider):
         return None
 
-    issuer = _trusted_issuer(identity_provider)
+    issuer = _raw_trusted_issuer(identity_provider)
     acs_rows = saml_sp_acs_rows(identity_provider)
     resolution = _account_resolution_evidence(identity_provider)
     rule_id = (
@@ -1193,7 +1217,11 @@ def saml_service_provider_row(identity_provider) -> dict[str, Any] | None:
         "idp_type": identity_provider.type,
         "idp_status": identity_provider.status,
         "sp_entity_id": _idp_sp_entity_id(identity_provider),
-        "issuer_id": saml_trusted_issuer_id(identity_provider.id) if issuer else None,
+        "issuer_id": (
+            saml_trusted_issuer_id(issuer, tenant_domain)
+            if issuer is not None
+            else None
+        ),
         "acs_ids": [row["id"] for row in acs_rows],
         "account_resolution_rule_id": rule_id,
         "account_resolution_field_id": (
@@ -1236,18 +1264,17 @@ def saml_account_resolution_field_row(
     }
 
 
-def saml_trusted_issuer_row(identity_provider) -> dict[str, Any] | None:
+def saml_trusted_issuer_row(
+    identity_provider,
+    tenant_domain: str,
+) -> dict[str, Any] | None:
     if not is_saml_identity_provider(identity_provider):
         return None
-    entity_id = _trusted_issuer(identity_provider)
-    if not entity_id:
+    entity_id = _raw_trusted_issuer(identity_provider)
+    if entity_id is None:
         return None
     return {
-        "id": saml_trusted_issuer_id(identity_provider.id),
-        "app_id": identity_provider.id,
-        "app_name": identity_provider.name,
-        "app_label": identity_provider.name,
-        "source_object_kind": nk.IDP,
+        "id": saml_trusted_issuer_id(entity_id, tenant_domain),
         "entity_id": entity_id,
     }
 
@@ -1408,6 +1435,20 @@ class SamlIssuerProperties(OktaNodeProperties):
     app_label: str
     entity_id: str
     source_object_kind: str = nk.APPLICATION
+    schema_contract_version: str = SAML_CONTRACT_VERSION
+
+
+@dataclass
+class SamlTrustedIssuerProperties(OktaNodeProperties):
+    """Properties for a shared issuer trusted by one or more Okta IdPs.
+
+    Per-IdP provenance is represented by the owning ``SAML_ServiceProvider``
+    nodes and their ``SAML_TrustsIssuer`` edges.  This node intentionally has
+    no scalar IdP owner fields because a single issuer can be trusted by more
+    than one IdP in the same Okta environment.
+    """
+
+    entity_id: str
     schema_contract_version: str = SAML_CONTRACT_VERSION
 
 
@@ -1836,16 +1877,41 @@ class SamlIssuer(BaseAsset):
         icon="stamp",
         kind=nk.SAML_ISSUER,
         description="Normalized SAML issuer trusted by an Okta inbound IdP",
-        properties=SamlIssuerProperties,
+        properties=SamlTrustedIssuerProperties,
     ),
 )
-class SamlTrustedIssuer(SamlIssuer):
+class SamlTrustedIssuer(BaseAsset):
     """Distinct conversion asset for inbound trusted issuers.
 
     OpenHound derives output filenames from the asset class name. Keeping inbound
     and outbound issuer streams on the same class causes the later stream to
     overwrite the earlier ``samlissuer`` graph file during conversion.
     """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    entity_id: str
+
+    @property
+    def as_node(self):
+        return OktaNode(
+            kinds=[nk.SAML_ISSUER],
+            properties=SamlTrustedIssuerProperties(
+                tenant=self._lookup.org_id(),
+                tenant_domain=self._extras["tenant"],
+                id=self.id,
+                name=self.entity_id,
+                displayname=self.entity_id,
+                environmentid=self._lookup.org_id(),
+                entity_id=self.entity_id,
+                schema_contract_version=SAML_CONTRACT_VERSION,
+            ),
+        )
+
+    @property
+    def edges(self):
+        return iter(())
 
 
 @app.asset(

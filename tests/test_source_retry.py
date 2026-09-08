@@ -24,6 +24,7 @@ from openhound_okta.source import (
     _office365_tenant_id_fields,
     _saml_idp_metadata_fields,
     _saml_metadata_fields,
+    _tenant_domain_from_base_url,
     application_grants,
     application_group_assignment_rows,
     application_group_push_mapping_row,
@@ -57,6 +58,30 @@ class FakeClock:
     def sleep(self, delay: float) -> None:
         self.sleeps.append(delay)
         self.now += delay
+
+
+def test_tenant_domain_uses_hostname_without_port_or_user_info():
+    assert (
+        _tenant_domain_from_base_url(
+            "https://user:secret@MIXED.Example:443/api/v1"
+        )
+        == "mixed.example"
+    )
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "preview.example",
+        "https:///missing-host",
+        "https://[invalid",
+        "https://preview.example:not-a-port",
+        "https://preview.example:65536",
+    ],
+)
+def test_tenant_domain_rejects_urls_without_scheme_or_hostname(base_url):
+    with pytest.raises(ValueError, match="URL scheme and hostname"):
+        _tenant_domain_from_base_url(base_url)
 
 
 def _response(
