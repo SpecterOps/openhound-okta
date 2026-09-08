@@ -395,8 +395,14 @@ class SourceContext:
 def _tenant_domain_from_base_url(base_url: str) -> str:
     if not isinstance(base_url, str) or not base_url.strip():
         raise ValueError("Okta base URL is unavailable during collection")
-    tenant_domain = urlparse(base_url.strip()).netloc
-    if not tenant_domain:
+    try:
+        parsed = urlparse(base_url.strip())
+        tenant_domain = parsed.hostname
+    except ValueError as error:
+        raise ValueError(
+            "Okta base URL must include a URL scheme and hostname"
+        ) from error
+    if not parsed.scheme or not tenant_domain:
         raise ValueError("Okta base URL must include a URL scheme and hostname")
     return tenant_domain.casefold()
 
