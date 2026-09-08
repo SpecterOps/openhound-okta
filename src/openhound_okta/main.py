@@ -25,6 +25,7 @@ def _tenant_domain_from_config() -> str:
 
     try:
         parsed = urlparse(tenant_url.strip())
+        _ = parsed.port
         tenant_domain = parsed.hostname
     except ValueError as error:
         raise ValueError(

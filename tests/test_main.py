@@ -40,7 +40,13 @@ def test_tenant_domain_rejects_missing_config(monkeypatch):
 
 @pytest.mark.parametrize(
     "base_url",
-    ["preview.example", "https:///missing-host", "https://[invalid"],
+    [
+        "preview.example",
+        "https:///missing-host",
+        "https://[invalid",
+        "https://preview.example:not-a-port",
+        "https://preview.example:65536",
+    ],
 )
 def test_tenant_domain_rejects_urls_without_scheme_or_hostname(monkeypatch, base_url):
     monkeypatch.setattr(

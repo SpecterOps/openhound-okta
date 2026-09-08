@@ -71,7 +71,13 @@ def test_tenant_domain_uses_hostname_without_port_or_user_info():
 
 @pytest.mark.parametrize(
     "base_url",
-    ["preview.example", "https:///missing-host", "https://[invalid"],
+    [
+        "preview.example",
+        "https:///missing-host",
+        "https://[invalid",
+        "https://preview.example:not-a-port",
+        "https://preview.example:65536",
+    ],
 )
 def test_tenant_domain_rejects_urls_without_scheme_or_hostname(base_url):
     with pytest.raises(ValueError, match="URL scheme and hostname"):

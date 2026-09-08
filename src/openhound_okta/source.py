@@ -397,6 +397,7 @@ def _tenant_domain_from_base_url(base_url: str) -> str:
         raise ValueError("Okta base URL is unavailable during collection")
     try:
         parsed = urlparse(base_url.strip())
+        _ = parsed.port
         tenant_domain = parsed.hostname
     except ValueError as error:
         raise ValueError(
