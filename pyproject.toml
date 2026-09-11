@@ -13,6 +13,7 @@ dependencies = [
     "cryptography>=46.0.5",
     "defusedxml>=0.7.1",
     "joserfc>=1.6.3",
+    "openhound>=0.4.0",
 ]
 
 [build-system]
@@ -30,7 +31,6 @@ local_scheme = "no-local-version"
 
 [dependency-groups]
 dev = [
-    "openhound>=0.4.0",
     "pre-commit>=4.5.1",
     "pytest>=9.0.1",
     "ruff>=0.15.5",
