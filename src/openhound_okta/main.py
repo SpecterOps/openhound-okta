@@ -1,3 +1,5 @@
+from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 import dlt
@@ -8,9 +10,57 @@ from openhound.core.convert import ConvertContext
 from openhound.core.preproc import PreProcContext
 
 from openhound_okta.lookup import OktaLookup
+from openhound_okta.telemetry import TelemetrySettings, build_telemetry
 from openhound_okta.transforms import transforms
 
 app = OpenHound("okta", source_kind="Okta", help="OpenGraph collector for Okta")
+
+_TELEMETRY_CONFIG_PREFIX = "sources.source.okta.telemetry"
+_DEFAULT_EXTRACT_WORKERS = 5
+_DEFAULT_EXTRACT_MAX_PARALLEL_ITEMS = 20
+
+
+def _telemetry_settings_from_config() -> TelemetrySettings:
+    fields: tuple[tuple[str, type[Any]], ...] = (
+        ("enabled", bool),
+        ("output_directory", str),
+        ("reporting_interval_seconds", float),
+        ("max_file_bytes", int),
+        ("max_interval_records", int),
+        ("queue_capacity", int),
+    )
+    values = {
+        name: value
+        for name, expected_type in fields
+        if (
+            value := dlt.config.get(
+                f"{_TELEMETRY_CONFIG_PREFIX}.{name}", expected_type
+            )
+        )
+        is not None
+    }
+    return TelemetrySettings.from_mapping(values)
+
+
+def _extract_performance_settings_from_config() -> dict[str, int]:
+    values = {
+        "extract_workers": dlt.config.get("extract.workers", int),
+        "extract_max_parallel_items": dlt.config.get(
+            "extract.max_parallel_items", int
+        ),
+    }
+    defaults = {
+        "extract_workers": _DEFAULT_EXTRACT_WORKERS,
+        "extract_max_parallel_items": _DEFAULT_EXTRACT_MAX_PARALLEL_ITEMS,
+    }
+    effective = {
+        name: defaults[name] if value is None else value
+        for name, value in values.items()
+    }
+    for name, value in effective.items():
+        if value < 1:
+            raise ValueError(f"{name} must be at least 1")
+    return effective
 
 
 def _tenant_domain_from_config() -> str:
@@ -45,7 +95,32 @@ def collect(ctx: CollectContext) -> DltSource:
     """
     from openhound_okta.source import source as okta_source
 
-    return okta_source()
+    telemetry = build_telemetry(
+        _telemetry_settings_from_config(),
+        collection_output=Path(ctx.pipeline.output_path),
+    )
+    try:
+        telemetry.set_effective_settings(
+            _extract_performance_settings_from_config()
+        )
+        source_method = okta_source(telemetry=telemetry)
+    except BaseException as error:
+        telemetry.finish("incomplete", error)
+        raise
+
+    original_run = ctx.pipeline.run
+
+    def run_with_telemetry(source_object: DltSource, **kwargs):
+        try:
+            result = original_run(source_object, **kwargs)
+        except BaseException as error:
+            telemetry.finish("incomplete", error)
+            raise
+        telemetry.finish("complete")
+        return result
+
+    ctx.pipeline.run = run_with_telemetry
+    return source_method
 
 
 @app.convert(lookup=OktaLookup)
