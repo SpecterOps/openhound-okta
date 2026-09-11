@@ -10,6 +10,9 @@ from openhound.core.models.entries_dataclass import (
     NodeProperties as BaseProperties,
 )
 
+OKTA_SOURCE_KIND = "Okta"
+SAML_SOURCE_KIND = "SAML"
+
 
 @dataclass
 class OktaNodeProperties(BaseProperties):
@@ -29,6 +32,13 @@ class OktaNode(BaseNode):
 
     def __post_init__(self):
         self.id = self.properties.id.upper()
+        source_kind = (
+            SAML_SOURCE_KIND
+            if any(kind.startswith("SAML_") for kind in self.kinds)
+            else OKTA_SOURCE_KIND
+        )
+        if source_kind not in self.kinds:
+            self.kinds.append(source_kind)
 
 
 @dataclass

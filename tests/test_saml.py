@@ -8,6 +8,7 @@ import pytest
 
 from openhound_okta.lookup import USER_SAML_CONTEXT_CACHE_MAXSIZE, OktaLookup
 from openhound_okta.kinds import edges as ek
+from openhound_okta.kinds import nodes as nk
 from openhound_okta.main import app as openhound_app
 from openhound_okta.models.application import Application
 from openhound_okta.models.application_users import ApplicationUser
@@ -154,6 +155,14 @@ def _identity_provider(**overrides) -> IdentityProvider:
     }
     data.update(overrides)
     return IdentityProvider.model_validate(data)
+
+
+def test_identity_provider_node_uses_okta_source_kind() -> None:
+    identity_provider = _identity_provider()
+    identity_provider._lookup = _ApplicationLookup()
+    identity_provider._extras = {"tenant": TEST_TENANT_DOMAIN}
+
+    assert identity_provider.as_node.kinds == [nk.IDP, "Okta"]
 
 
 def _application_user(**overrides) -> ApplicationUser:
@@ -678,6 +687,7 @@ def test_saml_issuer_node_uses_resolved_entity_id_for_display_values():
     assert properties.entity_id == "http://www.okta.com/exk_runtime"
     assert properties.name == "HTTP://WWW.OKTA.COM/EXK_RUNTIME"
     assert properties.displayname == "http://www.okta.com/exk_runtime"
+    assert issuer.as_node.kinds == [nk.SAML_ISSUER, "SAML"]
 
 
 def test_saml_issuer_uses_concrete_configured_value_without_metadata():
