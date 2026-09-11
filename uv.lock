@@ -890,7 +890,7 @@ wheels = [
 
 [[package]]
 name = "openhound"
-version = "0.2.11"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alive-progress" },
@@ -908,9 +908,9 @@ dependencies = [
     { name = "typer" },
     { name = "types-requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fa/cb/5e62a35d99010635e34a5c9b1431f4091a81a798a276a6ab49f3073a5e5a/openhound-0.2.11.tar.gz", hash = "sha256:cfe3d5593d073c39e1580e1118fcc52cd4c97e03d80f5ecedc375022b522b5bb", size = 3545294, upload-time = "2026-07-01T19:19:53.508Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3b/03/95cf2dc3d2ea8cc8d2245c894f37a97b53b52dd9fda2f20b5f3757854f5d/openhound-0.4.0.tar.gz", hash = "sha256:7ba9f295f073eea4980aef9776a5cdf09c375d58fac39e6d71c2200d4029af34", size = 3580578, upload-time = "2026-09-08T14:54:20.215Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c6/67/e93acbc4c79244a75cd7dd3525e68d2b3123c9a496789de024b2b363694f/openhound-0.2.11-py3-none-any.whl", hash = "sha256:2f6db3431196b4c8cb4cee52001dce4443819070d78e93d9ee6fd0fa2ffc489d", size = 68003, upload-time = "2026-07-01T19:19:52.28Z" },
+    { url = "https://files.pythonhosted.org/packages/da/17/c1d6b7f39a3d08c16982c167f717be63c0fd87b0274e245ccf8cc0a53be2/openhound-0.4.0-py3-none-any.whl", hash = "sha256:f547d34eda0a48e271a316197304dc4c04214e42b9d00a685cea3982d0137567", size = 74608, upload-time = "2026-09-08T14:54:18.895Z" },
 ]
 
 [[package]]
@@ -920,12 +920,12 @@ dependencies = [
     { name = "cryptography" },
     { name = "defusedxml" },
     { name = "joserfc" },
+    { name = "openhound" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
-    { name = "openhound" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "ruff" },
@@ -937,12 +937,12 @@ requires-dist = [
     { name = "cryptography", specifier = ">=46.0.5" },
     { name = "defusedxml", specifier = ">=0.7.1" },
     { name = "joserfc", specifier = ">=1.6.3" },
+    { name = "openhound", specifier = ">=0.4.0" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "mypy", specifier = ">=1.19.1" },
-    { name = "openhound", specifier = ">=0.2.7" },
     { name = "pre-commit", specifier = ">=4.5.1" },
     { name = "pytest", specifier = ">=9.0.1" },
     { name = "ruff", specifier = ">=0.15.5" },

@@ -10,7 +10,7 @@ from openhound.core.preproc import PreProcContext
 from openhound_okta.lookup import OktaLookup
 from openhound_okta.transforms import transforms
 
-app = OpenHound("okta", source_kind="Okta", help="OpenGraph collector for Okta")
+app = OpenHound("okta", help="OpenGraph collector for Okta")
 
 
 def _tenant_domain_from_config() -> str:
