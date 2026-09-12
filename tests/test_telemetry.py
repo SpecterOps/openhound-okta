@@ -100,38 +100,80 @@ def test_config_toml_settings_are_loaded_from_the_okta_telemetry_section(
     assert {key for key, _ in requested} == set(values)
 
 
-def test_extract_performance_settings_use_config_and_defaults(monkeypatch):
-    values = {"extract.workers": 10}
-    requested = []
-
-    def get_config(key, expected_type):
-        requested.append((key, expected_type))
-        return values.get(key)
-
-    monkeypatch.setattr(main.dlt.config, "get", get_config)
-
-    assert main._extract_performance_settings_from_config() == {
-        "extract_workers": 10,
-        "extract_max_parallel_items": 20,
-    }
-    assert requested == [
-        ("extract.workers", int),
-        ("extract.max_parallel_items", int),
-    ]
-
-
-@pytest.mark.parametrize("value", [0, -1])
-def test_extract_performance_settings_reject_non_positive_values(
-    monkeypatch, value
+def test_extract_performance_settings_use_source_scoped_config_toml(
+    monkeypatch, tmp_path
 ):
-    monkeypatch.setattr(
-        main.dlt.config,
-        "get",
-        lambda key, expected_type: value,
+    monkeypatch.delenv("SOURCES__SOURCE__OKTA__EXTRACT__WORKERS", raising=False)
+    monkeypatch.delenv(
+        "SOURCES__SOURCE__OKTA__EXTRACT__MAX_PARALLEL_ITEMS", raising=False
     )
+    settings_directory = tmp_path / ".dlt"
+    settings_directory.mkdir()
+    (settings_directory / "config.toml").write_text(
+        """
+[sources.source.okta.extract]
+workers = 6
+max_parallel_items = 22
+""".strip()
+    )
+    run_context = Container()[PluggableRunContext]
+    cookie = run_context.push_context()
+    try:
+        run_context.reload(str(tmp_path))
+        from openhound_okta.source import OktaTokenCredentials, source
 
-    with pytest.raises(ValueError, match="must be at least 1"):
-        main._extract_performance_settings_from_config()
+        source_object = source(
+            credentials=OktaTokenCredentials(
+                base_url="https://example.okta.test",
+                token="not-used",
+            )
+        )
+        settings = main._extract_performance_settings_from_source(source_object)
+    finally:
+        run_context.pop_context(cookie)
+
+    assert settings == {
+        "extract_workers": 6,
+        "extract_max_parallel_items": 22,
+    }
+
+
+def test_extract_performance_settings_use_dlt_source_scoped_environment_overrides(
+    monkeypatch, tmp_path
+):
+    settings_directory = tmp_path / ".dlt"
+    settings_directory.mkdir()
+    (settings_directory / "config.toml").write_text(
+        """
+[sources.source.okta.extract]
+workers = 6
+max_parallel_items = 22
+""".strip()
+    )
+    monkeypatch.setenv("SOURCES__SOURCE__OKTA__EXTRACT__WORKERS", "9")
+    monkeypatch.setenv(
+        "SOURCES__SOURCE__OKTA__EXTRACT__MAX_PARALLEL_ITEMS", "27"
+    )
+    run_context = Container()[PluggableRunContext]
+    cookie = run_context.push_context()
+    try:
+        run_context.reload(str(tmp_path))
+        from openhound_okta.source import OktaTokenCredentials, source
+
+        source_object = source(
+            credentials=OktaTokenCredentials(
+                base_url="https://example.okta.test",
+                token="not-used",
+            )
+        )
+        settings = main._extract_performance_settings_from_source(source_object)
+    finally:
+        run_context.pop_context(cookie)
+
+    assert settings == {
+        "extract_workers": 9,
+        "extract_max_parallel_items": 27,
+    }
 
 
 def test_environment_overrides_config_toml(monkeypatch, tmp_path):
@@ -583,6 +625,14 @@ def test_collect_lifecycle_writes_terminal_summary(
         }
     )
     monkeypatch.setattr(main, "_telemetry_settings_from_config", lambda: settings)
+    monkeypatch.setattr(
+        main,
+        "_extract_performance_settings_from_source",
+        lambda source: {
+            "extract_workers": 5,
+            "extract_max_parallel_items": 20,
+        },
+    )
 
     from openhound_okta import source as source_module
 
@@ -622,3 +672,35 @@ def test_collect_lifecycle_writes_terminal_summary(
     summary = _records(artifact)[-1]
     assert summary["state"] == expected_state
     assert "collection-secret" not in artifact.read_text()
+
+
+def test_representative_collection_replay_preserves_graph_parity(tmp_path):
+    from tools.benchmark_collection_telemetry import run_once
+
+    disabled = run_once(
+        False,
+        tmp_path,
+        1,
+        applications=2,
+        assignments_per_application=4,
+        rows_per_page=2,
+    )
+    enabled = run_once(
+        True,
+        tmp_path,
+        1,
+        applications=2,
+        assignments_per_application=4,
+        rows_per_page=2,
+    )
+
+    assert disabled["http_requests"] == enabled["http_requests"] == 4
+    assert disabled["graph"] == enabled["graph"]
+    assert enabled["graph"]["nodes"] == 0
+    assert enabled["graph"]["edges"] == 8
+    assert disabled["artifact_bytes"] == 0
+    assert enabled["artifact_bytes"] > 0
+    assert enabled["telemetry_summary"]["effective_performance_settings"] == {
+        "extract_max_parallel_items": 20,
+        "extract_workers": 5,
+    }

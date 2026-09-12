@@ -3,6 +3,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 import dlt
+from dlt.common.configuration import inject_section, resolve_configuration
+from dlt.extract.pipe_iterator import PipeIterator
 from dlt.extract.source import DltSource
 from openhound.core.app import OpenHound
 from openhound.core.collect import CollectContext
@@ -16,8 +18,6 @@ from openhound_okta.transforms import transforms
 app = OpenHound("okta", source_kind="Okta", help="OpenGraph collector for Okta")
 
 _TELEMETRY_CONFIG_PREFIX = "sources.source.okta.telemetry"
-_DEFAULT_EXTRACT_WORKERS = 5
-_DEFAULT_EXTRACT_MAX_PARALLEL_ITEMS = 20
 
 
 def _telemetry_settings_from_config() -> TelemetrySettings:
@@ -42,25 +42,18 @@ def _telemetry_settings_from_config() -> TelemetrySettings:
     return TelemetrySettings.from_mapping(values)
 
 
-def _extract_performance_settings_from_config() -> dict[str, int]:
-    values = {
-        "extract_workers": dlt.config.get("extract.workers", int),
-        "extract_max_parallel_items": dlt.config.get(
-            "extract.max_parallel_items", int
-        ),
+def _extract_performance_settings_from_source(
+    source: DltSource,
+) -> dict[str, int]:
+    # DLT resolves PipeIteratorConfiguration inside this source context. Reuse
+    # the same spec and context so scoped overrides and defaults cannot drift
+    # from the values used to construct DLT's worker pool.
+    with inject_section(source._get_config_section_context()):
+        config = resolve_configuration(PipeIterator.PipeIteratorConfiguration())
+    return {
+        "extract_workers": config.workers,
+        "extract_max_parallel_items": config.max_parallel_items,
     }
-    defaults = {
-        "extract_workers": _DEFAULT_EXTRACT_WORKERS,
-        "extract_max_parallel_items": _DEFAULT_EXTRACT_MAX_PARALLEL_ITEMS,
-    }
-    effective = {
-        name: defaults[name] if value is None else value
-        for name, value in values.items()
-    }
-    for name, value in effective.items():
-        if value < 1:
-            raise ValueError(f"{name} must be at least 1")
-    return effective
 
 
 def _tenant_domain_from_config() -> str:
@@ -100,10 +93,10 @@ def collect(ctx: CollectContext) -> DltSource:
         collection_output=Path(ctx.pipeline.output_path),
     )
     try:
-        telemetry.set_effective_settings(
-            _extract_performance_settings_from_config()
-        )
         source_method = okta_source(telemetry=telemetry)
+        telemetry.set_effective_settings(
+            _extract_performance_settings_from_source(source_method)
+        )
     except BaseException as error:
         telemetry.finish("incomplete", error)
         raise

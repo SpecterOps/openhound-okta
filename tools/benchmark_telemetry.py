@@ -1,4 +1,4 @@
-"""Deterministic BED-9741 telemetry overhead replay benchmark."""
+"""Deterministic BED-9741 recorder-only telemetry microbenchmark."""
 
 from __future__ import annotations
 
@@ -105,6 +105,7 @@ def main() -> None:
     print(
         json.dumps(
             {
+                "benchmark_kind": "recorder_microbenchmark",
                 "workload": {
                     "applications": APPLICATIONS,
                     "pages_per_application": PAGES_PER_APPLICATION,

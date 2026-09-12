@@ -144,8 +144,11 @@ zero HTTP 429 responses does not prove that quota was unused.
 
 The summary records DLT's effective `extract_workers` and
 `extract_max_parallel_items` values as well as the Okta settings above. Put
-worker tuning under `[extract]` in the same `config.toml`; do not use telemetry
-artifacts from different settings as direct performance pairs.
+shared worker tuning under `[extract]` in the same `config.toml`, or use
+`[sources.source.okta.extract]` when the override is intentionally scoped to
+this source. The reported values use DLT's source-scoped resolution and include
+the values from whichever TOML scope wins. Do not use telemetry artifacts from
+different settings as direct performance pairs.
 
 The first record marks the run incomplete, periodic interval records retain
 useful progress after interruption, and a normal end adds a concise complete
@@ -153,5 +156,5 @@ summary. Output truncation, dropped records, and exporter failure are explicit
 and value-free. A telemetry write failure is logged but never changes request,
 retry, or collection failure behavior. See
 [`docs/collection-performance-telemetry.md`](docs/collection-performance-telemetry.md)
-for the record contract, interpretation, troubleshooting, and benchmark
-procedure.
+for the record contract, interpretation, troubleshooting, representative
+collection benchmark, and separate recorder microbenchmark.

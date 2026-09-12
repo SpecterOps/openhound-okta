@@ -70,9 +70,19 @@ the same `config.toml`, separately from the Okta endpoint-family limit:
 workers = 10
 max_parallel_items = 40
 
+[sources.source.okta.extract]
+# Optional Okta-only override of the shared [extract] values.
+workers = 10
+max_parallel_items = 40
+
 [sources.source.okta]
 endpoint_concurrency = 4
 ```
+
+DLT resolves the source-scoped extraction table over the shared extraction
+table. Telemetry uses DLT's own extraction configuration spec under the Okta
+source context, so the reported values match the worker pool rather than a
+separate set of hardcoded defaults.
 
 The latency groups have deliberately distinct meanings:
 
@@ -134,7 +144,7 @@ applicable `config.toml` bound or choose a healthy local destination before the
 next run. Aggregation state is fixed by the normalized endpoint set and latency
 histograms; it does not grow with total request count.
 
-## Benchmark procedure
+## Collection benchmark procedure
 
 Performance acceptance uses identical deterministic replay inputs and worker
 settings for telemetry off/on. Run at least five repetitions of each mode on
@@ -145,7 +155,55 @@ run, then compare medians. The acceptance limit is no more than 5% added median
 collection time. Replay evidence does not predict a customer speedup and does
 not establish a tenant's available Okta quota.
 
-### 2026-09-11 local replay result
+Run the representative replay with:
+
+```text
+PYTHONPATH=src RUNTIME__LOG_PATH=/tmp/openhound-okta-bed-9741-logs .venv/bin/python tools/benchmark_collection_telemetry.py
+```
+
+It generates paginated Okta-shaped HTTP responses through `OktaRESTClient`,
+streams those responses through `application_user_rows`, extracts the validated
+`ApplicationUser` resource with DLT, and converts the raw collection with the
+OpenHound converter. Each off/on pair must have the same order-independent
+graph digest and cardinality. The default workload performs five repetitions
+per mode over 200 applications and one million assignments.
+
+### 2026-09-11 representative collection result
+
+The test host ran Linux 6.8.12 on an AMD EPYC-Rome processor with Python
+3.13.13. Every run used DLT's resolved default of 5 extraction workers and 20
+parallel items. Each run processed 200 applications, 2,000 instrumented HTTP
+requests, and 1,000,000 validated assignment rows at 500 rows per page, then
+converted those assignments to OpenGraph. Peak RSS is the subprocess
+high-water mark across collection, conversion, and graph verification.
+
+| Repetition | Off wall (s) | On wall (s) | Off CPU (s) | On CPU (s) | Off peak RSS (KiB) | On peak RSS (KiB) | Artifact (bytes) |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 273.240483 | 271.694660 | 273.290823 | 272.708234 | 1,652,456 | 1,684,528 | 5,535 |
+| 2 | 272.421442 | 269.901086 | 272.489744 | 272.413279 | 1,685,684 | 1,655,384 | 5,533 |
+| 3 | 269.395960 | 272.785513 | 270.872271 | 274.658001 | 1,654,548 | 1,654,432 | 5,530 |
+| 4 | 272.199167 | 267.333196 | 272.929992 | 270.436016 | 1,722,668 | 1,684,508 | 5,536 |
+| 5 | 280.717163 | 272.165360 | 280.217507 | 275.310879 | 1,653,356 | 1,642,176 | 5,536 |
+| **Median** | **272.421442** | **271.694660** | **272.929992** | **272.708234** | **1,654,548** | **1,655,384** | **5,535** |
+
+The enabled median collection wall time was 0.267% lower; this is ordinary
+measurement variation, not a speedup claim, and establishes zero measured
+added median time against the 5% limit. All five enabled summaries were
+complete with 200 completed application streams, 2,000 attempts, and 1,000,000
+rows. Every enabled and disabled conversion emitted exactly 1,000,000 edges
+and zero nodes with identical order-independent digests (`digest_sum`
+`f6c8efcd58c6729ce40aae3f63a6cc263ae8abe819972039d16aa97ddf307ceb` and
+`digest_xor`
+`d326ade14d272e72da668eed05533d1ca0f075dc4424e8f4f529839037027b13`).
+
+### Recorder microbenchmark (not collection acceptance)
+
+`tools/benchmark_telemetry.py` isolates bounded recorder and exporter cost. It
+does not perform HTTP request execution, assignment-model processing, DLT
+extraction, or OpenGraph conversion, so its results cannot satisfy the 5%
+collection-overhead acceptance criterion.
+
+#### 2026-09-11 local recorder result
 
 Command:
 
@@ -168,9 +226,10 @@ fresh subprocess so peak RSS is a per-run high-water mark.
 | 5 | 4.209338 | 4.462982 | 0.055717 | 0.212818 | 28,800 | 28,800 | 5,392 |
 | **Median** | **4.200649** | **4.386274** | **0.055155** | **0.213087** | **28,800** | **28,800** | **5,394** |
 
-The enabled median wall time was 4.42% higher, within the 5% acceptance limit.
-Median peak RSS did not increase at KiB resolution. The artifact remained a
-fixed three-record start/interval/summary
-shape for the one-million-row run; the implementation retains counters and
-fixed histograms rather than per-request samples. This is a controlled local
-replay result, not a customer timing result or a speedup prediction.
+The enabled median wall time was 4.42% higher in this recorder-only
+microbenchmark. That result characterizes the telemetry recorder but is not a
+collection acceptance result. Median peak RSS did not increase at KiB
+resolution. The artifact remained a fixed three-record
+start/interval/summary shape for the one-million-counter run; the
+implementation retains counters and fixed histograms rather than per-request
+samples.
