@@ -215,8 +215,13 @@ class TelemetrySettings:
             ),
             queue_capacity=int(configured("queue_capacity", DEFAULT_QUEUE_CAPACITY)),
         )
-        if settings.reporting_interval_seconds <= 0:
-            raise ValueError("telemetry.reporting_interval_seconds must be positive")
+        if (
+            not math.isfinite(settings.reporting_interval_seconds)
+            or settings.reporting_interval_seconds <= 0
+        ):
+            raise ValueError(
+                "telemetry.reporting_interval_seconds must be finite and positive"
+            )
         if settings.max_file_bytes < MIN_MAX_FILE_BYTES:
             raise ValueError(
                 f"telemetry.max_file_bytes must be at least {MIN_MAX_FILE_BYTES}"
@@ -739,7 +744,7 @@ class TelemetryRecorder:
                 continue
             try:
                 value = parser(raw.strip())
-                if value < 0:
+                if value < 0 or (isinstance(value, float) and not math.isfinite(value)):
                     raise ValueError
             except (TypeError, ValueError):
                 fields[artifact_name] = {"state": "invalid", "value": None}
@@ -751,7 +756,7 @@ class TelemetryRecorder:
         else:
             try:
                 value = float(retry_after.strip())
-                if value < 0:
+                if not math.isfinite(value) or value < 0:
                     raise ValueError
             except (TypeError, ValueError):
                 try:
@@ -841,7 +846,12 @@ class TelemetryRecorder:
                             else "complete"
                         )
                     encoded = (
-                        json.dumps(record, separators=(",", ":"), sort_keys=True)
+                        json.dumps(
+                            record,
+                            separators=(",", ":"),
+                            sort_keys=True,
+                            allow_nan=False,
+                        )
                         + os.linesep
                     ).encode("utf-8")
                     is_summary = record.get("record_type") == "run_summary"
@@ -860,6 +870,7 @@ class TelemetryRecorder:
                                     },
                                     separators=(",", ":"),
                                     sort_keys=True,
+                                    allow_nan=False,
                                 )
                                 + os.linesep
                             ).encode("utf-8")
@@ -886,7 +897,10 @@ class TelemetryRecorder:
                             }
                             encoded = (
                                 json.dumps(
-                                    record, separators=(",", ":"), sort_keys=True
+                                    record,
+                                    separators=(",", ":"),
+                                    sort_keys=True,
+                                    allow_nan=False,
                                 )
                                 + os.linesep
                             ).encode("utf-8")

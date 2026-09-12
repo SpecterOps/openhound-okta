@@ -44,6 +44,9 @@ def test_telemetry_is_disabled_by_default_and_writes_nothing(tmp_path):
     ("values", "message"),
     [
         ({"reporting_interval_seconds": 0}, "reporting_interval_seconds"),
+        ({"reporting_interval_seconds": float("nan")}, "reporting_interval_seconds"),
+        ({"reporting_interval_seconds": float("inf")}, "reporting_interval_seconds"),
+        ({"reporting_interval_seconds": float("-inf")}, "reporting_interval_seconds"),
         ({"max_file_bytes": MIN_MAX_FILE_BYTES - 1}, "max_file_bytes"),
         ({"max_interval_records": 0}, "max_interval_records"),
         ({"queue_capacity": 1}, "queue_capacity"),
@@ -393,6 +396,71 @@ def test_quota_headers_report_missing_invalid_stale_and_http_date(tmp_path):
         "reset_epoch_seconds": {"state": "valid", "value": 900.0},
         "retry_after_seconds": {"state": "valid", "value": 200.0},
     }
+
+
+@pytest.mark.parametrize("non_finite", ["NaN", "Infinity", "-Infinity"])
+def test_non_finite_quota_headers_are_invalid_strict_json(tmp_path, non_finite):
+    recorder = TelemetryRecorder(
+        TelemetrySettings.from_mapping(
+            {"enabled": True, "output_directory": tmp_path / "diagnostics"}
+        ),
+        collection_output=tmp_path / "raw",
+        monotonic=lambda: 0.0,
+        wall_clock=lambda: 1_000.0,
+    )
+    recorder.record_http_response(
+        "/api/v1/users",
+        status_code=429,
+        duration_seconds=0.1,
+        headers={
+            "X-Rate-Limit-Reset": non_finite,
+            "Retry-After": non_finite,
+        },
+    )
+    recorder.finish("complete")
+
+    lines = recorder.artifact_path.read_text().splitlines()
+    records = [
+        json.loads(
+            line,
+            parse_constant=lambda value: pytest.fail(
+                f"non-standard JSON number: {value}"
+            ),
+        )
+        for line in lines
+    ]
+    quota = records[-1]["endpoints"]["/api/v1/users"]["latest_quota_observation"]
+    assert quota["state"] == "unavailable"
+    assert quota["reset_freshness_seconds"] is None
+    assert quota["headers"]["reset_epoch_seconds"] == {
+        "state": "invalid",
+        "value": None,
+    }
+    assert quota["headers"]["retry_after_seconds"] == {
+        "state": "invalid",
+        "value": None,
+    }
+
+
+def test_exporter_rejects_non_standard_json_numbers(tmp_path, caplog):
+    recorder = TelemetryRecorder(
+        TelemetrySettings.from_mapping(
+            {"enabled": True, "output_directory": tmp_path / "diagnostics"}
+        ),
+        collection_output=tmp_path / "raw",
+    )
+    recorder.set_effective_settings({"invalid_test_value": float("nan")})
+
+    recorder.finish("complete")
+
+    for line in recorder.artifact_path.read_text().splitlines():
+        json.loads(
+            line,
+            parse_constant=lambda value: pytest.fail(
+                f"non-standard JSON number: {value}"
+            ),
+        )
+    assert "exporter_failure" in caplog.text
 
 
 def test_slow_writer_does_not_block_collection_measurements(tmp_path):
