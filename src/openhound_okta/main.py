@@ -94,12 +94,18 @@ def collect(ctx: CollectContext) -> DltSource:
     )
     try:
         source_method = okta_source(telemetry=telemetry)
-        telemetry.set_effective_settings(
-            _extract_performance_settings_from_source(source_method)
-        )
     except BaseException as error:
         telemetry.finish("incomplete", error)
         raise
+    if telemetry.active:
+        try:
+            effective_settings = _extract_performance_settings_from_source(
+                source_method
+            )
+        except Exception:
+            pass
+        else:
+            telemetry.set_effective_settings(effective_settings)
 
     original_run = ctx.pipeline.run
 

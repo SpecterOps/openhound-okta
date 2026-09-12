@@ -463,6 +463,34 @@ def test_exporter_rejects_non_standard_json_numbers(tmp_path, caplog):
     assert "exporter_failure" in caplog.text
 
 
+def test_writer_uses_literal_lf_without_newline_translation(
+    monkeypatch, tmp_path
+):
+    import os
+
+    open_calls = []
+
+    def open_file(*args, **kwargs):
+        open_calls.append(kwargs)
+        return open(*args, **kwargs)
+
+    monkeypatch.setattr(os, "linesep", "\r\n")
+    recorder = TelemetryRecorder(
+        TelemetrySettings.from_mapping(
+            {"enabled": True, "output_directory": tmp_path / "diagnostics"}
+        ),
+        collection_output=tmp_path / "raw",
+        open_file=open_file,
+    )
+    recorder.record_page("/api/v1/users", 1)
+    recorder.finish("complete")
+
+    artifact = recorder.artifact_path.read_bytes()
+    assert open_calls[0]["newline"] == ""
+    assert artifact.endswith(b"\n")
+    assert b"\r\n" not in artifact
+
+
 def test_slow_writer_does_not_block_collection_measurements(tmp_path):
     writer_started = threading.Event()
     release_writer = threading.Event()
@@ -740,6 +768,116 @@ def test_collect_lifecycle_writes_terminal_summary(
     summary = _records(artifact)[-1]
     assert summary["state"] == expected_state
     assert "collection-secret" not in artifact.read_text()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_collect_settings_telemetry_cannot_fail_collection(
+    monkeypatch, tmp_path, enabled
+):
+    settings = TelemetrySettings.from_mapping(
+        {
+            "enabled": enabled,
+            "output_directory": tmp_path / "diagnostics",
+        }
+    )
+    monkeypatch.setattr(main, "_telemetry_settings_from_config", lambda: settings)
+    settings_calls = []
+
+    def fail_settings(source):
+        settings_calls.append(source)
+        raise RuntimeError("settings-secret")
+
+    monkeypatch.setattr(main, "_extract_performance_settings_from_source", fail_settings)
+
+    from openhound_okta import source as source_module
+
+    source_object = object()
+    monkeypatch.setattr(source_module, "source", lambda telemetry: source_object)
+    monkeypatch.setattr(Collector, "run", lambda self, source, **kwargs: "loaded")
+
+    assert (
+        main.collect(
+            output_path=tmp_path / "raw",
+            resources=[],
+            progress=Progress.log,
+            tables_contract=Contract.evolve,
+            columns_contract=Contract.evolve,
+            data_type_contract=Contract.discard_row,
+        )
+        == "loaded"
+    )
+    assert len(settings_calls) == int(enabled)
+    if enabled:
+        summary = _records(next((tmp_path / "diagnostics").glob("*.jsonl")))[-1]
+        assert summary["collection_state"] == "complete"
+        assert summary["effective_performance_settings"] == {}
+    else:
+        assert list((tmp_path / "diagnostics").glob("*.jsonl")) == []
+
+
+def test_recorder_microbenchmark_worker_reports_errors(monkeypatch, tmp_path):
+    from tools import benchmark_telemetry
+
+    messages = []
+
+    class Results:
+        def put(self, message):
+            messages.append(message)
+
+    def fail_run_once(enabled, root, repetition):
+        raise ValueError("benchmark failed")
+
+    monkeypatch.setattr(benchmark_telemetry, "run_once", fail_run_once)
+
+    with pytest.raises(ValueError, match="benchmark failed"):
+        benchmark_telemetry._worker(True, tmp_path, 3, Results())
+
+    assert messages == [
+        {
+            "error": "ValueError: benchmark failed",
+            "enabled": True,
+            "repetition": 3,
+        }
+    ]
+
+
+def test_recorder_microbenchmark_isolated_run_surfaces_worker_error(
+    monkeypatch, tmp_path
+):
+    from tools import benchmark_telemetry
+
+    class Results:
+        def get(self):
+            return {
+                "error": "ValueError: benchmark failed",
+                "enabled": True,
+                "repetition": 3,
+            }
+
+    class Process:
+        exitcode = 1
+
+        def start(self):
+            pass
+
+        def join(self):
+            pass
+
+    class Context:
+        def Queue(self):
+            return Results()
+
+        def Process(self, **kwargs):
+            return Process()
+
+    monkeypatch.setattr(
+        benchmark_telemetry.multiprocessing,
+        "get_context",
+        lambda method: Context(),
+    )
+
+    with pytest.raises(RuntimeError, match="ValueError: benchmark failed"):
+        benchmark_telemetry.isolated_run(True, tmp_path, 3)
 
 
 def test_representative_collection_replay_preserves_graph_parity(tmp_path):

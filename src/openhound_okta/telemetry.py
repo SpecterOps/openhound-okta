@@ -6,7 +6,6 @@ import importlib.metadata
 import json
 import logging
 import math
-import os
 import queue
 import re
 import threading
@@ -823,7 +822,10 @@ class TelemetryRecorder:
                 parents=True, exist_ok=True
             )
             file_handle = self._open_file(
-                self.artifact_path.expanduser(), "x", encoding="utf-8"
+                self.artifact_path.expanduser(),
+                "x",
+                encoding="utf-8",
+                newline="",
             )
             while not self._writer_stop.is_set() or not self._queue.empty():
                 try:
@@ -852,7 +854,7 @@ class TelemetryRecorder:
                             sort_keys=True,
                             allow_nan=False,
                         )
-                        + os.linesep
+                        + "\n"
                     ).encode("utf-8")
                     is_summary = record.get("record_type") == "run_summary"
                     data_limit = self.settings.max_file_bytes - SUMMARY_RESERVE_BYTES
@@ -872,7 +874,7 @@ class TelemetryRecorder:
                                     sort_keys=True,
                                     allow_nan=False,
                                 )
-                                + os.linesep
+                                + "\n"
                             ).encode("utf-8")
                             file_handle.write(status.decode("utf-8"))
                             file_handle.flush()
@@ -902,7 +904,7 @@ class TelemetryRecorder:
                                     sort_keys=True,
                                     allow_nan=False,
                                 )
-                                + os.linesep
+                                + "\n"
                             ).encode("utf-8")
                             if (
                                 bytes_written + len(encoded)

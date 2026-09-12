@@ -73,7 +73,17 @@ def run_once(
 
 
 def _worker(enabled: bool, root: Path, repetition: int, results) -> None:
-    results.put(run_once(enabled, root, repetition))
+    try:
+        results.put({"result": run_once(enabled, root, repetition)})
+    except BaseException as error:
+        results.put(
+            {
+                "error": f"{error.__class__.__name__}: {error}",
+                "enabled": enabled,
+                "repetition": repetition,
+            }
+        )
+        raise
 
 
 def isolated_run(
@@ -86,11 +96,13 @@ def isolated_run(
         args=(enabled, root, repetition, results),
     )
     process.start()
-    result = results.get()
+    message = results.get()
     process.join()
-    if process.exitcode != 0:
-        raise RuntimeError(f"benchmark worker exited with {process.exitcode}")
-    return result
+    if process.exitcode != 0 or "error" in message:
+        raise RuntimeError(
+            message.get("error", f"benchmark worker exited with {process.exitcode}")
+        )
+    return message["result"]
 
 
 def main() -> None:
