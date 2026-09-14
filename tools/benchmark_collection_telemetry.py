@@ -38,6 +38,7 @@ from openhound_okta.source import (
 )
 from openhound_okta.telemetry import TelemetrySettings, build_telemetry
 from openhound_okta.utils.http import EndpointThrottle, OktaRESTClient
+from openhound_okta.utils.benchmark import wait_for_worker_result
 
 REPETITIONS = 5
 APPLICATIONS = 200
@@ -301,7 +302,7 @@ def isolated_run(enabled: bool, root: Path, repetition: int) -> dict[str, Any]:
         args=(enabled, root, repetition, results),
     )
     process.start()
-    message = results.get()
+    message = wait_for_worker_result(process, results)
     process.join()
     if process.exitcode != 0 or "error" in message:
         raise RuntimeError(

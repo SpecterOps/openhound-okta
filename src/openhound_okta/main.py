@@ -21,15 +21,18 @@ _TELEMETRY_CONFIG_PREFIX = "sources.source.okta.telemetry"
 
 
 def _telemetry_settings_from_config() -> TelemetrySettings:
+    enabled = dlt.config.get(f"{_TELEMETRY_CONFIG_PREFIX}.enabled", bool)
+    if not enabled:
+        return TelemetrySettings()
+
     fields: tuple[tuple[str, type[Any]], ...] = (
-        ("enabled", bool),
         ("output_directory", str),
         ("reporting_interval_seconds", float),
         ("max_file_bytes", int),
         ("max_interval_records", int),
         ("queue_capacity", int),
     )
-    values = {
+    values: dict[str, Any] = {
         name: value
         for name, expected_type in fields
         if (
@@ -39,6 +42,7 @@ def _telemetry_settings_from_config() -> TelemetrySettings:
         )
         is not None
     }
+    values["enabled"] = True
     return TelemetrySettings.from_mapping(values)
 
 

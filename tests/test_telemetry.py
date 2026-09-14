@@ -1,4 +1,6 @@
+import importlib
 import json
+import queue
 import threading
 from pathlib import Path
 
@@ -101,6 +103,33 @@ def test_config_toml_settings_are_loaded_from_the_okta_telemetry_section(
         queue_capacity=8,
     )
     assert {key for key, _ in requested} == set(values)
+
+
+def test_disabled_telemetry_ignores_other_invalid_configuration(
+    monkeypatch, tmp_path
+):
+    monkeypatch.delenv("SOURCES__SOURCE__OKTA__TELEMETRY__ENABLED", raising=False)
+    monkeypatch.delenv(
+        "SOURCES__SOURCE__OKTA__TELEMETRY__QUEUE_CAPACITY", raising=False
+    )
+    settings_directory = tmp_path / ".dlt"
+    settings_directory.mkdir()
+    (settings_directory / "config.toml").write_text(
+        """
+[sources.source.okta.telemetry]
+enabled = false
+queue_capacity = "not-an-integer"
+""".strip()
+    )
+    run_context = Container()[PluggableRunContext]
+    cookie = run_context.push_context()
+    try:
+        run_context.reload(str(tmp_path))
+        settings = main._telemetry_settings_from_config()
+    finally:
+        run_context.pop_context(cookie)
+
+    assert settings == TelemetrySettings()
 
 
 def test_extract_performance_settings_use_source_scoped_config_toml(
@@ -847,7 +876,7 @@ def test_recorder_microbenchmark_isolated_run_surfaces_worker_error(
     from tools import benchmark_telemetry
 
     class Results:
-        def get(self):
+        def get(self, timeout):
             return {
                 "error": "ValueError: benchmark failed",
                 "enabled": True,
@@ -880,25 +909,106 @@ def test_recorder_microbenchmark_isolated_run_surfaces_worker_error(
         benchmark_telemetry.isolated_run(True, tmp_path, 3)
 
 
-def test_representative_collection_replay_preserves_graph_parity(tmp_path):
+@pytest.mark.parametrize(
+    "module_name",
+    ["tools.benchmark_telemetry", "tools.benchmark_collection_telemetry"],
+)
+def test_benchmark_isolated_run_detects_unreported_worker_exit(
+    monkeypatch, tmp_path, module_name
+):
+    benchmark = importlib.import_module(module_name)
+
+    class Results:
+        def __init__(self):
+            self.timeouts = []
+
+        def get(self, timeout):
+            self.timeouts.append(timeout)
+            raise queue.Empty
+
+    class Process:
+        exitcode = -9
+
+        def __init__(self):
+            self.started = False
+            self.joined = False
+
+        def start(self):
+            self.started = True
+
+        def is_alive(self):
+            return False
+
+        def join(self):
+            self.joined = True
+
+    results = Results()
+    process = Process()
+
+    class Context:
+        def Queue(self):
+            return results
+
+        def Process(self, **kwargs):
+            return process
+
+    monkeypatch.setattr(
+        benchmark.multiprocessing,
+        "get_context",
+        lambda method: Context(),
+    )
+
+    with pytest.raises(
+        RuntimeError, match="exited with -9 before reporting a result"
+    ):
+        benchmark.isolated_run(True, tmp_path, 3)
+
+    assert process.started is True
+    assert process.joined is True
+    assert len(results.timeouts) == 2
+    assert all(timeout > 0 for timeout in results.timeouts)
+
+
+def test_representative_collection_replay_preserves_graph_parity(
+    monkeypatch, tmp_path
+):
     from tools.benchmark_collection_telemetry import run_once
 
-    disabled = run_once(
-        False,
-        tmp_path,
-        1,
-        applications=2,
-        assignments_per_application=4,
-        rows_per_page=2,
+    monkeypatch.delenv("SOURCES__SOURCE__OKTA__EXTRACT__WORKERS", raising=False)
+    monkeypatch.delenv(
+        "SOURCES__SOURCE__OKTA__EXTRACT__MAX_PARALLEL_ITEMS", raising=False
     )
-    enabled = run_once(
-        True,
-        tmp_path,
-        1,
-        applications=2,
-        assignments_per_application=4,
-        rows_per_page=2,
+    settings_directory = tmp_path / ".dlt"
+    settings_directory.mkdir()
+    (settings_directory / "config.toml").write_text(
+        """
+[sources.source.okta.extract]
+workers = 4
+max_parallel_items = 17
+""".strip()
     )
+    run_context = Container()[PluggableRunContext]
+    cookie = run_context.push_context()
+    try:
+        run_context.reload(str(tmp_path))
+        disabled = run_once(
+            False,
+            tmp_path,
+            1,
+            applications=2,
+            assignments_per_application=4,
+            rows_per_page=2,
+        )
+        enabled = run_once(
+            True,
+            tmp_path,
+            1,
+            applications=2,
+            assignments_per_application=4,
+            rows_per_page=2,
+        )
+    finally:
+        run_context.pop_context(cookie)
 
     assert disabled["http_requests"] == enabled["http_requests"] == 4
     assert disabled["graph"] == enabled["graph"]
@@ -907,6 +1017,6 @@ def test_representative_collection_replay_preserves_graph_parity(tmp_path):
     assert disabled["artifact_bytes"] == 0
     assert enabled["artifact_bytes"] > 0
     assert enabled["telemetry_summary"]["effective_performance_settings"] == {
-        "extract_max_parallel_items": 20,
-        "extract_workers": 5,
+        "extract_max_parallel_items": 17,
+        "extract_workers": 4,
     }
