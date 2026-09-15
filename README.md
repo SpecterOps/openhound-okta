@@ -87,7 +87,9 @@ does not publish an incomplete replacement. If the initial expanded group page r
 retries that first page with successively halved limits before failing. With the default configuration, that sequence
 is 200, 100, then 50.
 
-The defaults can be adjusted with DLT source configuration environment variables:
+The defaults can be adjusted in `.dlt/config.toml` under
+`[sources.source.okta]`. DLT environment variables may override the same
+non-secret settings:
 
 | Environment variable | Default | Purpose |
 | --- | ---: | --- |
@@ -99,3 +101,60 @@ The defaults can be adjusted with DLT source configuration environment variables
 | `SOURCES__SOURCE__OKTA__ENDPOINT_CONCURRENCY` | `2` | Maximum simultaneous requests per endpoint family |
 | `SOURCES__SOURCE__OKTA__RATE_LIMIT_MAX_ELAPSED_SECONDS` | `900` | Maximum elapsed retry window for an individual 429 request |
 | `SOURCES__SOURCE__OKTA__RATE_LIMIT_REMAINING_RESERVE` | `1` | Requests held in reserve when pacing against a rate-limit window |
+
+## Optional collection performance telemetry
+
+Collection telemetry is disabled by default. When enabled in `config.toml`, it
+writes bounded, value-free JSONL diagnostics to a local directory without
+requiring DEBUG logging, an external service, an additional Okta permission, or
+an additional request. The same configuration applies to interactive,
+scheduled, and containerized `openhound collect okta` invocations.
+
+```toml
+[sources.source.okta.telemetry]
+enabled = true
+output_directory = "./telemetry"
+reporting_interval_seconds = 60
+max_file_bytes = 10485760
+max_interval_records = 1440
+queue_capacity = 16
+```
+
+Keep `output_directory` outside the collection raw-data directory. The
+collector rejects an unsafe nested telemetry location so diagnostics cannot be
+discovered, converted, or uploaded as Okta collection data. Each collection
+creates `openhound-okta-<opaque-run-id>.jsonl`; disabling telemetry creates no
+artifact.
+
+Environment variables use the equivalent nested DLT names, such as
+`SOURCES__SOURCE__OKTA__TELEMETRY__ENABLED=true` and
+`SOURCES__SOURCE__OKTA__TELEMETRY__OUTPUT_DIRECTORY=/diagnostics`. Environment
+values take precedence over `config.toml`; omitted values use the defaults
+shown above. Reporting intervals must be positive, `max_file_bytes` must be at
+least 65,536, `max_interval_records` must be at least 1, and `queue_capacity`
+must be at least 2.
+
+The artifact separates concurrency-slot waits, proactive pacing, retry
+backoff, and HTTP execution. HTTP execution includes response-body transfer but
+not JSON decoding or downstream row conversion. Wait distributions are summed
+worker samples, not additive wall-clock attribution. Pages and rows are API
+yield progress and do not mean DLT committed the output. Collector endpoint
+families are limiter groups, not verified Okta provider buckets. In particular,
+zero HTTP 429 responses does not prove that quota was unused.
+
+The summary records DLT's effective `extract_workers` and
+`extract_max_parallel_items` values as well as the Okta settings above. Put
+shared worker tuning under `[extract]` in the same `config.toml`, or use
+`[sources.source.okta.extract]` when the override is intentionally scoped to
+this source. The reported values use DLT's source-scoped resolution and include
+the values from whichever TOML scope wins. Do not use telemetry artifacts from
+different settings as direct performance pairs.
+
+The first record marks the run incomplete, periodic interval records retain
+useful progress after interruption, and a normal end adds a concise complete
+summary. Output truncation, dropped records, and exporter failure are explicit
+and value-free. A telemetry write failure is logged but never changes request,
+retry, or collection failure behavior. See
+[`docs/collection-performance-telemetry.md`](docs/collection-performance-telemetry.md)
+for the record contract, interpretation, troubleshooting, representative
+collection benchmark, and separate recorder microbenchmark.

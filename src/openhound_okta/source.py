@@ -4,7 +4,7 @@ import json
 import logging
 from base64 import b64decode
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Union
 from urllib.parse import urlparse
 from xml.etree.ElementTree import Element
@@ -61,13 +61,20 @@ from .models import (
     SamlClaimMapping,
     SamlFederationProvider,
     SamlIssuer,
-    SamlServiceProviderAssertionConsumerService,
     SamlServiceProvider,
+    SamlServiceProviderAssertionConsumerService,
     SamlTrustedIssuer,
     User,
     UserFactor,
     UserRoleAssignment,
 )
+from .models.built_in_role import (
+    BUILT_IN_ROLES,
+    SUPPORTED_ROLE_ASSIGNMENT_TYPES,
+    UNSUPPORTED_BUILT_IN_ROLES,
+)
+from .models.built_in_role_permission import BUILT_IN_PERMISSIONS
+from .models.role_assignment import DIRECT_ASSIGNMENT_TYPES, GROUP_TARGETED_ROLE_TYPES
 from .models.saml import (
     saml_account_resolution_field_row,
     saml_account_resolution_rule_row,
@@ -80,13 +87,7 @@ from .models.saml import (
     saml_trusted_issuer_row,
 )
 from .models.token import Token
-from .models.built_in_role import (
-    BUILT_IN_ROLES,
-    SUPPORTED_ROLE_ASSIGNMENT_TYPES,
-    UNSUPPORTED_BUILT_IN_ROLES,
-)
-from .models.built_in_role_permission import BUILT_IN_PERMISSIONS
-from .models.role_assignment import DIRECT_ASSIGNMENT_TYPES, GROUP_TARGETED_ROLE_TYPES
+from .telemetry import NullTelemetryRecorder, Telemetry
 from .utils.auth import OktaAuth, OktaBearerAuth
 from .utils.http import (
     DEFAULT_ENDPOINT_CONCURRENCY,
@@ -320,7 +321,9 @@ class ClientPool:
         endpoint_concurrency: int = DEFAULT_ENDPOINT_CONCURRENCY,
         rate_limit_max_elapsed_seconds: float = DEFAULT_RATE_LIMIT_MAX_ELAPSED_SECONDS,
         rate_limit_remaining_reserve: int = DEFAULT_RATE_LIMIT_REMAINING_RESERVE,
+        telemetry: Telemetry | None = None,
     ):
+        self._telemetry = telemetry or NullTelemetryRecorder()
         throttles = {
             pattern: throttle_factory(
                 max_concurrency=endpoint_concurrency,
@@ -337,6 +340,7 @@ class ClientPool:
                 endpoint_family=pattern,
                 throttle=throttles[pattern],
                 rate_limit_max_elapsed_seconds=rate_limit_max_elapsed_seconds,
+                telemetry=self._telemetry,
             )
             for pattern in API_RATE_LIMIT_ENDPOINTS
         }
@@ -348,6 +352,7 @@ class ClientPool:
             endpoint_family="/api/v1/apps*",
             throttle=throttles["/api/v1/apps*"],
             rate_limit_max_elapsed_seconds=rate_limit_max_elapsed_seconds,
+            telemetry=self._telemetry,
         )
         self._idp_saml_metadata_client = OktaRESTClient(
             base_url=base_url,
@@ -357,6 +362,7 @@ class ClientPool:
             endpoint_family="/api/v1/idps*",
             throttle=throttles["/api/v1/idps*"],
             rate_limit_max_elapsed_seconds=rate_limit_max_elapsed_seconds,
+            telemetry=self._telemetry,
         )
 
     def get_client(self, path: str) -> RESTClient:
@@ -366,7 +372,13 @@ class ClientPool:
         return self._clients["*"]
 
     def paginate(self, path: str, **kwargs):
-        return self.get_client(path).paginate(path, **kwargs)
+        for page in self.get_client(path).paginate(path, **kwargs):
+            try:
+                row_count = len(page)
+            except TypeError:
+                row_count = None
+            self._telemetry.record_page(path, row_count)
+            yield page
 
     def get(self, path: str, **kwargs):
         return self.get_client(path).get(path, **kwargs)
@@ -383,6 +395,7 @@ class SourceContext:
 
     pool: ClientPool
     tenant_domain: str
+    telemetry: Telemetry = field(default_factory=NullTelemetryRecorder)
     application_users_page_size: int = APPLICATION_USERS_PAGE_SIZE
     groups_page_size: int = GROUPS_PAGE_SIZE
     application_group_assignments_page_size: int = (
@@ -1056,6 +1069,7 @@ def application_users(application: Application, ctx: SourceContext):
 
 def application_user_rows(application: Application, ctx: SourceContext):
     row_count = 0
+    telemetry = getattr(ctx, "telemetry", NullTelemetryRecorder())
     sign_on = application.settings.sign_on if application.settings else None
     user_name_template = (
         application.credentials.user_name_template if application.credentials else None
@@ -1089,6 +1103,7 @@ def application_user_rows(application: Application, ctx: SourceContext):
                     **item,
                 }
     except Exception:
+        telemetry.record_application_stream("failed")
         logger.error(
             "Application user collection failed app_id=%s rows_streamed=%s",
             application.id,
@@ -1096,6 +1111,7 @@ def application_user_rows(application: Application, ctx: SourceContext):
             exc_info=True,
         )
         raise
+    telemetry.record_application_stream("completed")
     logger.info(
         "Application user collection completed app_id=%s rows=%s",
         application.id,
@@ -1563,6 +1579,7 @@ def source(
     endpoint_concurrency: int = DEFAULT_ENDPOINT_CONCURRENCY,
     rate_limit_max_elapsed_seconds: float = DEFAULT_RATE_LIMIT_MAX_ELAPSED_SECONDS,
     rate_limit_remaining_reserve: int = DEFAULT_RATE_LIMIT_REMAINING_RESERVE,
+    telemetry: Telemetry | None = None,
 ) -> tuple:
     """DLT source, defines Okta collection resources and transformers.
 
@@ -1576,6 +1593,7 @@ def source(
         endpoint_concurrency: Maximum simultaneous requests for each endpoint family.
         rate_limit_max_elapsed_seconds: Maximum retry window for an individual 429 request.
         rate_limit_remaining_reserve: Requests retained as headroom in each observed window.
+        telemetry: Internal collection-phase telemetry recorder.
     Returns:
         Tuple of DLT resources and transformers registered for Okta.
     """
@@ -1617,6 +1635,22 @@ def source(
     if rate_limit_remaining_reserve < 0:
         raise ValueError("rate_limit_remaining_reserve cannot be negative")
 
+    telemetry = telemetry or NullTelemetryRecorder()
+    telemetry.set_effective_settings(
+        {
+            "application_users_page_size": application_users_page_size,
+            "groups_page_size": groups_page_size,
+            "application_group_assignments_page_size": (
+                application_group_assignments_page_size
+            ),
+            "group_push_mappings_page_size": group_push_mappings_page_size,
+            "identity_provider_users_page_size": identity_provider_users_page_size,
+            "endpoint_concurrency": endpoint_concurrency,
+            "rate_limit_max_elapsed_seconds": rate_limit_max_elapsed_seconds,
+            "rate_limit_remaining_reserve": rate_limit_remaining_reserve,
+        }
+    )
+
     pool = ClientPool(
         base_url=credentials.base_url,
         auth=_request_auth(credentials),
@@ -1624,11 +1658,13 @@ def source(
         endpoint_concurrency=endpoint_concurrency,
         rate_limit_max_elapsed_seconds=rate_limit_max_elapsed_seconds,
         rate_limit_remaining_reserve=rate_limit_remaining_reserve,
+        telemetry=telemetry,
     )
 
     ctx = SourceContext(
         pool=pool,
         tenant_domain=_tenant_domain_from_base_url(credentials.base_url),
+        telemetry=telemetry,
         application_users_page_size=application_users_page_size,
         groups_page_size=groups_page_size,
         application_group_assignments_page_size=(

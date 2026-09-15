@@ -2,6 +2,7 @@ import inspect
 import logging
 from threading import Event, Thread
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import requests
@@ -847,6 +848,72 @@ def test_endpoint_throttle_bounds_concurrent_requests():
     assert second_acquired.wait(1.0)
     worker.join(timeout=1.0)
     assert not worker.is_alive()
+
+
+def test_occupied_throttle_slots_are_not_reported_as_active_http_requests():
+    clock = FakeClock()
+    throttle = EndpointThrottle(
+        clock=clock.time,
+        sleep=clock.sleep,
+        max_concurrency=2,
+    )
+    telemetry = Mock()
+    client = SequencedOktaClient(
+        [_response(200, "https://example.okta.test/api/v1/apps/0oa123/users")],
+        throttle=throttle,
+        elapsed_clock=clock.time,
+        telemetry=telemetry,
+    )
+    throttle.acquire()
+
+    try:
+        client._send_request(Request("GET", "/api/v1/apps/0oa123/users"))
+    finally:
+        throttle.release()
+
+    throttle_wait = telemetry.record_http_response.call_args.kwargs[
+        "throttle_wait"
+    ]
+    assert throttle_wait["observed_concurrency"] == 1
+
+
+@pytest.mark.parametrize(
+    ("proactive_delay", "retry_delay", "expected_proactive", "expected_retry"),
+    [
+        (31.0, 1.0, 31.0, 0.0),
+        (2.0, 5.0, 0.0, 5.0),
+    ],
+)
+def test_endpoint_throttle_attributes_wait_to_the_controlling_deadline(
+    proactive_delay,
+    retry_delay,
+    expected_proactive,
+    expected_retry,
+):
+    clock = FakeClock()
+    throttle = EndpointThrottle(
+        clock=clock.time,
+        wall_clock=clock.time,
+        sleep=clock.sleep,
+        remaining_reserve=1,
+    )
+    response = _response(
+        200,
+        "https://example.okta.test/api/v1/apps/0oa123/users",
+        {
+            "X-Rate-Limit-Remaining": "0",
+            "X-Rate-Limit-Reset": str(clock.now + proactive_delay - 1.0),
+        },
+    )
+    throttle.observe_response(response)
+    throttle.defer(retry_delay)
+
+    wait = throttle.acquire()
+    throttle.release()
+
+    assert wait.proactive_pacing_seconds == expected_proactive
+    assert wait.retry_backoff_seconds == expected_retry
+    assert clock.sleeps == [max(proactive_delay, retry_delay)]
 
 
 def test_successful_rate_headers_pace_the_next_request():
