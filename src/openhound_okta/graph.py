@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from typing import Final, cast
 
 from openhound.core.models.entries_dataclass import (
     EdgePath as BaseEdgePath,
@@ -10,8 +11,9 @@ from openhound.core.models.entries_dataclass import (
     NodeProperties as BaseProperties,
 )
 
-OKTA_SOURCE_KIND = "Okta"
-SAML_SOURCE_KIND = "SAML"
+OKTA_SOURCE_KIND: Final[str] = "Okta"
+SAML_SOURCE_KIND: Final[str] = "SAML"
+SCIM_SOURCE_KIND: Final[str] = "SCIM"
 
 
 @dataclass
@@ -27,18 +29,23 @@ class OktaNodeProperties(BaseProperties):
 
 @dataclass
 class OktaNode(BaseNode):
+    """An Okta-owned node with a per-node source kind for conversion."""
+
     properties: OktaNodeProperties  # pyright: ignore[reportIncompatibleVariableOverride]
     id: str = field(init=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.id = self.properties.id.upper()
-        source_kind = (
-            SAML_SOURCE_KIND
-            if any(kind.startswith("SAML_") for kind in self.kinds)
-            else OKTA_SOURCE_KIND
-        )
-        if source_kind not in self.kinds:
-            self.kinds.append(source_kind)
+        # OpenHound does not publish type metadata; its node contract defines
+        # ``kinds`` as list[str]. Keep the untyped boundary at this access.
+        node_kinds = cast(list[str], getattr(self, "kinds"))
+        source_kind = OKTA_SOURCE_KIND
+        if any(kind.startswith("SAML_") for kind in node_kinds):
+            source_kind = SAML_SOURCE_KIND
+        elif any(kind.startswith("SCIM_") for kind in node_kinds):
+            source_kind = SCIM_SOURCE_KIND
+        if source_kind not in node_kinds:
+            self.kinds = [*node_kinds, source_kind]
 
 
 @dataclass
