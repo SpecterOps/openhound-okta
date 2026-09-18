@@ -15,3 +15,7 @@ convert +args='okta /tmp/output/raw/okta /tmp/output/graph/okta':
 sync:
     @echo "Syncing dependencies"
     uv sync --group dev
+
+skills:
+    @echo "Installing shared agent skills"
+    npx skills add ./docs/og-docs-automation/skills --skill '*' --agent codex claude-code --project --yes
