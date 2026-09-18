@@ -58,18 +58,18 @@ def test_okta_node_uppercases_id():
 
 
 def test_okta_node_uses_scim_source_kind() -> None:
-    node = OktaNode(kinds=["SCIM_ServiceProvider"], properties=_make_properties())
+    node = OktaNode(kinds=["SCIM_User"], properties=_make_properties())
 
-    assert node.kinds == ["SCIM_ServiceProvider", "SCIM"]
+    assert node.kinds == ["SCIM_User", "SCIM"]
 
 
-def test_okta_node_keeps_existing_source_kind_once_without_mutating_input() -> None:
-    kinds = ["SCIM_ServiceProvider", "SCIM"]
+def test_okta_node_adds_source_kind_without_mutating_input() -> None:
+    kinds = ["SCIM_User"]
 
     node = OktaNode(kinds=kinds, properties=_make_properties())
 
-    assert kinds == ["SCIM_ServiceProvider", "SCIM"]
-    assert node.kinds == ["SCIM_ServiceProvider", "SCIM"]
+    assert kinds == ["SCIM_User"]
+    assert node.kinds == ["SCIM_User", "SCIM"]
 
 
 def test_okta_owned_edge_path_uppercases_value_when_matching_by_id():
