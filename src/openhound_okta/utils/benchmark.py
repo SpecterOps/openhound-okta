@@ -45,7 +45,8 @@ else:
 
         Linux reports ru_maxrss in KiB; macOS reports it in bytes.
         """
-        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        peak_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return peak_rss // 1024 if sys.platform == "darwin" else peak_rss
 
 
 def wait_for_worker_result(process: Any, results: Any) -> Any:
