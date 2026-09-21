@@ -14,6 +14,10 @@ docs/official-docs/
 # Codex
 .codex
 
+# Skills are managed locally by npx skills (see the justfile)
+.agents/skills/
+.claude/skills/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
