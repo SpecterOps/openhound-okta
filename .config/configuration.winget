@@ -1,0 +1,63 @@
+# WinGet configuration for setting up a Windows development environment.
+# Apply from the repository root with:
+#   winget configure .config\configuration.winget
+# yaml-language-server: $schema=https://aka.ms/configuration-dsc-schema/0.2
+properties:
+  configurationVersion: 0.2.0
+  resources:
+    - resource: Microsoft.WinGet.DSC/WinGetPackage
+      id: git
+      directives:
+        description: Install Git
+        # The installer is machine-wide and requires elevation
+        securityContext: elevated
+      settings:
+        id: Git.Git
+        source: winget
+    - resource: Microsoft.WinGet.DSC/WinGetPackage
+      id: nodejs
+      directives:
+        description: Install Node.js (used to install agent skills via npx)
+        # The MSI is machine-wide and fails with exit code 1603 when run unelevated
+        securityContext: elevated
+      settings:
+        id: OpenJS.NodeJS
+        source: winget
+    - resource: Microsoft.WinGet.DSC/WinGetPackage
+      id: uv
+      directives:
+        description: Install uv (Python package and project manager)
+      settings:
+        id: astral-sh.uv
+        source: winget
+    - resource: Microsoft.WinGet.DSC/WinGetPackage
+      id: just
+      directives:
+        description: Install just (command runner for the justfile)
+      settings:
+        id: Casey.Just
+        source: winget
+    - resource: Microsoft.WinGet.DSC/WinGetPackage
+      id: duckdb
+      directives:
+        description: Install DuckDB CLI (query collected data)
+      settings:
+        id: DuckDB.cli
+        source: winget
+    - resource: Microsoft.WinGet.DSC/WinGetPackage
+      id: vscode
+      directives:
+        description: Install Visual Studio Code
+      settings:
+        id: Microsoft.VisualStudioCode
+        source: winget
+    - resource: Microsoft.Windows.Settings/WindowsSettings
+      id: developerMode
+      directives:
+        description: Enable Windows Developer Mode
+        # The Microsoft.Windows.Settings module has no stable release yet
+        allowPrerelease: true
+        # Writes to HKLM and requires elevation
+        securityContext: elevated
+      settings:
+        DeveloperMode: true
