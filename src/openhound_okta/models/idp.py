@@ -165,7 +165,7 @@ class IdentityProvider(BaseAsset):
         default_factory=list
     )
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def idp_url(self) -> str | None:
         url = None

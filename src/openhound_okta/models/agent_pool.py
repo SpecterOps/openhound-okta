@@ -92,7 +92,7 @@ class AgentPool(BaseAsset):
     disrupted_agents: int | None = Field(alias="disruptedAgents", default=None)
     inactive_agents: int | None = Field(alias="inactiveAgents", default=None)
     operational_status: str = Field(alias="operationalStatus")
-    agents: list[Agent] | None = Field(default=list)
+    agents: list[Agent] | None = Field(default=None)
 
     @property
     def as_node(self):
