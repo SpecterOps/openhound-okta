@@ -6,7 +6,6 @@ import hashlib
 import json
 import multiprocessing
 import re
-import resource
 import shutil
 import statistics
 import tempfile
@@ -38,7 +37,7 @@ from openhound_okta.source import (
 )
 from openhound_okta.telemetry import TelemetrySettings, build_telemetry
 from openhound_okta.utils.http import EndpointThrottle, OktaRESTClient
-from openhound_okta.utils.benchmark import wait_for_worker_result
+from openhound_okta.utils.benchmark import peak_rss_kib, wait_for_worker_result
 
 REPETITIONS = 5
 APPLICATIONS = 200
@@ -85,8 +84,8 @@ class AssignmentReplayAdapter(BaseAdapter):
         response.headers["Content-Type"] = "application/json"
         if end < self.assignments_per_application:
             response.headers["Link"] = (
-                f'<https://replay.okta.test{parsed.path}?'
-                f'{urlencode({"limit": self.rows_per_page, "after": end})}>; '
+                f"<https://replay.okta.test{parsed.path}?"
+                f"{urlencode({'limit': self.rows_per_page, 'after': end})}>; "
                 'rel="next"'
             )
         response._content = json.dumps(rows, separators=(",", ":")).encode()
@@ -256,9 +255,7 @@ def run_once(
         telemetry_summary = {
             "collection_state": summary["collection_state"],
             "telemetry_state": summary["telemetry_state"],
-            "effective_performance_settings": summary[
-                "effective_performance_settings"
-            ],
+            "effective_performance_settings": summary["effective_performance_settings"],
             "application_streams": summary["application_streams"],
             "attempts": endpoint["attempts"],
             "rows_yielded": endpoint["rows_yielded"],
@@ -270,7 +267,7 @@ def run_once(
         "collection_cpu_seconds": round(collection_cpu_seconds, 6),
         "pipeline_wall_seconds": round(pipeline_wall_seconds, 6),
         "pipeline_cpu_seconds": round(pipeline_cpu_seconds, 6),
-        "peak_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+        "peak_rss_kib": peak_rss_kib(),
         "artifact_bytes": artifact_bytes,
         "http_requests": adapter.requests,
         "graph": graph_signature,
@@ -348,9 +345,7 @@ def _performance_summary(results: list[dict[str, Any]]) -> dict[str, float]:
     off_wall = statistics.median(
         result["collection_wall_seconds"] for result in disabled
     )
-    on_wall = statistics.median(
-        result["collection_wall_seconds"] for result in enabled
-    )
+    on_wall = statistics.median(result["collection_wall_seconds"] for result in enabled)
     return {
         "disabled_median_collection_wall_seconds": off_wall,
         "enabled_median_collection_wall_seconds": on_wall,

@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import json
 import multiprocessing
-import resource
 import tempfile
 import time
 from pathlib import Path
 
 from openhound_okta.telemetry import TelemetrySettings, build_telemetry
-from openhound_okta.utils.benchmark import wait_for_worker_result
+from openhound_okta.utils.benchmark import peak_rss_kib, wait_for_worker_result
 
 REPETITIONS = 5
 APPLICATIONS = 200
@@ -68,7 +67,7 @@ def run_once(
         "repetition": repetition,
         "wall_seconds": round(wall_seconds, 6),
         "cpu_seconds": round(cpu_seconds, 6),
-        "peak_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+        "peak_rss_kib": peak_rss_kib(),
         "artifact_bytes": artifact_bytes,
     }
 
