@@ -57,6 +57,21 @@ def test_okta_node_uppercases_id():
     assert node.id == "MIXEDCASE-ID-1"
 
 
+def test_okta_node_uses_scim_source_kind() -> None:
+    node = OktaNode(kinds=["SCIM_User"], properties=_make_properties())
+
+    assert node.kinds == ["SCIM_User", "SCIM"]
+
+
+def test_okta_node_adds_source_kind_without_mutating_input() -> None:
+    kinds = ["SCIM_User"]
+
+    node = OktaNode(kinds=kinds, properties=_make_properties())
+
+    assert kinds == ["SCIM_User"]
+    assert node.kinds == ["SCIM_User", "SCIM"]
+
+
 def test_okta_owned_edge_path_uppercases_value_when_matching_by_id():
     edge = OktaOwnedEdgePath(value="mixedCase-Id-1", match_by="id")
 
