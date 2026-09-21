@@ -1,17 +1,17 @@
 {
-	"python-envs.workspaceSearchPaths": ["./**/.venv", "./envs/**"],
-	"python.testing.pytestEnabled": true,
-	"python.testing.pytestArgs": ["tests"],
-	"python.testing.unittestEnabled": false,
-	"python.analysis.typeCheckingMode": "standard",
-	"mypy-type-checker.importStrategy": "fromEnvironment",
-	"[python]": {
-		"editor.rulers": [88],
-		"editor.defaultFormatter": "charliermarsh.ruff",
-		"editor.formatOnSave": true,
-		"editor.codeActionsOnSave": {
-			"source.fixAll.ruff": "explicit",
-			"source.organizeImports.ruff": "explicit"
-		}
-	}
+  "python-envs.workspaceSearchPaths": ["./**/.venv", "./envs/**"],
+  "python.testing.pytestEnabled": true,
+  "python.testing.pytestArgs": ["tests"],
+  "python.testing.unittestEnabled": false,
+  "python.analysis.typeCheckingMode": "standard",
+  "mypy-type-checker.importStrategy": "fromEnvironment",
+  "[python]": {
+    "editor.rulers": [88],
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    }
+  }
 }
