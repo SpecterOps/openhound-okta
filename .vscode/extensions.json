@@ -1,0 +1,13 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.mypy-type-checker",
+    "GitHub.remotehub",
+    "github.vscode-github-actions",
+    "GitHub.vscode-pull-request-github",
+    "EditorConfig.EditorConfig",
+    "charliermarsh.ruff",
+    "nefrob.vscode-just-syntax",
+    "davidanson.vscode-markdownlint"
+  ]
+}

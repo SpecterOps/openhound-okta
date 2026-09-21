@@ -1,0 +1,127 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "OpenHound: collect okta",
+      "type": "shell",
+      "command": "uv run src/main.py collect okta ./output",
+      "dependsOn": [
+        "uv: install dependencies"
+      ],
+      "problemMatcher": [],
+      "icon": {
+        "id": "database",
+        "color": "terminal.ansiCyan"
+      }
+    },
+    {
+      "label": "DuckDB: browse lookup database",
+      "type": "shell",
+      "command": "duckdb -ui lookup.duckdb",
+      "isBackground": true,
+      "problemMatcher": [],
+      "icon": {
+        "id": "database",
+        "color": "terminal.ansiYellow"
+      }
+    },
+    {
+      "label": "Marimo: browse collected data",
+      "type": "shell",
+      "command": "uv run marimo edit notebooks/explore.py --watch",
+      "dependsOn": [
+        "uv: install dependencies"
+      ],
+      "isBackground": true,
+      "problemMatcher": [],
+      "icon": {
+        "id": "notebook",
+        "color": "terminal.ansiMagenta"
+      }
+    },
+    {
+      "label": "dltHub: inspect pipelines",
+      "type": "shell",
+      "command": "uv run dlt dashboard",
+      "dependsOn": [
+        "uv: install dependencies"
+      ],
+      "isBackground": true,
+      "problemMatcher": [],
+      "icon": {
+        "id": "dashboard",
+        "color": "terminal.ansiCyan"
+      }
+    },
+    {
+      "label": "uv: install dependencies",
+      "hide": true,
+      "type": "shell",
+      "command": "uv sync --group dev",
+      "problemMatcher": [],
+      "icon": {
+        "id": "package",
+        "color": "terminal.ansiGreen"
+      }
+    },
+    {
+      "label": "Ruff: lint",
+      "type": "shell",
+      "command": "uv run ruff check .",
+      "dependsOn": [
+        "uv: install dependencies"
+      ],
+      "group": "test",
+      "problemMatcher": [],
+      "icon": {
+        "id": "check",
+        "color": "terminal.ansiGreen"
+      }
+    },
+    {
+      "label": "Mypy: typecheck",
+      "type": "shell",
+      "command": "uv run mypy src",
+      "dependsOn": [
+        "uv: install dependencies"
+      ],
+      "group": "test",
+      "problemMatcher": [],
+      "icon": {
+        "id": "symbol-class",
+        "color": "terminal.ansiBlue"
+      }
+    },
+    {
+      "label": "Pytest: run tests",
+      "type": "shell",
+      "command": "uv run pytest",
+      "dependsOn": [
+        "uv: install dependencies"
+      ],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": [],
+      "icon": {
+        "id": "beaker",
+        "color": "terminal.ansiMagenta"
+      }
+    },
+    {
+      "label": "uv: build",
+      "type": "shell",
+      "command": "uv build",
+      "dependsOn": [
+        "uv: install dependencies"
+      ],
+      "group": "build",
+      "problemMatcher": [],
+      "icon": {
+        "id": "package",
+        "color": "terminal.ansiGreen"
+      }
+    }
+  ]
+}
