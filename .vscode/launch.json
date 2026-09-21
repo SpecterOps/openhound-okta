@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "OpenHound Okta CLI",
+      "type": "debugpy",
+      "request": "launch",
+      "preLaunchTask": "uv: install dependencies",
+      "program": "${workspaceFolder}/src/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "collect",
+        "okta",
+        "./output"
+       ]
+    }
+  ]
+}
