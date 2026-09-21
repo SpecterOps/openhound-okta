@@ -15,6 +15,7 @@ from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
 from dlt.common.configuration import configspec
 from dlt.common.configuration.specs import CredentialsConfiguration
+from dlt.common.typing import TSecretStrValue
 from dlt.sources.helpers.rest_client.auth import APIKeyAuth
 from dlt.sources.helpers.rest_client.client import RESTClient
 from dlt.sources.helpers.rest_client.paginators import HeaderLinkPaginator
@@ -246,7 +247,7 @@ def _app_token(okta_auth: OktaAuth, base_url: str, client_id: str) -> Token:
 
 @configspec
 class OktaAppCredentials(OktaCredentials):
-    private_key_path: str = dlt.secrets.value
+    private_key_path: TSecretStrValue = dlt.secrets.value
     client_id: str = dlt.config.value
 
     def auth(self) -> str:
@@ -266,7 +267,7 @@ class OktaAppCredentials(OktaCredentials):
 
 @configspec
 class OktaEncodedAppCredentials(OktaCredentials):
-    private_key_b64: str = dlt.secrets.value
+    private_key_b64: TSecretStrValue = dlt.secrets.value
     client_id: str = dlt.config.value
 
     def auth(self) -> str:
@@ -287,7 +288,7 @@ class OktaEncodedAppCredentials(OktaCredentials):
 
 @configspec
 class OktaTokenCredentials(OktaCredentials):
-    token: str = dlt.secrets.value
+    token: TSecretStrValue = dlt.secrets.value
 
     def auth(self) -> str:
         return "token"

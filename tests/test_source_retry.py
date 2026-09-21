@@ -28,6 +28,7 @@ from openhound_okta.source import (
     _tenant_domain_from_base_url,
     application_grants,
     application_group_assignment_rows,
+    application_secrets,
     application_group_push_mapping_row,
     application_group_push_mappings,
     application_jwk_rows,
@@ -63,9 +64,7 @@ class FakeClock:
 
 def test_tenant_domain_uses_hostname_without_port_or_user_info():
     assert (
-        _tenant_domain_from_base_url(
-            "https://user:secret@MIXED.Example:443/api/v1"
-        )
+        _tenant_domain_from_base_url("https://user:secret@MIXED.Example:443/api/v1")
         == "mixed.example"
     )
 
@@ -871,9 +870,7 @@ def test_occupied_throttle_slots_are_not_reported_as_active_http_requests():
     finally:
         throttle.release()
 
-    throttle_wait = telemetry.record_http_response.call_args.kwargs[
-        "throttle_wait"
-    ]
+    throttle_wait = telemetry.record_http_response.call_args.kwargs["throttle_wait"]
     assert throttle_wait["observed_concurrency"] == 1
 
 
@@ -1335,9 +1332,7 @@ def test_inbound_idp_metadata_preserves_entity_and_all_acs_routes():
         SimpleNamespace(pool=MetadataPool()),
         identity_provider,
     ) == {
-        "saml_metadata_entity_id": (
-            "https://www.okta.com/saml2/service-provider"
-        ),
+        "saml_metadata_entity_id": ("https://www.okta.com/saml2/service-provider"),
         "saml_metadata_acs_endpoints": [
             {
                 "url": "https://example.okta.test/sso/saml2/0oa123",
@@ -1375,7 +1370,9 @@ def test_saml_metadata_rejects_entity_declarations():
         "_links": {"metadata": {"href": "https://example.okta.test/metadata"}},
     }
 
-    assert _saml_metadata_fields(SimpleNamespace(pool=MetadataPool()), application) == {}
+    assert (
+        _saml_metadata_fields(SimpleNamespace(pool=MetadataPool()), application) == {}
+    )
 
 
 def test_inbound_idp_metadata_retry_exhaustion_is_not_silently_discarded():
@@ -1495,6 +1492,22 @@ def test_application_grants_retry_exhaustion_is_not_silently_discarded():
         next(inspect.unwrap(application_grants)(application, ctx))
 
     assert exc.value is error
+
+
+def test_application_secrets_skips_applications_without_credentials():
+    application = SimpleNamespace(
+        id="0oa123",
+        name="example_app",
+        credentials=None,
+    )
+
+    class UnexpectedPool:
+        def paginate(self, path, **kwargs):
+            raise AssertionError("the secrets endpoint must not be requested")
+
+    ctx = SimpleNamespace(pool=UnexpectedPool())
+
+    assert list(inspect.unwrap(application_secrets)(application, ctx)) == []
 
 
 class FailingPool:

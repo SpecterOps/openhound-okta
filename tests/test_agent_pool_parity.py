@@ -1,5 +1,8 @@
+import inspect
+
 from openhound_okta.kinds import edges as ek
 from openhound_okta.models import Agent, AgentPool
+from openhound_okta.source import agents as agents_transformer
 
 
 class StubLookup:
@@ -67,6 +70,20 @@ def test_non_directory_agent_pools_do_not_emit_agent_pool_for_edges():
     agent_pool = make_agent_pool(pool_type="RADIUS")
 
     assert [edge for edge in agent_pool.edges if edge.kind == ek.AGENT_POOL_FOR] == []
+
+
+def test_agents_transformer_yields_no_rows_when_agents_are_omitted():
+    agent_pool = AgentPool.model_validate(
+        {
+            "id": "app-or-pool-1",
+            "name": "corp.example.com",
+            "type": "AD",
+            "operationalStatus": "OPERATIONAL",
+        }
+    )
+
+    assert agent_pool.agents is None
+    assert list(inspect.unwrap(agents_transformer)(agent_pool)) == []
 
 
 def test_agent_member_of_edges_target_namespaced_pool_ids():
