@@ -1559,11 +1559,14 @@ def test_application_grants_stop_after_consecutive_access_denied(caplog):
 
     assert pool.calls == 3
     assert ctx.application_grants_breaker.tripped
-    assert any(
-        "Skipping app grant collection" in record.getMessage()
-        for record in caplog.records
-    )
-    assert not any(record.levelno >= logging.ERROR for record in caplog.records)
+    # Pre-trip denials log at debug level, so the whole run emits exactly one
+    # warning-or-above record: the breaker trip message.
+    warnings = [
+        record for record in caplog.records if record.levelno >= logging.WARNING
+    ]
+    assert len(warnings) == 1
+    assert "Skipping app grant collection" in warnings[0].getMessage()
+    assert warnings[0].levelno == logging.WARNING
 
 
 def test_application_grants_success_resets_consecutive_access_denied_count():

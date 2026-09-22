@@ -1083,12 +1083,13 @@ def application_grants(
             if breaker.record_access_denied():
                 logger.warning(
                     "Skipping app grant collection after %d consecutive "
-                    "access-denied responses; oauth_scopes will be missing.",
+                    "access-denied responses; oauth_scopes and OIDC "
+                    "application attack path edges will be missing.",
                     APPLICATION_GRANTS_ACCESS_DENIED_LIMIT,
                     extra={"resource": "application_grants", "phase": "defer"},
                 )
             else:
-                logger.warning(
+                logger.debug(
                     "Access denied fetching application grants for %s",
                     application.id,
                     extra={"resource": "application_grants", "phase": "defer"},
