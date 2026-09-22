@@ -261,13 +261,24 @@ class OktaLookup(LookupManager):
 
     @lru_cache
     def non_admin_users(self):
-        res = self._find_all_objects(f"""SELECT id FROM {self.schema}.non_admin_users""")
+        res = self._find_all_objects(
+            f"""SELECT id FROM {self.schema}.non_admin_users"""
+        )
         return res
 
     @lru_cache
-    def all_api_services(self):
-        res = self._find_all_objects(f"""SELECT id FROM {self.schema}.api_services""")
-        return res
+    def all_api_services(self) -> list[str]:
+        """Return the IDs of all collected API service integrations.
+
+        Returns:
+            API service integration IDs in collection order. Empty when the
+            api_services table is absent because the collector's admin role
+            cannot read API service integrations.
+        """
+        if not self._table_exists("api_services"):
+            return []
+        rows = self._find_all_objects(f"""SELECT id FROM {self.schema}.api_services""")
+        return [api_service_id for (api_service_id,) in rows]
 
     @lru_cache
     def all_applications(self):
@@ -313,12 +324,24 @@ class OktaLookup(LookupManager):
         return res
 
     @lru_cache
-    def api_service_ids_by_name(self, app_name: str):
-        res = self._find_all_objects(
+    def api_service_ids_by_name(self, app_name: str) -> list[str]:
+        """Return the IDs of API service integrations with a given type name.
+
+        Args:
+            app_name: OIN catalog name matched against the integration type.
+
+        Returns:
+            Matching API service integration IDs in collection order. Empty
+            when nothing matches or the api_services table is absent because
+            the collector's admin role cannot read API service integrations.
+        """
+        if not self._table_exists("api_services"):
+            return []
+        rows = self._find_all_objects(
             f"""SELECT id FROM {self.schema}.api_services WHERE type = ?""",
             [app_name],
         )
-        return res
+        return [api_service_id for (api_service_id,) in rows]
 
     @lru_cache
     def application_secret_ids(self, app_id: str):
@@ -328,6 +351,18 @@ class OktaLookup(LookupManager):
 
     @lru_cache
     def application_oauth_scopes(self, app_id: str) -> tuple[str, ...]:
+        """Return the OAuth 2.0 scope IDs granted to an application.
+
+        Args:
+            app_id: Okta application ID.
+
+        Returns:
+            Granted scope IDs. Empty when the application has no grants or
+            the application_grants table is absent because the collector's
+            admin role cannot read app grants.
+        """
+        if not self._table_exists("application_grants"):
+            return ()
         try:
             rows = self._find_all_objects(
                 f"""SELECT scope_id FROM {self.schema}.application_grants
@@ -523,9 +558,7 @@ class OktaLookup(LookupManager):
         if path == "/api/v1/authorizationServers":
             return self._all_ids("authorization_servers")
         if path.startswith("/api/v1/authorizationServers/"):
-            return self._existing_ids(
-                "authorization_servers", path.rsplit("/", 1)[-1]
-            )
+            return self._existing_ids("authorization_servers", path.rsplit("/", 1)[-1])
 
         if path == "/api/v1/devices":
             return self._all_ids("devices")
@@ -535,9 +568,7 @@ class OktaLookup(LookupManager):
         if path == "/api/v1/idps":
             return self._all_ids("identity_providers")
         if path.startswith("/api/v1/idps/"):
-            return self._existing_ids(
-                "identity_providers", path.rsplit("/", 1)[-1]
-            )
+            return self._existing_ids("identity_providers", path.rsplit("/", 1)[-1])
 
         if path == "/api/v1/policies":
             return self._all_ids("policies")
@@ -629,7 +660,9 @@ class OktaLookup(LookupManager):
     @lru_cache
     def _all_apps_and_integrations(self) -> tuple[str, ...]:
         return tuple(
-            sorted(set(self._all_ids("applications")) | set(self._all_ids("api_services")))
+            sorted(
+                set(self._all_ids("applications")) | set(self._all_ids("api_services"))
+            )
         )
 
     @lru_cache

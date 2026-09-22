@@ -3,9 +3,10 @@ import hashlib
 import json
 import logging
 from base64 import b64decode
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Callable, Union
+from threading import Lock
+from typing import Any, Callable, Final, Union
 from urllib.parse import urlparse
 from xml.etree.ElementTree import Element
 
@@ -198,11 +199,7 @@ def _role_assignment_scope(
         return {}
 
     try:
-        targets = [
-            target
-            for page in ctx.pool.paginate(target_path)
-            for target in page
-        ]
+        targets = [target for page in ctx.pool.paginate(target_path) for target in page]
     except OktaRetryExhaustedError:
         raise
     except Exception as e:
@@ -218,6 +215,10 @@ def _role_assignment_scope(
 
     return {scope_field: targets}
 
+
+APPLICATION_GRANTS_ACCESS_DENIED_LIMIT: Final[int] = 10
+"""Consecutive access-denied (403) responses after which application OAuth 2.0
+grant collection is abandoned for all remaining applications."""
 
 APPLICATION_USERS_PAGE_SIZE = 500
 GROUPS_PAGE_SIZE = 200
@@ -308,7 +309,9 @@ def _request_auth(
 ):
     if isinstance(credentials, (OktaAppCredentials, OktaEncodedAppCredentials)):
         return OktaBearerAuth(credentials.fetch_token)
-    return APIKeyAuth(name="Authorization", api_key=credentials.header, location="header")
+    return APIKeyAuth(
+        name="Authorization", api_key=credentials.header, location="header"
+    )
 
 
 class ClientPool:
@@ -389,13 +392,99 @@ class ClientPool:
         return self._saml_metadata_client.get(path)
 
 
+class ConsecutiveAccessDeniedBreaker:
+    """Trips after an uninterrupted run of access-denied (403) responses.
+
+    Least-privilege collector roles cannot read some per-object endpoints at
+    all, so once every request in a row is denied there is no point in issuing
+    one request per remaining object. A successful request resets the run;
+    once tripped, the breaker never resets. The breaker is thread-safe.
+
+    Attributes:
+        tripped: Whether the denial limit has been reached and callers should
+            stop issuing further requests.
+    """
+
+    def __init__(self, limit: int) -> None:
+        """Create a breaker that trips at the given denial limit.
+
+        Args:
+            limit: Number of consecutive access-denied responses that trips
+                the breaker. Must be at least 1.
+
+        Raises:
+            ValueError: If limit is less than 1.
+        """
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+        self._limit: int = limit
+        self._lock: Lock = Lock()
+        self._consecutive_denials: int = 0
+        self._tripped: bool = False
+
+    @property
+    def tripped(self) -> bool:
+        """Whether the breaker has tripped and requests should stop.
+
+        Returns:
+            True once record_access_denied has counted the limit of
+            consecutive denials, False otherwise.
+        """
+        with self._lock:
+            return self._tripped
+
+    def record_success(self) -> None:
+        """Reset the consecutive denial count after a successful request."""
+        with self._lock:
+            self._consecutive_denials = 0
+
+    def record_access_denied(self) -> bool:
+        """Count one access-denied response toward the limit.
+
+        Returns:
+            True when this denial is the one that trips the breaker, False
+            when the breaker was already tripped or the limit has not been
+            reached yet.
+        """
+        with self._lock:
+            if self._tripped:
+                return False
+            self._consecutive_denials += 1
+            if self._consecutive_denials >= self._limit:
+                self._tripped = True
+                return True
+            return False
+
+
 @dataclass
 class SourceContext:
-    """Context for Okta API operations."""
+    """Context for Okta API operations.
+
+    Attributes:
+        pool: Client pool used to issue Okta API requests.
+        tenant_domain: Casefolded hostname of the collected Okta tenant.
+        telemetry: Collection-phase telemetry recorder.
+        application_grants_breaker: Shared breaker that stops application
+            OAuth 2.0 grant collection after consecutive access-denied
+            responses.
+        application_users_page_size: Users requested per application-users
+            page.
+        groups_page_size: Groups requested per expanded groups page.
+        application_group_assignments_page_size: Groups requested per
+            application page.
+        group_push_mappings_page_size: Mappings requested per group-push page.
+        identity_provider_users_page_size: Users requested per
+            identity-provider page.
+    """
 
     pool: ClientPool
     tenant_domain: str
     telemetry: Telemetry = field(default_factory=NullTelemetryRecorder)
+    application_grants_breaker: ConsecutiveAccessDeniedBreaker = field(
+        default_factory=lambda: ConsecutiveAccessDeniedBreaker(
+            APPLICATION_GRANTS_ACCESS_DENIED_LIMIT
+        )
+    )
     application_users_page_size: int = APPLICATION_USERS_PAGE_SIZE
     groups_page_size: int = GROUPS_PAGE_SIZE
     application_group_assignments_page_size: int = (
@@ -431,9 +520,8 @@ def _group_page_sizes(initial_page_size: int) -> tuple[int, ...]:
 
 
 def _is_read_timeout_retry_exhaustion(error: OktaRetryExhaustedError) -> bool:
-    return (
-        error.context.status_code is None
-        and isinstance(error.__cause__, requests.exceptions.ReadTimeout)
+    return error.context.status_code is None and isinstance(
+        error.__cause__, requests.exceptions.ReadTimeout
     )
 
 
@@ -679,7 +767,10 @@ def _office365_tenant_id_fields(
     application: dict[str, Any],
     get: Callable[..., requests.Response] = requests.get,
 ) -> dict[str, Any]:
-    if application.get("name") != "office365" or application.get("signOnMode") != "SAML_1_1":
+    if (
+        application.get("name") != "office365"
+        or application.get("signOnMode") != "SAML_1_1"
+    ):
         return application
 
     settings = application.get("settings")
@@ -736,7 +827,9 @@ def _microsoft_tenant_id_from_onmicrosoft_domain(
     if not isinstance(token_endpoint, str):
         return None
 
-    path_segments = [segment for segment in urlparse(token_endpoint).path.split("/") if segment]
+    path_segments = [
+        segment for segment in urlparse(token_endpoint).path.split("/") if segment
+    ]
     return path_segments[0] if path_segments else None
 
 
@@ -945,22 +1038,62 @@ def application_jwk_rows(application: Application, ctx: SourceContext):
 
 
 @app.transformer(name="application_grants", columns=ApplicationGrant)
-def application_grants(application: Application, ctx: SourceContext):
+def application_grants(
+    application: Application, ctx: SourceContext
+) -> Iterator[dict[str, Any]]:
+    """DLT transformer, fetches OAuth 2.0 grants of an OIDC or service
+    application via GET /apps/{applicationId}/grants.
+
+    Reading app grants requires the Super Administrator role. Each
+    access-denied (403) response is counted by the shared
+    ctx.application_grants_breaker; once it trips, grant collection is skipped
+    for all remaining applications without issuing further requests.
+
+    Args:
+        application: Okta application record.
+        ctx: SourceContext containing the REST client and the grant breaker.
+
+    Yields:
+        grant (dict): Application grant record enriched with an ``app_id`` key.
+
+    Raises:
+        OktaRetryExhaustedError: If retries were exhausted for a grants
+            request.
+    """
     oauth_client = application.settings.oauth_client if application.settings else None
     if application.sign_on_mode != "OPENID_CONNECT" and not (
         oauth_client and oauth_client.application_type == "service"
     ):
         return
 
+    breaker = ctx.application_grants_breaker
+    if breaker.tripped:
+        return
+
     try:
         for page in ctx.pool.paginate(f"/api/v1/apps/{application.id}/grants"):
+            breaker.record_success()
             for item in page:
                 yield {"app_id": application.id, **item}
     except OktaRetryExhaustedError:
         raise
     except Exception as e:
         status_code = getattr(getattr(e, "response", None), "status_code", None)
-        if status_code != 404:
+        if status_code == 403:
+            if breaker.record_access_denied():
+                logger.warning(
+                    "Skipping app grant collection after %d consecutive "
+                    "access-denied responses; oauth_scopes will be missing.",
+                    APPLICATION_GRANTS_ACCESS_DENIED_LIMIT,
+                    extra={"resource": "application_grants", "phase": "defer"},
+                )
+            else:
+                logger.warning(
+                    "Access denied fetching application grants for %s",
+                    application.id,
+                    extra={"resource": "application_grants", "phase": "defer"},
+                )
+        elif status_code != 404:
             logger.error(
                 "Error fetching application grants for %s: %s",
                 application.id,
@@ -1217,9 +1350,7 @@ def client_applications(ctx: SourceContext):
 )
 def client_role_assignments(client: ClientApplication, ctx: SourceContext):
     if client.application_type == "service":
-        for page in ctx.pool.paginate(
-            f"/oauth2/v1/clients/{client.client_id}/roles"
-        ):
+        for page in ctx.pool.paginate(f"/oauth2/v1/clients/{client.client_id}/roles"):
             for item in page:
                 if _is_direct_active_role_assignment(item, "client"):
                     yield {
@@ -1282,9 +1413,7 @@ def user_role_assignment_rows(user_id: str, ctx: SourceContext):
 )
 def group_role_assignments(group: Group, ctx: SourceContext):
     if group.embedded.stats.has_admin_privilege:
-        for page in ctx.pool.paginate(
-            f"/api/v1/groups/{group.id}/roles"
-        ):
+        for page in ctx.pool.paginate(f"/api/v1/groups/{group.id}/roles"):
             for role in page:
                 if _is_direct_active_role_assignment(role, "group"):
                     yield {
@@ -1415,10 +1544,7 @@ def identity_providers(ctx: SourceContext):
     for page in ctx.pool.paginate("/api/v1/idps"):
         for item in page:
             protocol = item.get("protocol") or {}
-            if (
-                item.get("type") == "SAML2"
-                and protocol.get("type") == "SAML2"
-            ):
+            if item.get("type") == "SAML2" and protocol.get("type") == "SAML2":
                 item = {**item, **_saml_idp_metadata_fields(ctx, item)}
             yield item
 
@@ -1552,16 +1678,32 @@ def api_tokens(ctx: SourceContext):
 
 
 @app.resource(name="api_services", columns=ApiService, parallelized=True)
-def api_services(ctx: SourceContext):
-    """DLT resource, fetches Okta API services via GET /api/v1/api-services.
+def api_services(ctx: SourceContext) -> Iterator[dict[str, Any]]:
+    """DLT resource, fetches Okta API service integrations via
+    GET /integrations/api/v1/api-services.
 
+    Listing API service integrations requires the Super Administrator role.
+    An access-denied (403) response is logged as a warning and treated as an
+    empty listing; all other HTTP errors propagate.
+
+    Args:
+        ctx: SourceContext containing the REST client for API calls.
 
     Yields:
-        api_service (ApiService): API service records.
+        api_service (ApiService): API service integration records.
     """
-    for page in ctx.pool.paginate("/integrations/api/v1/api-services"):
-        for item in page:
-            yield item
+    try:
+        for page in ctx.pool.paginate("/integrations/api/v1/api-services"):
+            for item in page:
+                yield item
+    except requests.HTTPError as e:
+        status_code = getattr(e.response, "status_code", None)
+        if status_code != 403:
+            raise
+        logger.warning(
+            "Access denied listing API service integrations; skipping them.",
+            extra={"resource": "api_services", "phase": "collect"},
+        )
 
 
 @app.source(name="okta", max_table_nesting=0)
@@ -1604,10 +1746,7 @@ def source(
             f"{APPLICATION_USERS_PAGE_SIZE}"
         )
     if not 1 <= groups_page_size <= GROUPS_PAGE_SIZE:
-        raise ValueError(
-            "groups_page_size must be between 1 and "
-            f"{GROUPS_PAGE_SIZE}"
-        )
+        raise ValueError(f"groups_page_size must be between 1 and {GROUPS_PAGE_SIZE}")
     if not (
         APPLICATION_GROUP_ASSIGNMENTS_MIN_PAGE_SIZE
         <= application_group_assignments_page_size

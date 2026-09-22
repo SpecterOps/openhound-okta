@@ -93,7 +93,6 @@ _ENDPOINT_TEMPLATES = (
 )
 _COLLECTION_PATHS = {
     "/api/v1/agentPools",
-    "/api/v1/api-services",
     "/api/v1/api-tokens",
     "/api/v1/apps",
     "/api/v1/authorizationServers",
@@ -106,8 +105,6 @@ _COLLECTION_PATHS = {
     "/api/v1/org",
     "/api/v1/policies",
     "/api/v1/realms",
-    "/api/v1/resource-sets",
-    "/api/v1/roles",
     "/api/v1/users",
     "/oauth2/v1/clients",
     "/integrations/api/v1/api-services",

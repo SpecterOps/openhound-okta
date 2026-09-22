@@ -113,10 +113,7 @@ class RoleAssignment(BaseAsset):
             target_ids.update(
                 app_id for (app_id,) in self._lookup.application_ids_by_name(app.name)
             )
-            target_ids.update(
-                integration_id
-                for (integration_id,) in self._lookup.api_service_ids_by_name(app.name)
-            )
+            target_ids.update(self._lookup.api_service_ids_by_name(app.name))
 
         return tuple(sorted(target_ids))
 
@@ -141,9 +138,7 @@ class RoleAssignment(BaseAsset):
         )
         non_admin_group_ids = set(self._ids(self._lookup.non_admin_groups()))
         return tuple(
-            group_id
-            for group_id in target_group_ids
-            if group_id in non_admin_group_ids
+            group_id for group_id in target_group_ids if group_id in non_admin_group_ids
         )
 
     @property
@@ -154,12 +149,12 @@ class RoleAssignment(BaseAsset):
 
         target_app_ids = (
             self._ids(self._lookup.all_applications())
-            + self._ids(self._lookup.all_api_services())
+            + tuple(self._lookup.all_api_services())
             if not self.scope_apps
             else scoped_app_ids
         )
         allowed_target_ids = set(self._ids(self._lookup.non_admin_apps()))
-        allowed_target_ids.update(self._ids(self._lookup.all_api_services()))
+        allowed_target_ids.update(self._lookup.all_api_services())
         return tuple(
             app_id for app_id in target_app_ids if app_id in allowed_target_ids
         )

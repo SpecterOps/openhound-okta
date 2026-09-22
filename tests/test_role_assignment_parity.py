@@ -43,7 +43,7 @@ class StubLookup:
         return [("app-2",)] if app_name == "catalog-app" else []
 
     def api_service_ids_by_name(self, app_name):
-        return [("integration-1",)] if app_name == "catalog-app" else []
+        return ["integration-1"] if app_name == "catalog-app" else []
 
     def all_groups(self):
         return [("group-1",), ("group-2",)]
@@ -67,7 +67,7 @@ class StubLookup:
         return [("app-1",), ("app-2",)]
 
     def all_api_services(self):
-        return [("integration-1",)]
+        return ["integration-1"]
 
     def application_secret_ids(self, app_id):
         return []
@@ -289,9 +289,7 @@ def test_admin_principal_transform_uses_privileged_user_inventory():
         "(source_id VARCHAR, status VARCHAR, assignment_type VARCHAR)"
     )
     con.execute(
-        "INSERT INTO okta.privileged_users VALUES "
-        "('direct-user'), "
-        "('inherited-user')"
+        "INSERT INTO okta.privileged_users VALUES ('direct-user'), ('inherited-user')"
     )
     con.execute(
         "INSERT INTO okta.user_role_assignments VALUES "
@@ -333,8 +331,12 @@ def test_non_admin_users_excludes_inherited_admins_from_privileged_inventory():
         "CREATE TABLE okta.user_role_assignments "
         "(source_id VARCHAR, status VARCHAR, assignment_type VARCHAR)"
     )
-    con.execute("INSERT INTO okta.users VALUES ('direct-user'), ('inherited-user'), ('plain-user')")
-    con.execute("INSERT INTO okta.privileged_users VALUES ('direct-user'), ('inherited-user')")
+    con.execute(
+        "INSERT INTO okta.users VALUES ('direct-user'), ('inherited-user'), ('plain-user')"
+    )
+    con.execute(
+        "INSERT INTO okta.privileged_users VALUES ('direct-user'), ('inherited-user')"
+    )
     con.execute(
         "INSERT INTO okta.user_role_assignments VALUES "
         "('direct-user', 'ACTIVE', 'USER')"
@@ -344,9 +346,9 @@ def test_non_admin_users_excludes_inherited_admins_from_privileged_inventory():
     insert_principals_with_admin_roles(con)
     non_admin_users(con)
 
-    assert con.execute("SELECT id FROM okta.non_admin_users ORDER BY id").fetchall() == [
-        ("plain-user",)
-    ]
+    assert con.execute(
+        "SELECT id FROM okta.non_admin_users ORDER BY id"
+    ).fetchall() == [("plain-user",)]
 
 
 def test_org_wide_standard_role_assignment_is_scoped_to_org():
