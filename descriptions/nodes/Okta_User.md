@@ -26,6 +26,18 @@ To simplify analysis in BloodHound, the OpenHound collector maps the **Status** 
 > [!WARNING]
 > This mapping is a simplification and may not cover all edge cases. Always refer to the actual **Status** attribute for precise user state information.
 
+## Authentication Factors
+
+Okta supports various authentication factors for multi-factor authentication (MFA), such as SMS, email, push notifications, and hardware tokens. In case of mobile and desktop applications, these authentication factors are associated with the [Device](Okta_Device.md) entities. Other authentication factors, such as YubiKeys and Google Authenticator, are not represented as separate nodes in BloodHound, but the number of enrolled factors is stored in the `authentication_factors` attribute of the Okta_User nodes.
+
+Because factor enumeration requires one additional API request per user, the OpenHound collector only fetches factors for privileged users: users with direct role assignments and members of groups that hold admin privileges. The `authentication_factors` attribute is therefore interpreted as follows:
+
+| Value  | Meaning |
+|--------|---------|
+| `null` | The user is not privileged and/or the factors were not collected. |
+| `0`    | The user is privileged and has no enrolled factors (no MFA). |
+| `N`    | The user is privileged and has `N` enrolled factors. |
+
 ## Synchronization with External Directories
 
 Users can be synchronized from external directories such as Active Directory (AD) or LDAP. When synchronized, certain attributes may be mapped from the external directory to the Okta user profile.

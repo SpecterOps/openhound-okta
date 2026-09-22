@@ -1,6 +1,5 @@
 import duckdb
 
-
 USERS_ID_INDEX_NAME = "users_id_idx"
 
 
@@ -110,10 +109,46 @@ def non_admin_apps(con, schema: str = "okta") -> None:
     """)
 
 
+def users_authentication_factors_count(con, schema: str = "okta") -> None:
+    """Materialize per-user enrolled factor counts on the users table.
+
+    Adds an authentication_factors_count column to users and fills it from the
+    collected user_factors table in one set-based pass, so the convert phase
+    reads the count off the user row instead of issuing per-user queries.
+    The column keeps the NULL/0/N contract: NULL for users whose factors were
+    never collected (not privileged, or user_factors absent), 0 for a covered
+    user with only the scope-marker row (NULL factor id), N for the number of
+    enrolled factors.
+
+    Args:
+        con: DuckDB connection to the collected dataset.
+        schema: Schema holding the collected Okta tables.
+    """
+    con.execute(f"""
+        ALTER TABLE {schema}.users
+        ADD COLUMN IF NOT EXISTS authentication_factors_count INTEGER
+    """)
+    try:
+        con.execute(f"""
+            UPDATE {schema}.users
+            SET authentication_factors_count = factor_counts.count
+            FROM (
+                SELECT user_id, COUNT(id) AS count
+                FROM {schema}.user_factors
+                GROUP BY user_id
+            ) factor_counts
+            WHERE {schema}.users.id = factor_counts.user_id
+        """)
+    except duckdb.CatalogException:
+        # user_factors was not collected; the column stays NULL everywhere.
+        pass
+
+
 def transforms(con: duckdb.DuckDBPyConnection, schema: str = "okta") -> None:
+    ensure_users_id_index(con, schema)
     principals_with_admin_roles(con, schema)
     insert_principals_with_admin_roles(con, schema)
     non_admin_users(con, schema)
     non_admin_groups(con, schema)
     non_admin_apps(con, schema)
-    ensure_users_id_index(con, schema)
+    users_authentication_factors_count(con, schema)

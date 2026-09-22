@@ -2,8 +2,9 @@ import fnmatch
 import hashlib
 import json
 import logging
+import threading
 from base64 import b64decode
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Callable, Union
 from urllib.parse import urlparse
@@ -124,6 +125,11 @@ OKTA_DEFAULT_SCOPE = [
 ]
 
 API_RATE_LIMIT_ENDPOINTS = [
+    # Dedicated family for per-user factor enumeration: it must precede the
+    # broader /api/v1/users* pattern so the potentially large volume of factor
+    # requests cannot queue-starve or rate-limit-clamp the users listing,
+    # which Okta serves from a different rate-limit bucket.
+    "/api/v1/users/*/factors",
     "/api/v1/users*",
     "/api/v1/groups*",
     "/api/v1/apps*",
@@ -198,11 +204,7 @@ def _role_assignment_scope(
         return {}
 
     try:
-        targets = [
-            target
-            for page in ctx.pool.paginate(target_path)
-            for target in page
-        ]
+        targets = [target for page in ctx.pool.paginate(target_path) for target in page]
     except OktaRetryExhaustedError:
         raise
     except Exception as e:
@@ -308,7 +310,9 @@ def _request_auth(
 ):
     if isinstance(credentials, (OktaAppCredentials, OktaEncodedAppCredentials)):
         return OktaBearerAuth(credentials.fetch_token)
-    return APIKeyAuth(name="Authorization", api_key=credentials.header, location="header")
+    return APIKeyAuth(
+        name="Authorization", api_key=credentials.header, location="header"
+    )
 
 
 class ClientPool:
@@ -431,9 +435,8 @@ def _group_page_sizes(initial_page_size: int) -> tuple[int, ...]:
 
 
 def _is_read_timeout_retry_exhaustion(error: OktaRetryExhaustedError) -> bool:
-    return (
-        error.context.status_code is None
-        and isinstance(error.__cause__, requests.exceptions.ReadTimeout)
+    return error.context.status_code is None and isinstance(
+        error.__cause__, requests.exceptions.ReadTimeout
     )
 
 
@@ -466,17 +469,179 @@ def users(ctx: SourceContext):
             yield user
 
 
+# Authentication factor collection
+#
+# Enumerating factors costs one GET /api/v1/users/{id}/factors request per
+# user, so factors are only collected for privileged users, discovered by two
+# parallel streams:
+#   1. users with direct role assignments (privileged_users | user_factors)
+#   2. members of groups whose stats report hasAdminPrivilege, chained off the
+#      membership rows already being collected so no member list is paginated
+#      twice (groups | group_memberships | admin_group_member_factors)
+# Both write to the user_factors table. A user can appear in both streams
+# (e.g. a direct super admin who is also in several admin groups), and dlt
+# transformers cannot consume a merged, deduplicated stream, so both
+# transformers share one UserFactorClaims instance (created per source() call):
+# whichever stream claims a user ID first fetches the factors, later claimants
+# skip. For every claimed user with zero factors a scope-marker row (NULL
+# factor id) is written, so downstream the authentication_factors node
+# property can distinguish:
+#   NULL - user not covered (not privileged, factors never fetched)
+#   0    - user covered, no enrolled factors
+#   N    - user covered, N enrolled factors
+# The counts are materialized onto the users table by the
+# users_authentication_factors_count preprocessing transform (see transforms.py and
+# descriptions/nodes/Okta_User.md).
+class UserFactorClaims:
+    """Grants each user's factor fetch to exactly one of the parallel streams.
+
+    Attributes:
+        _claimed: User IDs whose factor fetch has already been granted.
+        _lock: Guards _claimed against the parallelized transformer threads.
+    """
+
+    def __init__(self) -> None:
+        self._claimed: set[str] = set()
+        self._lock = threading.Lock()
+
+    def claim(self, user_id: str) -> bool:
+        """Atomically claim the factor fetch for a user.
+
+        Args:
+            user_id: Okta user ID to claim.
+
+        Returns:
+            True if this caller should fetch the user's factors,
+            False if another stream already claimed the user.
+        """
+        with self._lock:
+            if user_id in self._claimed:
+                return False
+            self._claimed.add(user_id)
+            return True
+
+
+def user_factor_rows(user_id: str, ctx: SourceContext) -> Iterator[dict[str, object]]:
+    """Fetch one user's enrolled factors via GET /api/v1/users/{id}/factors.
+
+    A failed fetch is logged and yields nothing at all (not even the scope
+    marker), so the user's authentication_factors node property stays NULL
+    ("not collected") instead of understating the factor count. Rate-limit
+    retry exhaustion is re-raised to stop the transformer.
+
+    Args:
+        user_id: Okta user ID whose factors to enumerate.
+        ctx: SourceContext containing the REST client for API calls.
+
+    Yields:
+        One user_factors row per enrolled factor, or a single scope-marker row
+        holding only user_id (NULL factor id) when the user has no factors, so
+        a collected user without factors (0) stays distinct from a user whose
+        factors were never fetched (NULL on the node).
+    """
+    try:
+        rows = [
+            {"user_id": user_id, **item}
+            for page in ctx.pool.paginate(f"/api/v1/users/{user_id}/factors")
+            for item in page
+        ]
+    except OktaRetryExhaustedError:
+        raise
+    except Exception as e:
+        logger.error(
+            "Error fetching authentication factors for user %s: %s",
+            user_id,
+            e,
+            extra={"resource": "user_factors", "phase": "defer"},
+        )
+        return
+    yield from rows or [{"user_id": user_id}]
+
+
+def privileged_user_factor_rows(
+    user: PrivilegedUser, ctx: SourceContext, claims: UserFactorClaims
+) -> Iterator[dict[str, object]]:
+    """Fetch factors for a directly privileged user, unless already claimed.
+
+    Args:
+        user: User returned by Okta's privileged assignee inventory endpoint.
+        ctx: SourceContext containing the REST client for API calls.
+        claims: Registry shared with the admin-group stream; skips the fetch
+            when the user was already claimed there.
+
+    Yields:
+        user_factors rows for the user (see user_factor_rows), or nothing when
+        another stream already claimed the user.
+    """
+    if claims.claim(user.id):
+        yield from user_factor_rows(user.id, ctx)
+
+
+def admin_group_member_factor_rows(
+    membership: Mapping[str, object], ctx: SourceContext, claims: UserFactorClaims
+) -> Iterator[dict[str, object]]:
+    """Fetch factors for a member of an admin group, unless already claimed.
+
+    Args:
+        membership: A group_memberships row; only rows whose
+            group_has_admin_privilege flag is set trigger a fetch.
+        ctx: SourceContext containing the REST client for API calls.
+        claims: Registry shared with the direct-assignee stream; skips the
+            fetch when the member was already claimed there.
+
+    Yields:
+        user_factors rows for the member (see user_factor_rows), or nothing
+        for non-admin groups or already claimed users.
+    """
+    member_id = membership.get("id")
+    if (
+        membership.get("group_has_admin_privilege")
+        and isinstance(member_id, str)
+        and claims.claim(member_id)
+    ):
+        yield from user_factor_rows(member_id, ctx)
+
+
+@app.transformer(name="user_factors", columns=UserFactor, parallelized=True)
+def user_factors(
+    user: PrivilegedUser, ctx: SourceContext, claims: UserFactorClaims
+) -> Iterator[dict[str, object]]:
+    """DLT transformer, fetches factors of directly privileged users.
+
+    Args:
+        user: User returned by Okta's privileged assignee inventory endpoint.
+        ctx: SourceContext containing the REST client for API calls.
+        claims: Fetch-once registry shared with admin_group_member_factors.
+
+    Yields:
+        user_factor (UserFactor): Enrolled factor or scope-marker record.
+    """
+    yield from privileged_user_factor_rows(user, ctx, claims)
+
+
 @app.transformer(
-    name="user_factors",
+    name="admin_group_member_factors",
+    table_name="user_factors",
     columns=UserFactor,
     parallelized=True,
-    selected=False,
 )
-def user_factors(user: User, ctx: SourceContext):
-    # Factor enumeration requires one additional API request per user, so keep it opt-in.
-    for page in ctx.pool.paginate(f"/api/v1/users/{user.id}/factors"):
-        for item in page:
-            yield {"user_id": user.id, **item}
+def admin_group_member_factors(
+    membership: Mapping[str, object], ctx: SourceContext, claims: UserFactorClaims
+) -> Iterator[dict[str, object]]:
+    """DLT transformer, fetches factors of admin-group members.
+
+    Chained off group_memberships so member lists are not paginated twice;
+    writes to the same user_factors table as the user_factors transformer.
+
+    Args:
+        membership: A group_memberships row (carries group_has_admin_privilege).
+        ctx: SourceContext containing the REST client for API calls.
+        claims: Fetch-once registry shared with user_factors.
+
+    Yields:
+        user_factor (UserFactor): Enrolled factor or scope-marker record.
+    """
+    yield from admin_group_member_factor_rows(membership, ctx, claims)
 
 
 @app.resource(
@@ -541,11 +706,31 @@ def groups(ctx: SourceContext):
     parallelized=True,
     write_disposition="replace",
 )
-def group_memberships(group: Group, ctx: SourceContext):
+def group_memberships(group: Group, ctx: SourceContext) -> Iterator[dict[str, object]]:
+    """DLT transformer, fetches group members via GET /groups/{groupId}/users.
+
+    Args:
+        group: Okta group record whose members to fetch.
+        ctx: SourceContext containing the REST client for API calls.
+
+    Yields:
+        membership (GroupMembership): Member record enriched with group_id and
+            group_has_admin_privilege, the latter consumed by the chained
+            admin_group_member_factors transformer.
+    """
     if group.embedded.stats.users_count > 0:
         for page in ctx.pool.paginate(f"/api/v1/groups/{group.id}/users"):
             for item in page:
-                yield {"group_id": group.id, **item}
+                yield {
+                    "group_id": group.id,
+                    # Carried along so the chained admin_group_member_factors
+                    # transformer can select admin-group members without
+                    # paginating the member list a second time.
+                    "group_has_admin_privilege": (
+                        group.embedded.stats.has_admin_privilege
+                    ),
+                    **item,
+                }
 
 
 def _application_group_assignment_fingerprint(
@@ -679,7 +864,10 @@ def _office365_tenant_id_fields(
     application: dict[str, Any],
     get: Callable[..., requests.Response] = requests.get,
 ) -> dict[str, Any]:
-    if application.get("name") != "office365" or application.get("signOnMode") != "SAML_1_1":
+    if (
+        application.get("name") != "office365"
+        or application.get("signOnMode") != "SAML_1_1"
+    ):
         return application
 
     settings = application.get("settings")
@@ -736,7 +924,9 @@ def _microsoft_tenant_id_from_onmicrosoft_domain(
     if not isinstance(token_endpoint, str):
         return None
 
-    path_segments = [segment for segment in urlparse(token_endpoint).path.split("/") if segment]
+    path_segments = [
+        segment for segment in urlparse(token_endpoint).path.split("/") if segment
+    ]
     return path_segments[0] if path_segments else None
 
 
@@ -1217,9 +1407,7 @@ def client_applications(ctx: SourceContext):
 )
 def client_role_assignments(client: ClientApplication, ctx: SourceContext):
     if client.application_type == "service":
-        for page in ctx.pool.paginate(
-            f"/oauth2/v1/clients/{client.client_id}/roles"
-        ):
+        for page in ctx.pool.paginate(f"/oauth2/v1/clients/{client.client_id}/roles"):
             for item in page:
                 if _is_direct_active_role_assignment(item, "client"):
                     yield {
@@ -1282,9 +1470,7 @@ def user_role_assignment_rows(user_id: str, ctx: SourceContext):
 )
 def group_role_assignments(group: Group, ctx: SourceContext):
     if group.embedded.stats.has_admin_privilege:
-        for page in ctx.pool.paginate(
-            f"/api/v1/groups/{group.id}/roles"
-        ):
+        for page in ctx.pool.paginate(f"/api/v1/groups/{group.id}/roles"):
             for role in page:
                 if _is_direct_active_role_assignment(role, "group"):
                     yield {
@@ -1415,10 +1601,7 @@ def identity_providers(ctx: SourceContext):
     for page in ctx.pool.paginate("/api/v1/idps"):
         for item in page:
             protocol = item.get("protocol") or {}
-            if (
-                item.get("type") == "SAML2"
-                and protocol.get("type") == "SAML2"
-            ):
+            if item.get("type") == "SAML2" and protocol.get("type") == "SAML2":
                 item = {**item, **_saml_idp_metadata_fields(ctx, item)}
             yield item
 
@@ -1604,10 +1787,7 @@ def source(
             f"{APPLICATION_USERS_PAGE_SIZE}"
         )
     if not 1 <= groups_page_size <= GROUPS_PAGE_SIZE:
-        raise ValueError(
-            "groups_page_size must be between 1 and "
-            f"{GROUPS_PAGE_SIZE}"
-        )
+        raise ValueError(f"groups_page_size must be between 1 and {GROUPS_PAGE_SIZE}")
     if not (
         APPLICATION_GROUP_ASSIGNMENTS_MIN_PAGE_SIZE
         <= application_group_assignments_page_size
@@ -1685,12 +1865,14 @@ def source(
     resource_sets_resource = resource_sets(ctx)
     users_resource = users(ctx)
     privileged_users_resource = privileged_users(ctx)
+    factor_claims = UserFactorClaims()
+    group_memberships_resource = groups_resource | group_memberships(ctx)
     return (
         organization(ctx),
         users_resource,
-        users_resource | user_factors(ctx),
         groups_resource,
-        groups_resource | group_memberships(ctx),
+        group_memberships_resource,
+        group_memberships_resource | admin_group_member_factors(ctx, factor_claims),
         groups_resource | group_role_assignments(ctx),
         client_apps_resource,
         client_apps_resource | client_role_assignments(ctx),
@@ -1731,4 +1913,5 @@ def source(
         built_in_roles_resource | built_in_role_permissions,
         privileged_users_resource,
         privileged_users_resource | user_role_assignments(ctx),
+        privileged_users_resource | user_factors(ctx, factor_claims),
     )

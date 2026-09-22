@@ -64,6 +64,9 @@ class GroupMembership(BaseAsset):
 
     # Additional
     group_id: str
+    # Lets the chained admin_group_member_factors transformer select admin-group
+    # members without paginating the member list again.
+    group_has_admin_privilege: bool = False
 
     @property
     def as_node(self):
