@@ -128,6 +128,13 @@ def users_authentication_factors_count(con, schema: str = "okta") -> None:
         ALTER TABLE {schema}.users
         ADD COLUMN IF NOT EXISTS authentication_factors_count INTEGER
     """)
+    # Reset before aggregating so a repeated preprocessing run rebuilds the
+    # snapshot instead of keeping stale counts for users no longer covered.
+    con.execute(f"""
+        UPDATE {schema}.users
+        SET authentication_factors_count = NULL
+        WHERE authentication_factors_count IS NOT NULL
+    """)
     try:
         con.execute(f"""
             UPDATE {schema}.users

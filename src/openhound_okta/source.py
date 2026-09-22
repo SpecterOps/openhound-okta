@@ -602,7 +602,15 @@ def admin_group_member_factor_rows(
         yield from user_factor_rows(member_id, ctx)
 
 
-@app.transformer(name="user_factors", columns=UserFactor, parallelized=True)
+# Both factor writers replace the shared user_factors table so each collection
+# is a fresh snapshot: appended leftovers from an earlier run would inflate
+# counts and let a user whose fetch failed inherit stale rows.
+@app.transformer(
+    name="user_factors",
+    columns=UserFactor,
+    parallelized=True,
+    write_disposition="replace",
+)
 def user_factors(
     user: PrivilegedUser, ctx: SourceContext, claims: UserFactorClaims
 ) -> Iterator[dict[str, object]]:
@@ -624,6 +632,7 @@ def user_factors(
     table_name="user_factors",
     columns=UserFactor,
     parallelized=True,
+    write_disposition="replace",
 )
 def admin_group_member_factors(
     membership: Mapping[str, object], ctx: SourceContext, claims: UserFactorClaims

@@ -199,6 +199,33 @@ def test_users_authentication_factors_count_materializes_null_zero_and_counts() 
     }
 
 
+def test_users_authentication_factors_count_rerun_clears_stale_counts() -> None:
+    """A repeated preprocessing run resets counts for users no longer covered."""
+    connection = duckdb.connect()
+    _create_users_table(connection)
+    connection.execute(
+        "INSERT INTO okta.users VALUES ('user-1', 'ACTIVE', NULL), "
+        "('user-2', 'ACTIVE', NULL)"
+    )
+    connection.execute("CREATE TABLE okta.user_factors (user_id VARCHAR, id VARCHAR)")
+    connection.execute(
+        "INSERT INTO okta.user_factors VALUES ('user-1', 'factor-1'), ('user-2', NULL)"
+    )
+    transforms_module.users_authentication_factors_count(connection)
+    assert _factor_counts(connection) == {"user-1": 1, "user-2": 0}
+
+    # The next collection covers only user-2, now with one enrolled factor.
+    connection.execute("DELETE FROM okta.user_factors")
+    connection.execute("INSERT INTO okta.user_factors VALUES ('user-2', 'factor-9')")
+    transforms_module.users_authentication_factors_count(connection)
+    assert _factor_counts(connection) == {"user-1": None, "user-2": 1}
+
+    # A run without any collected factors resets every count.
+    connection.execute("DROP TABLE okta.user_factors")
+    transforms_module.users_authentication_factors_count(connection)
+    assert _factor_counts(connection) == {"user-1": None, "user-2": None}
+
+
 def test_users_authentication_factors_count_without_collected_factors_stays_null() -> (
     None
 ):

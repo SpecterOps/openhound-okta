@@ -303,6 +303,16 @@ def test_factor_fetch_rate_limit_exhaustion_propagates() -> None:
         )
 
 
+def test_factor_writers_replace_the_shared_table() -> None:
+    """Both factor transformers snapshot user_factors per collection run."""
+    from openhound_okta.source import admin_group_member_factors, user_factors
+
+    claims = UserFactorClaims()
+
+    assert user_factors(None, claims).write_disposition == "replace"
+    assert admin_group_member_factors(None, claims).write_disposition == "replace"
+
+
 def test_factor_requests_use_a_dedicated_throttle_family() -> None:
     """Factor calls must not share the users listing's throttle budget."""
     from dlt.sources.helpers.rest_client.paginators import HeaderLinkPaginator
