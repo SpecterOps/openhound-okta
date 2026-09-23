@@ -70,6 +70,39 @@ If Okta rejects a bearer token with HTTP 401, the collector retries once for sta
 while preserving the current token for known non-token authorization failures. Classic SSWS API token authentication
 remains static.
 
+### API Service Integration client-secret configuration
+
+An Okta Integration Network (OIN) API Service Integration issues a client ID
+and client secret when it is installed in a customer organization. Configure
+those credentials in `.dlt/secrets.toml`:
+
+```toml
+[sources.source.okta.credentials]
+base_url = "https://mytenant.okta.com"
+client_id = "myclientid"
+client_secret = "<client-secret>"
+```
+
+For environment-only deployments, use the equivalent variables:
+
+```text
+SOURCES__OKTA__CREDENTIALS__BASE_URL=https://mytenant.okta.com
+SOURCES__OKTA__CREDENTIALS__CLIENT_ID=myclientid
+SOURCES__OKTA__CREDENTIALS__CLIENT_SECRET=<client-secret>
+```
+
+The client secret authenticates only the OAuth token request. The collector
+sends it with HTTP Basic authentication and does not include it in token form
+data, collection requests, logs, or telemetry. Okta displays an integration
+secret only when it is generated, so store it in the deployment's secret
+manager immediately. When credentials are rotated or replaced, update both
+values supplied by Okta and restart the collector before its next run.
+
+This authentication option is independent of collecting installed API Service
+Integrations as `Okta_ApiServiceIntegration` graph nodes. The same client-secret
+configuration performs the normal collection of every resource authorized by
+the integration's registered scopes.
+
 ## Rate-limit behavior
 
 The collector coordinates requests by Okta API endpoint family. It limits concurrent requests, observes

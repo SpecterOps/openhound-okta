@@ -88,7 +88,7 @@ from .models.saml import (
 )
 from .models.token import Token
 from .telemetry import NullTelemetryRecorder, Telemetry
-from .utils.auth import OktaAuth, OktaBearerAuth
+from .utils.auth import OktaAuth, OktaBearerAuth, client_secret_token_response
 from .utils.http import (
     DEFAULT_ENDPOINT_CONCURRENCY,
     DEFAULT_RATE_LIMIT_MAX_ELAPSED_SECONDS,
@@ -290,6 +290,42 @@ class OktaEncodedAppCredentials(OktaCredentials):
 
 
 @configspec
+class OktaClientSecretCredentials(OktaCredentials):
+    """Credentials issued for an installed Okta API Service Integration.
+
+    The client secret is used only to authenticate with Okta's organization
+    authorization server. It must not be sent in a request body or included in
+    logs, telemetry, or error messages.
+
+    Attributes:
+        base_url: Inherited base URL of the customer Okta organization.
+        client_id: Client ID generated when the integration is installed.
+        client_secret: Client secret generated when the integration is installed.
+    """
+
+    client_id: str = None
+    client_secret: str = None
+
+    def auth(self) -> str:
+        """Return the bearer-token authentication method identifier."""
+        return "app"
+
+    def fetch_token(self) -> Token:
+        """Exchange the installed integration credentials for an access token."""
+        return client_secret_token_response(
+            self.base_url,
+            self.client_id,
+            self.client_secret,
+            " ".join(OKTA_DEFAULT_SCOPE),
+        )
+
+    @property
+    def header(self) -> str:
+        """Return an authorization header generated from a fresh token."""
+        return f"Bearer {self.fetch_token().access_token}"
+
+
+@configspec
 class OktaTokenCredentials(OktaCredentials):
     token: str = None
 
@@ -303,10 +339,16 @@ class OktaTokenCredentials(OktaCredentials):
 
 def _request_auth(
     credentials: Union[
-        OktaAppCredentials, OktaEncodedAppCredentials, OktaTokenCredentials
+        OktaAppCredentials,
+        OktaEncodedAppCredentials,
+        OktaClientSecretCredentials,
+        OktaTokenCredentials,
     ],
 ):
-    if isinstance(credentials, (OktaAppCredentials, OktaEncodedAppCredentials)):
+    if isinstance(
+        credentials,
+        (OktaAppCredentials, OktaEncodedAppCredentials, OktaClientSecretCredentials),
+    ):
         return OktaBearerAuth(credentials.fetch_token)
     return APIKeyAuth(name="Authorization", api_key=credentials.header, location="header")
 
@@ -1567,7 +1609,10 @@ def api_services(ctx: SourceContext):
 @app.source(name="okta", max_table_nesting=0)
 def source(
     credentials: Union[
-        OktaAppCredentials, OktaEncodedAppCredentials, OktaTokenCredentials
+        OktaAppCredentials,
+        OktaEncodedAppCredentials,
+        OktaClientSecretCredentials,
+        OktaTokenCredentials,
     ] = dlt.secrets.value,
     application_users_page_size: int = APPLICATION_USERS_PAGE_SIZE,
     groups_page_size: int = GROUPS_PAGE_SIZE,
@@ -1584,7 +1629,8 @@ def source(
     """DLT source, defines Okta collection resources and transformers.
 
     Args:
-        credentials: Okta API credentials based on key path, encoded key or SSWS for authentication.
+        credentials: Okta API credentials based on a key path, encoded key,
+            API Service Integration client secret, or SSWS token.
         application_users_page_size: Users requested per application-users page.
         groups_page_size: Groups requested per expanded groups page.
         application_group_assignments_page_size: Groups requested per application page.
