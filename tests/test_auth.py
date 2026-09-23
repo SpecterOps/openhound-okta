@@ -1,4 +1,7 @@
 from base64 import b64encode
+import os
+import subprocess
+import sys
 from threading import Event, Lock, Thread
 
 import pytest
@@ -10,6 +13,7 @@ import openhound_okta.source as source_module
 from openhound_okta.models.token import Token
 from openhound_okta.source import (
     OktaAppCredentials,
+    OktaClientSecretCredentials,
     OktaEncodedAppCredentials,
     OktaTokenCredentials,
     _request_auth,
@@ -18,6 +22,7 @@ from openhound_okta.utils.auth import (
     DEFAULT_TOKEN_REQUEST_TIMEOUT_SECONDS,
     OktaAuth,
     OktaBearerAuth,
+    client_secret_token_response,
 )
 
 
@@ -128,6 +133,106 @@ def test_okta_auth_token_response_rejects_malformed_success_payload(monkeypatch)
         OktaAuth(private_key_string='{"kid":"kid-1"}').token_response(
             "https://example.okta.test",
             "client-assertion",
+            "okta.users.read",
+        )
+
+
+def test_client_secret_token_response_uses_http_basic_auth(monkeypatch):
+    requested: list[tuple[str, dict[str, object]]] = []
+    response = requests.Response()
+    response.status_code = 200
+    response._content = (
+        b'{"access_token":"token-1","token_type":"Bearer",'
+        b'"expires_in":3600,"scope":"okta.users.read"}'
+    )
+
+    def post(url: str, **kwargs):
+        requested.append((url, kwargs))
+        return response
+
+    monkeypatch.setattr("openhound_okta.utils.auth.requests.post", post)
+
+    token = client_secret_token_response(
+        "https://example.okta.test",
+        "client-1",
+        "secret-1",
+        "okta.users.read",
+    )
+
+    assert token == _token("token-1")
+    assert requested[0][0] == "https://example.okta.test/oauth2/v1/token"
+    assert requested[0][1]["data"] == {
+        "grant_type": "client_credentials",
+        "scope": "okta.users.read",
+    }
+    assert "secret-1" not in repr(requested[0][1]["data"])
+    assert requested[0][1]["timeout"] == DEFAULT_TOKEN_REQUEST_TIMEOUT_SECONDS
+
+    # Apply the auth handler to prove the prepared request receives exactly the
+    # Basic credentials Okta requires, without exposing them in the form data.
+    request = Request("POST", requested[0][0]).prepare()
+    requested[0][1]["auth"](request)
+    assert request.headers["Authorization"] == "Basic Y2xpZW50LTE6c2VjcmV0LTE="
+
+
+def test_client_secret_token_response_does_not_expose_secret_on_http_error(
+    monkeypatch,
+):
+    response = requests.Response()
+    response.status_code = 401
+    response.url = "https://example.okta.test/oauth2/v1/token"
+    response._content = b'{"error":"invalid_client"}'
+
+    def post(url: str, **kwargs):
+        # Apply the supplied auth handler so the failure exercises a realistic
+        # prepared request whose Authorization header contains the secret.
+        response.request = Request("POST", url, auth=kwargs["auth"]).prepare()
+        return response
+
+    monkeypatch.setattr("openhound_okta.utils.auth.requests.post", post)
+
+    with pytest.raises(requests.HTTPError) as error:
+        client_secret_token_response(
+            "https://example.okta.test",
+            "client-1",
+            "secret-that-must-not-leak",
+            "okta.users.read",
+        )
+
+    assert "secret-that-must-not-leak" not in str(error.value)
+    assert "secret-that-must-not-leak" not in repr(error.value)
+
+
+def test_client_secret_token_response_rejects_malformed_success_payload(monkeypatch):
+    response = requests.Response()
+    response.status_code = 200
+    response._content = b'{"access_token":"token-1"}'
+
+    monkeypatch.setattr(
+        "openhound_okta.utils.auth.requests.post",
+        lambda *args, **kwargs: response,
+    )
+
+    with pytest.raises(ValidationError):
+        client_secret_token_response(
+            "https://example.okta.test",
+            "client-1",
+            "secret-1",
+            "okta.users.read",
+        )
+
+
+def test_client_secret_token_response_propagates_timeout(monkeypatch):
+    def post(*args, **kwargs):
+        raise requests.Timeout("token endpoint unavailable")
+
+    monkeypatch.setattr("openhound_okta.utils.auth.requests.post", post)
+
+    with pytest.raises(requests.Timeout, match="token endpoint unavailable"):
+        client_secret_token_response(
+            "https://example.okta.test",
+            "client-1",
+            "secret-1",
             "okta.users.read",
         )
 
@@ -588,6 +693,41 @@ def test_app_credentials_fetch_full_token_metadata(
     ]
 
 
+def test_client_secret_credentials_fetch_full_token_metadata(monkeypatch):
+    calls: list[tuple[str, object]] = []
+
+    def fetch_token(base_url, client_id, client_secret, scope):
+        calls.append(
+            (
+                "fetch_token",
+                (base_url, client_id, client_secret, scope),
+            )
+        )
+        return _token("token-1")
+
+    monkeypatch.setattr(source_module, "client_secret_token_response", fetch_token)
+    credentials = OktaClientSecretCredentials(
+        base_url="https://example.okta.test",
+        client_id="client-1",
+        client_secret="secret-1",
+    )
+
+    token = credentials.fetch_token()
+
+    assert token == _token("token-1")
+    assert calls == [
+        (
+            "fetch_token",
+            (
+                "https://example.okta.test",
+                "client-1",
+                "secret-1",
+                " ".join(source_module.OKTA_DEFAULT_SCOPE),
+            ),
+        )
+    ]
+
+
 def test_request_auth_uses_lazy_refreshable_auth_for_app_credentials():
     credentials = OktaAppCredentials(
         base_url="https://example.okta.test",
@@ -598,6 +738,68 @@ def test_request_auth_uses_lazy_refreshable_auth_for_app_credentials():
     auth = _request_auth(credentials)
 
     assert isinstance(auth, OktaBearerAuth)
+
+
+def test_request_auth_uses_refreshable_auth_for_client_secret_credentials():
+    credentials = OktaClientSecretCredentials(
+        base_url="https://example.okta.test",
+        client_id="client-1",
+        client_secret="secret-1",
+    )
+
+    auth = _request_auth(credentials)
+
+    assert isinstance(auth, OktaBearerAuth)
+
+
+def test_source_resolves_client_secret_credentials_from_environment(tmp_path):
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("SOURCES__")
+    }
+    environment.update(
+        {
+            "RUNTIME__LOG_PATH": str(tmp_path / "logs"),
+            "SOURCES__OKTA__CREDENTIALS__BASE_URL": (
+                "https://example.okta.test"
+            ),
+            "SOURCES__OKTA__CREDENTIALS__CLIENT_ID": "client-1",
+            "SOURCES__OKTA__CREDENTIALS__CLIENT_SECRET": "secret-1",
+        }
+    )
+    probe = """
+import openhound_okta.source as source_module
+
+resolved_credentials = []
+source_module._request_auth = lambda credentials: resolved_credentials.append(
+    credentials
+)
+source_module.source()
+credentials = resolved_credentials[0]
+print(type(credentials).__name__)
+print(credentials.base_url)
+print(credentials.client_id)
+print(credentials.client_secret)
+"""
+
+    # DLT records its project directory during import. A fresh process makes
+    # this an environment-only resolution test and matches collector startup.
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+
+    assert result.stdout.splitlines() == [
+        "OktaClientSecretCredentials",
+        "https://example.okta.test",
+        "client-1",
+        "secret-1",
+    ]
 
 
 def test_request_auth_keeps_static_header_auth_for_ssws_tokens():
