@@ -12,7 +12,7 @@ from threading import Lock
 import requests
 from joserfc import jwt
 from joserfc.jwk import RSAKey
-from requests.auth import AuthBase
+from requests.auth import AuthBase, HTTPBasicAuth
 from requests.models import PreparedRequest
 
 from ..models.token import Token
@@ -42,6 +42,55 @@ class UnauthorizedDecision:
     retry: bool
     invalidated: bool
     reason: str
+
+
+def client_secret_token_response(
+    base_url: str,
+    client_id: str,
+    client_secret: str,
+    scope: str,
+) -> Token:
+    """Request an Okta access token with API Service Integration credentials.
+
+    Okta requires OIN API Service Integrations to authenticate to the
+    organization authorization server with HTTP Basic authentication. Keeping
+    the secret in the authentication handler prevents it from being included
+    in the form body, URL, logs, or validation errors.
+
+    Args:
+        base_url: Base URL of the customer Okta organization.
+        client_id: Client ID generated when the integration is installed.
+        client_secret: Client secret generated when the integration is installed.
+        scope: Space-separated Okta API scopes requested for collection.
+
+    Returns:
+        The access token and its expiration metadata.
+
+    Raises:
+        requests.HTTPError: The token endpoint rejects the request.
+        requests.RequestException: The token endpoint cannot be reached.
+        pydantic.ValidationError: The token endpoint returns an invalid payload.
+    """
+    headers = {
+        "accept": "application/json",
+        "content-type": "application/x-www-form-urlencoded",
+        "cache-control": "no-cache",
+    }
+    data = {
+        "grant_type": "client_credentials",
+        "scope": scope,
+    }
+    response = requests.post(
+        f"{base_url}/oauth2/v1/token",
+        headers=headers,
+        data=data,
+        # HTTPBasicAuth adds the secret only while preparing the request rather
+        # than copying it into application-owned dictionaries or diagnostics.
+        auth=HTTPBasicAuth(client_id, client_secret),
+        timeout=DEFAULT_TOKEN_REQUEST_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    return Token.model_validate(response.json())
 
 
 class OktaBearerAuth(AuthBase):

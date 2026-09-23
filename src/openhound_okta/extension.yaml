@@ -22,6 +22,9 @@ credentials:
   - name: client_id
     description: Okta app registration client ID
     required: false
+  - name: client_secret
+    description: Okta API Service Integration client secret
+    required: false
   - name: private_key_path
     description: Path to Okta private key
     required: false
