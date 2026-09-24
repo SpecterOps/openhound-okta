@@ -130,7 +130,6 @@ def test_transforms_creates_users_index_before_derived_work(monkeypatch) -> None
         "non_admin_groups",
         "non_admin_apps",
         "ensure_users_id_index",
-        "users_authentication_factors_count",
     ):
         monkeypatch.setattr(
             transforms_module,
@@ -147,93 +146,4 @@ def test_transforms_creates_users_index_before_derived_work(monkeypatch) -> None
         "non_admin_users",
         "non_admin_groups",
         "non_admin_apps",
-        "users_authentication_factors_count",
     ]
-
-
-def _factor_counts(
-    connection: duckdb.DuckDBPyConnection, schema: str = "okta"
-) -> dict[str, int | None]:
-    """Read the materialized authentication_factors_count column keyed by user ID.
-
-    Args:
-        connection: DuckDB connection holding the users table.
-        schema: Schema of the users table.
-
-    Returns:
-        Mapping of user ID to the authentication_factors_count column value.
-    """
-    rows = connection.execute(
-        f'SELECT id, authentication_factors_count FROM "{schema}".users'
-    ).fetchall()
-    return dict(rows)
-
-
-def test_users_authentication_factors_count_materializes_null_zero_and_counts() -> None:
-    """The transform maps factor rows to N, scope markers to 0, absence to NULL."""
-    connection = duckdb.connect()
-    _create_users_table(connection)
-    connection.execute(
-        "INSERT INTO okta.users VALUES "
-        "('user-1', 'ACTIVE', NULL), ('user-2', 'ACTIVE', NULL), "
-        "('user-3', 'ACTIVE', NULL)"
-    )
-    connection.execute("CREATE TABLE okta.user_factors (user_id VARCHAR, id VARCHAR)")
-    connection.execute(
-        "INSERT INTO okta.user_factors VALUES "
-        "('user-1', 'factor-1'), ('user-1', 'factor-2'), ('user-1', 'factor-3'), "
-        "('user-2', NULL)"
-    )
-
-    # Mirror the production transform order: the users(id) index exists
-    # before the factor counts are materialized.
-    ensure_users_id_index(connection)
-    transforms_module.users_authentication_factors_count(connection)
-
-    assert _factor_counts(connection) == {
-        "user-1": 3,
-        # Scope marker only: collected privileged user without enrolled factors.
-        "user-2": 0,
-        # Never collected: unprivileged user.
-        "user-3": None,
-    }
-
-
-def test_users_authentication_factors_count_rerun_clears_stale_counts() -> None:
-    """A repeated preprocessing run resets counts for users no longer covered."""
-    connection = duckdb.connect()
-    _create_users_table(connection)
-    connection.execute(
-        "INSERT INTO okta.users VALUES ('user-1', 'ACTIVE', NULL), "
-        "('user-2', 'ACTIVE', NULL)"
-    )
-    connection.execute("CREATE TABLE okta.user_factors (user_id VARCHAR, id VARCHAR)")
-    connection.execute(
-        "INSERT INTO okta.user_factors VALUES ('user-1', 'factor-1'), ('user-2', NULL)"
-    )
-    transforms_module.users_authentication_factors_count(connection)
-    assert _factor_counts(connection) == {"user-1": 1, "user-2": 0}
-
-    # The next collection covers only user-2, now with one enrolled factor.
-    connection.execute("DELETE FROM okta.user_factors")
-    connection.execute("INSERT INTO okta.user_factors VALUES ('user-2', 'factor-9')")
-    transforms_module.users_authentication_factors_count(connection)
-    assert _factor_counts(connection) == {"user-1": None, "user-2": 1}
-
-    # A run without any collected factors resets every count.
-    connection.execute("DROP TABLE okta.user_factors")
-    transforms_module.users_authentication_factors_count(connection)
-    assert _factor_counts(connection) == {"user-1": None, "user-2": None}
-
-
-def test_users_authentication_factors_count_without_collected_factors_stays_null() -> (
-    None
-):
-    """Without a user_factors table the column is added but stays NULL."""
-    connection = duckdb.connect()
-    _create_users_table(connection)
-    connection.execute("INSERT INTO okta.users VALUES ('user-1', 'ACTIVE', NULL)")
-
-    transforms_module.users_authentication_factors_count(connection)
-
-    assert _factor_counts(connection) == {"user-1": None}

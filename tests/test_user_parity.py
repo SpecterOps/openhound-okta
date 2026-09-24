@@ -18,10 +18,30 @@ class StubLookup:
 
     Attributes:
         _has_role_assignments: Canned answer for has_role_assignments().
+        _authentication_factors_count: Canned answer for
+            user_authentication_factors_count().
     """
 
-    def __init__(self, *, has_role_assignments: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        has_role_assignments: bool = False,
+        authentication_factors_count: int | None = None,
+    ) -> None:
         self._has_role_assignments = has_role_assignments
+        self._authentication_factors_count = authentication_factors_count
+
+    def user_authentication_factors_count(self, user_id: str) -> int | None:
+        """Return the canned factor count for the test user.
+
+        Args:
+            user_id: Must be the test user "user-1".
+
+        Returns:
+            The authentication_factors_count value passed to the constructor.
+        """
+        assert user_id == "user-1"
+        return self._authentication_factors_count
 
     def org_id(self) -> str:
         """Return a fixed organization ID.
@@ -56,8 +76,8 @@ def make_user(
 
     Args:
         has_role_assignments: Canned lookup answer for the user's role flag.
-        authentication_factors_count: Preprocessed factor count carried on the user
-            row (None means the user's factors were never collected).
+        authentication_factors_count: Canned lookup answer for the
+            preprocessed factor count (None means never collected).
         **overrides: Raw API fields overriding the default user payload.
 
     Returns:
@@ -68,7 +88,6 @@ def make_user(
             "id": "user-1",
             "created": "2026-01-01T00:00:00Z",
             "status": "ACTIVE",
-            "authentication_factors_count": authentication_factors_count,
             "profile": {
                 "login": "alice@example.com",
                 "displayName": "Alice Example",
@@ -79,7 +98,10 @@ def make_user(
             **overrides,
         }
     )
-    user._lookup = StubLookup(has_role_assignments=has_role_assignments)
+    user._lookup = StubLookup(
+        has_role_assignments=has_role_assignments,
+        authentication_factors_count=authentication_factors_count,
+    )
     user._extras = {"tenant": "example.okta.com"}
     return user
 
@@ -114,6 +136,34 @@ def test_user_node_falls_back_to_login_when_display_name_is_missing() -> None:
     user = make_user(profile={"login": "alice@example.com"})
 
     assert user.as_node.properties.displayname == "alice@example.com"
+
+
+def test_user_lookup_distinguishes_uncollected_from_factorless_users() -> None:
+    """The lookup maps factor rows to N, scope markers to 0, absence to None."""
+    import duckdb
+
+    from openhound_okta.lookup import OktaLookup
+
+    con = duckdb.connect()
+    con.execute("CREATE SCHEMA okta")
+    con.execute("CREATE TABLE okta.user_factors (user_id VARCHAR, id VARCHAR)")
+    con.execute(
+        "INSERT INTO okta.user_factors VALUES "
+        "('user-1', 'factor-1'), ('user-1', 'factor-2'), ('user-1', 'factor-3'), "
+        "('user-2', NULL)"
+    )
+
+    lookup = OktaLookup(con)
+
+    assert lookup.user_authentication_factors_count("user-1") == 3
+    # Scope marker only: collected privileged user without enrolled factors.
+    assert lookup.user_authentication_factors_count("user-2") == 0
+    # Never collected: unprivileged user.
+    assert lookup.user_authentication_factors_count("user-3") is None
+
+    # Without a user_factors table every user reads as "not collected".
+    empty_lookup = OktaLookup(duckdb.connect())
+    assert empty_lookup.user_authentication_factors_count("user-1") is None
 
 
 class FactorStubPool:
@@ -426,3 +476,203 @@ def test_chained_factor_extraction_paginates_each_member_list_once() -> None:
         "user-1": "factor-1",
         "user-2": None,  # scope marker: collected, but no enrolled factors
     }
+
+
+def make_okta_user(user_id: str) -> dict[str, object]:
+    """Build a minimal valid user row for the users listing.
+
+    Args:
+        user_id: Okta user ID.
+
+    Returns:
+        A user row dict satisfying the User model validation.
+    """
+    return {
+        "id": user_id,
+        "created": "2026-01-01T00:00:00Z",
+        "status": "ACTIVE",
+        "profile": {"login": f"{user_id}@example.com"},
+    }
+
+
+class PipelineStubPool:
+    """ClientPool stand-in for full pipeline runs of the factor streams.
+
+    Attributes:
+        paths: Every paginated path, in call order, for request-count asserts.
+        _users: Rows served for the users listing.
+        _assignees: Rows served for the privileged assignee inventory listing.
+        _groups: Rows served for the expanded groups listing.
+        _members_by_group: Member rows served per group ID.
+        _factors_by_user: Factor rows served per user ID.
+    """
+
+    def __init__(
+        self,
+        users: list[dict[str, object]],
+        assignees: list[dict[str, object]],
+        groups: list[dict[str, object]],
+        members_by_group: dict[str, list[dict[str, object]]],
+        factors_by_user: dict[str, list[dict[str, object]]],
+    ) -> None:
+        self.paths: list[str] = []
+        self._users = users
+        self._assignees = assignees
+        self._groups = groups
+        self._members_by_group = members_by_group
+        self._factors_by_user = factors_by_user
+
+    def paginate(self, path: str, **kwargs: object) -> list[list[dict[str, object]]]:
+        """Return the canned single page matching the requested path.
+
+        Args:
+            path: Okta API path (users, assignees, groups, members, factors).
+            **kwargs: Ignored pagination options accepted for compatibility.
+
+        Returns:
+            A one-page list of rows for the addressed listing.
+        """
+        self.paths.append(path)
+        if path == "/api/v1/users":
+            return [self._users]
+        if path == "/api/v1/iam/assignees/users":
+            return [self._assignees]
+        if path.startswith("/api/v1/groups?"):
+            return [self._groups]
+        if path.endswith("/factors"):
+            return [self._factors_by_user.get(path.split("/")[-2], [])]
+        return [self._members_by_group.get(path.split("/")[-2], [])]
+
+
+def test_factor_pipeline_loads_one_deduplicated_replaced_snapshot(tmp_path) -> None:
+    """Both replace writers merge into one deduped user_factors snapshot.
+
+    Runs the real transformers through a dlt pipeline into DuckDB, twice:
+    the first run asserts rows from both streams land in one table with a
+    multi-path super admin fetched exactly once, and that the preprocessing
+    transform materializes the NULL/0/N counts; the second run asserts the
+    snapshot is replaced rather than appended to.
+
+    Args:
+        tmp_path: Pytest fixture providing an isolated working directory.
+    """
+    import dlt
+    import duckdb
+
+    from openhound_okta.lookup import OktaLookup
+    from openhound_okta.source import (
+        admin_group_member_factors,
+        group_memberships,
+        groups,
+        privileged_users,
+        user_factors,
+        users,
+    )
+
+    db_path = str(tmp_path / "collected.duckdb")
+
+    def run_collection(
+        assignees: list[dict[str, object]],
+        factors_by_user: dict[str, list[dict[str, object]]],
+    ) -> PipelineStubPool:
+        """Run one full collection of the factor-related resources.
+
+        Args:
+            assignees: Privileged assignee rows for this run.
+            factors_by_user: Factor rows per user for this run.
+
+        Returns:
+            The stub pool, for request-count assertions.
+        """
+        pool = PipelineStubPool(
+            users=[make_okta_user(f"user-{i}") for i in range(1, 6)],
+            assignees=assignees,
+            groups=[
+                make_group_item("admin-group", admin=True, users_count=2),
+                make_group_item("plain-group", admin=False, users_count=1),
+            ],
+            members_by_group={
+                "admin-group": [make_member("user-1"), make_member("user-3")],
+                "plain-group": [make_member("user-4")],
+            },
+            factors_by_user=factors_by_user,
+        )
+        ctx = SourceContext(
+            pool=cast(ClientPool, pool), tenant_domain="example.okta.com"
+        )
+        claims = UserFactorClaims()
+        memberships_resource = groups(ctx) | group_memberships(ctx)
+        pipeline = dlt.pipeline(
+            pipeline_name="factor_snapshot_test",
+            pipelines_dir=str(tmp_path / "dlt"),
+            destination=dlt.destinations.duckdb(db_path),
+            dataset_name="okta",
+        )
+        pipeline.run(
+            [
+                users(ctx),
+                privileged_users(ctx) | user_factors(ctx, claims),
+                memberships_resource | admin_group_member_factors(ctx, claims),
+            ]
+        )
+        return pool
+
+    def factor_table() -> dict[str, list[str | None]]:
+        """Read the loaded user_factors snapshot grouped by user ID.
+
+        Returns:
+            Mapping of user ID to its sorted factor IDs (None = scope marker).
+        """
+        con = duckdb.connect(db_path)
+        rows = con.execute(
+            "SELECT user_id, id FROM okta.user_factors ORDER BY user_id, id"
+        ).fetchall()
+        con.close()
+        table: dict[str, list[str | None]] = {}
+        for user_id, factor_id in rows:
+            table.setdefault(user_id, []).append(factor_id)
+        return table
+
+    # user-1 is a multi-path super admin: direct assignee AND admin-group
+    # member. user-2 is direct only, user-3 admin-group only (no factors),
+    # user-4 is only in a non-admin group, user-5 is unprivileged.
+    pool = run_collection(
+        assignees=[{"id": "user-1"}, {"id": "user-2"}],
+        factors_by_user={
+            "user-1": [{"id": "factor-1"}, {"id": "factor-2"}],
+            "user-2": [{"id": "factor-3"}],
+        },
+    )
+
+    assert pool.paths.count("/api/v1/users/user-1/factors") == 1
+    assert factor_table() == {
+        "user-1": ["factor-1", "factor-2"],
+        "user-2": ["factor-3"],
+        "user-3": [None],  # scope marker: covered, no enrolled factors
+    }
+
+    con = duckdb.connect(db_path)
+    # Convert rehydrates models from the collected JSONL, so the counts must
+    # be reachable through the lookup, which is what as_node consults.
+    lookup = OktaLookup(con)
+    counts = {
+        user_id: lookup.user_authentication_factors_count(user_id)
+        for user_id in ("user-1", "user-2", "user-3", "user-4", "user-5")
+    }
+    con.close()
+    assert counts == {
+        "user-1": 2,
+        "user-2": 1,
+        "user-3": 0,
+        "user-4": None,
+        "user-5": None,
+    }
+
+    # A second collection covers only user-1 with a single factor: the
+    # replace disposition must rebuild the snapshot, not append to it.
+    run_collection(
+        assignees=[{"id": "user-1"}],
+        factors_by_user={"user-1": [{"id": "factor-9"}]},
+    )
+
+    assert factor_table() == {"user-1": ["factor-9"], "user-3": [None]}

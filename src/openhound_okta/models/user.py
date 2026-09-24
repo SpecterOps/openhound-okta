@@ -122,10 +122,6 @@ class User(BaseAsset):
     status: str
     realm_id: str | None = Field(default=None, alias="realmId")
     credentials: Credentials | None = None
-    # Not an Okta API field: materialized on the users table by the
-    # users_authentication_factors_count preprocessing transform (None means the
-    # user's factors were never collected).
-    authentication_factors_count: int | None = None
 
     @property
     def enabled(self) -> bool:
@@ -146,7 +142,9 @@ class User(BaseAsset):
                 okta_domain=self._extras["tenant"],
                 enabled=self.enabled,
                 has_role_assignments=self._lookup.has_role_assignments(self.id, "user"),
-                authentication_factors=self.authentication_factors_count,
+                authentication_factors=self._lookup.user_authentication_factors_count(
+                    self.id
+                ),
                 login=self.profile.login,
                 email=self.profile.email,
                 first_name=self.profile.first_name,

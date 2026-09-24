@@ -295,6 +295,33 @@ class OktaLookup(LookupManager):
         return bool(res)
 
     @lru_cache
+    def user_authentication_factors_count(self, user_id: str) -> int | None:
+        """Enrolled factor count, or None when factors were not collected.
+
+        The collector writes a scope-marker row (NULL factor id) for every
+        privileged user it covered, so an absent user means "not collected"
+        rather than "no factors".
+
+        Args:
+            user_id: Okta user ID to look up.
+
+        Returns:
+            Number of enrolled factors (0 for a covered user without factors),
+            or None when the user's factors were never collected.
+        """
+        if not self._table_exists("user_factors"):
+            return None
+
+        row = self.client.execute(
+            f"""SELECT COUNT(*), COUNT(id) FROM {self.schema}.user_factors
+                WHERE user_id = ?""",
+            [user_id],
+        ).fetchone()
+        if not row or int(row[0]) == 0:
+            return None
+        return int(row[1])
+
+    @lru_cache
     def application_ids_by_name(self, app_name: str):
         res = self._find_all_objects(
             f"""SELECT id FROM {self.schema}.applications WHERE name = ?""",

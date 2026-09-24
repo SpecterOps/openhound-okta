@@ -489,8 +489,7 @@ def users(ctx: SourceContext):
 #   NULL - user not covered (not privileged, factors never fetched)
 #   0    - user covered, no enrolled factors
 #   N    - user covered, N enrolled factors
-# The counts are materialized onto the users table by the
-# users_authentication_factors_count preprocessing transform (see transforms.py and
+# (see OktaLookup.user_authentication_factors_count and
 # descriptions/nodes/Okta_User.md).
 class UserFactorClaims:
     """Grants each user's factor fetch to exactly one of the parallel streams.
