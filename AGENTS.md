@@ -1,60 +1,108 @@
-# AGENTS.md
+# AGENTS.md - Agent Guidance
 
-Guidance for coding agents working in this repository.
+This file should always be used as the entrypoint for agents working in this repository. Keep it generic and concise.
+Project-specific standards live under `.agents/standards/` and task-specific guidance lives in the relevant skill files
+under `.agents/skills/`.
 
-## What this is
+## Before Editing
 
-`openhound-okta` is an Okta collector extension for OpenHound (SpecterOps' framework for building
-BloodHound OpenGraph collectors). It collects Okta resources over the Okta API and converts them into
-BloodHound-compatible graph nodes and edges. It is a Python project (see `pyproject.toml`) built on the [DLT](https://dlthub.com/docs/intro) library.
+- Read `CONTRIBUTING.md` for development setup, commands, and this repository's conventions.
+- Read `.agents/standards/openhound.md` before making OpenHound collector changes.
+- Read `.agents/standards/workflow.md` before developing a new collector or making broad collector changes.
+- Load the `openhound` skill from `.agents/skills/openhound/` for task-specific workflows.
 
-The package registers itself through the `openhound.sources` entry point (`openhound_okta.main:app`);
-the `openhound` CLI (and `src/main.py`) drive it.
+## Task Skill
 
-## Commands
+Use `openhound` for all OpenHound collector work. The skill routes tasks to action-specific references.
 
-```bash
-uv sync --group dev        # install dependencies (just sync)
-just lint                  # ruff check .
-just typecheck             # mypy src
-just test-all              # uv run pytest
+| Task                                                                                   | Skill       | Reference |
+|----------------------------------------------------------------------------------------|-------------|---|
+| Plan a new collector from target service requirements or API docs                      | `openhound` | `.agents/skills/openhound/references/plan-collector.md` |
+| Add or modify a collected asset/model                                                  | `openhound` | `.agents/skills/openhound/references/add-asset.md` |
+| Implement API collection resources, transformers, auth and DLT source wiring           | `openhound` | `.agents/skills/openhound/references/source-collection.md` |
+| Define base graph node/edge dataclasses and ID generation behavior                     | `openhound` | `.agents/skills/openhound/references/graph-schema.md` |
+| Add DuckDB transforms or lookup methods                                                | `openhound` | `.agents/skills/openhound/references/preproc-lookup.md` |
+| Wire phase registration (collect, preproc, convert), metadata, or package entry points | `openhound` | `.agents/skills/openhound/references/register-extension.md` |
+| Validate a collector before finishing                                                  | `openhound` | `.agents/skills/openhound/references/validate-extension.md` |
+
+## General Rules
+
+Behavioral guidelines. Merge with project-specific instructions as needed.
+
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+### 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+### 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+### 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+### 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
 ```
 
-Pipeline stages:
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
-```bash
-just collect      # collect Okta data into ./output (needs .dlt/secrets.toml credentials)
-just preprocess   # load collected data into DuckDB tables + derived tables
-just convert      # emit OpenGraph nodes/edges into ./output/graph/okta
-just db           # open lookup.duckdb in the DuckDB UI
-```
+### 5. Protect User State
 
-After cloning, initialize the submodule: `git submodule update --init` (docs/og-docs-automation),
-then `just skills` installs the shared documentation agent skills.
+**Do not disturb the user's local environment or unrelated work.**
 
-## Architecture
+- Use an isolated uv virtual environment outside the repository for validation commands, for example `UV_PROJECT_ENVIRONMENT=/tmp/openhound-venv uv run pytest`.
+- Do not create, remove, rebuild, or modify the repository-local `.venv` unless explicitly asked.
+- Do not revert, rewrite, or clean up unrelated worktree changes.
+- Do not remove files or code that are outside the task scope unless they are made obsolete by your own changes.
+- If a validation command would alter user state or require credentials/external services, report that instead of forcing it.
 
-Three-stage pipeline driven by decorators on the OpenHound `app` object created in
-`src/openhound_okta/main.py`:
+---
 
-1. **Collect** (`@app.collect`, [source.py](src/openhound_okta/source.py)) — DLT resources and
-   transformers, one per Okta endpoint family (`@app.resource` / `@app.transformer`). `SourceContext`
-   bundles a `ClientPool` of `OktaRESTClient`s, the tenant domain, telemetry, and page-size settings;
-   credentials are resolved separately in `source()` and used to construct the pool. Rows are
-   validated pydantic models and written to disk by DLT.
-2. **Preprocess** (`@app.preproc`, [transforms.py](src/openhound_okta/transforms.py)) — loads collected
-   resources into DuckDB tables (`okta` schema; the resource→table map is
-   `preprocessing_resources()` in main.py) and builds derived tables and indices.
-3. **Convert** (`@app.convert`, models + [lookup.py](src/openhound_okta/lookup.py)) — re-instantiates
-   models from the DuckDB rows; each model's `as_node` / `edges` properties emit OpenGraph output.
-   `OktaLookup` answers cross-resource queries against DuckDB during conversion and is available to
-   models as `self._lookup`.
-
-## Conventions
-
-- Use type hints to annotate new functions, methods, properties, variables, constants, etc.
-- All modules, classes, methods, OpenHound assets, DLT resources, and transformers should have concise docstrings, including private ones.
-- Comments should explain why code is shaped a certain way, not repeat what the next line does. Prefer a named helper over a long explanatory comment when the logic is reused.
-- PR branch names must match `^(fix|patch|chore|feature|minor|major)/<description>` (CI enforces).
-- Versioning is git-tag based (hatch-vcs); merging a PR that touches `src/`, `pyproject.toml`,
-  `uv.lock`, or `README.md` triggers the release workflow. Do not hand-edit a version number.
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and
+clarifying questions come before implementation rather than after mistakes.

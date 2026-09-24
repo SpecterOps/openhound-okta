@@ -36,11 +36,12 @@ If you already cloned without submodules, run `git submodule update --init`.
 
 ### 3. Install agent skills
 
-If you use a coding agent (Claude Code or Codex), install the shared documentation
-skills from the `og-docs-automation` submodule:
+If you use a coding agent (Claude Code or Codex), install the shared agent skills
+(the documentation skills from `og-docs-automation` and the skills from the
+OpenHound template, both fetched from GitHub):
 
 ```bash
-npx skills add ./docs/og-docs-automation/skills --skill '*' --agent codex claude-code --project --yes
+just skills
 ```
 
 ### 4. Install Python dependencies
@@ -89,3 +90,14 @@ Open the local `lookup.duckdb` database in the DuckDB UI:
 ```bash
 duckdb -ui lookup.duckdb
 ```
+
+## Conventions
+
+- Use type hints to annotate new functions, methods, properties, variables, constants, etc.
+- All modules, classes, methods, OpenHound assets, DLT resources, and transformers should have
+  concise docstrings, including private ones.
+- Comments should explain why code is shaped a certain way, not repeat what the next line does.
+  Prefer a named helper over a long explanatory comment when the logic is reused.
+- PR branch names must match `^(fix|patch|chore|feature|minor|major)/<description>` (CI enforces).
+- Versioning is git-tag based (hatch-vcs); merging a PR that touches `src/`, `pyproject.toml`,
+  `uv.lock`, or `README.md` triggers the release workflow. Do not hand-edit a version number.
