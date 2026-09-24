@@ -206,7 +206,11 @@ class Group(BaseAsset):
 
     @property
     def _group_pull_edge(self):
-        if self.source and self.source.id and self._lookup.application_by_id(self.source.id):
+        if (
+            self.source
+            and self.source.id
+            and self._lookup.application_by_id(self.source.id)
+        ):
             yield Edge(
                 kind=ek.GROUP_PULL,
                 start=OktaOwnedEdgePath(value=self.source.id, match_by="id"),

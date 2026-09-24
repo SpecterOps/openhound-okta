@@ -36,9 +36,7 @@ def parse_saml_group_eligibility_mode(value: object) -> str:
     """Return one supported producer mode, rejecting accidental cutover values."""
 
     if not isinstance(value, str) or value not in SAML_GROUP_ELIGIBILITY_MODES:
-        raise ValueError(
-            "saml_group_eligibility_mode must be expanded or shadow"
-        )
+        raise ValueError("saml_group_eligibility_mode must be expanded or shadow")
     return value
 
 
@@ -81,7 +79,9 @@ def canonical_group_assignment_policy_identity(group_ids: tuple[str, ...]) -> st
 
     operands = tuple(sorted(set(group_ids)))
     if not operands:
-        raise ValueError("SAML group eligibility requires at least one group assignment")
+        raise ValueError(
+            "SAML group eligibility requires at least one group assignment"
+        )
     selector = "single" if len(operands) == 1 else "any_of"
     return f"{selector}:" + ",".join(
         f"positive_set:{group_id}" for group_id in operands

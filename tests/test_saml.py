@@ -2193,8 +2193,12 @@ def test_saml_trusted_issuer_is_shared_by_entity_id_without_scalar_idp_owner():
     assert second_service_provider["issuer_id"] == expected_issuer_id
 
     first_edges = list(SamlServiceProvider.model_validate(first_service_provider).edges)
-    second_edges = list(SamlServiceProvider.model_validate(second_service_provider).edges)
-    first_trust = next(edge for edge in first_edges if edge.kind == ek.SAML_TRUSTS_ISSUER)
+    second_edges = list(
+        SamlServiceProvider.model_validate(second_service_provider).edges
+    )
+    first_trust = next(
+        edge for edge in first_edges if edge.kind == ek.SAML_TRUSTS_ISSUER
+    )
     second_trust = next(
         edge for edge in second_edges if edge.kind == ek.SAML_TRUSTS_ISSUER
     )
@@ -2240,21 +2244,15 @@ def test_saml_trusted_issuer_preserves_source_whitespace_in_identity():
 
     exact_row = saml_trusted_issuer_row(exact_idp, TEST_TENANT_DOMAIN)
     padded_row = saml_trusted_issuer_row(padded_idp, TEST_TENANT_DOMAIN)
-    padded_service_provider = saml_service_provider_row(
-        padded_idp, TEST_TENANT_DOMAIN
-    )
+    padded_service_provider = saml_service_provider_row(padded_idp, TEST_TENANT_DOMAIN)
 
     assert exact_row is not None
     assert padded_row is not None
     assert padded_service_provider is not None
     assert exact_row["entity_id"] == exact_issuer
     assert padded_row["entity_id"] == padded_issuer
-    assert exact_row["id"] == saml_trusted_issuer_id(
-        exact_issuer, TEST_TENANT_DOMAIN
-    )
-    assert padded_row["id"] == saml_trusted_issuer_id(
-        padded_issuer, TEST_TENANT_DOMAIN
-    )
+    assert exact_row["id"] == saml_trusted_issuer_id(exact_issuer, TEST_TENANT_DOMAIN)
+    assert padded_row["id"] == saml_trusted_issuer_id(padded_issuer, TEST_TENANT_DOMAIN)
     assert exact_row["id"] != padded_row["id"]
     assert padded_service_provider["issuer_id"] == padded_row["id"]
 

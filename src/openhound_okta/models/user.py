@@ -152,9 +152,7 @@ class User(BaseAsset):
             displayname=display_name,
             okta_domain=self._extras["tenant"],
             enabled=self.enabled,
-            has_role_assignments=self._lookup.has_role_assignments(
-                self.id, "user"
-            ),
+            has_role_assignments=self._lookup.has_role_assignments(self.id, "user"),
             authentication_factors=self._lookup.user_authentication_factors_count(
                 self.id
             ),
