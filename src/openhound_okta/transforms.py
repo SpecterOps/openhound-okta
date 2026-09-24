@@ -274,26 +274,37 @@ def create_saml_eligibility_preflight(
             FROM group_coverage
             GROUP BY app_id
         ),
+        user_inventory AS (
+            SELECT
+                id,
+                count(*) AS user_row_count,
+                min(status) AS status
+            FROM {schema}.users
+            GROUP BY id
+        ),
         predicted_members AS (
             SELECT DISTINCT
                 assignments.app_id,
                 group_memberships.id AS user_id,
-                users.status AS user_status
+                user_inventory.status AS user_status,
+                user_inventory.user_row_count
             FROM assignments
             JOIN {schema}.group_memberships AS group_memberships
                 ON group_memberships.group_id = assignments.group_id
-            LEFT JOIN {schema}.users AS users ON users.id = group_memberships.id
+            LEFT JOIN user_inventory
+                ON user_inventory.id = group_memberships.id
         ),
         reachability AS (
             SELECT
                 app_id,
-                bool_and(COALESCE(user_status IN (
+                bool_and(COALESCE(user_row_count = 1 AND user_status IN (
                     'ACTIVE', 'PROVISIONED', 'PASSWORD_EXPIRED', 'RECOVERY',
                     'LOCKED_OUT', 'SUSPENDED', 'DEPROVISIONED', 'STAGED'
                 ), FALSE)) AS reachability_complete,
                 sum(
                     CASE
-                        WHEN user_status NOT IN (
+                        WHEN user_row_count IS NULL
+                            OR user_status NOT IN (
                             'ACTIVE', 'PROVISIONED', 'PASSWORD_EXPIRED', 'RECOVERY',
                             'LOCKED_OUT', 'SUSPENDED', 'DEPROVISIONED', 'STAGED'
                         ) OR user_status IS NULL
@@ -301,6 +312,8 @@ def create_saml_eligibility_preflight(
                         ELSE 0
                     END
                 ) AS unknown_or_missing_user_count,
+                count(*) FILTER (WHERE user_row_count > 1)
+                    AS duplicate_canonical_user_count,
                 count(*) FILTER (
                     WHERE user_status IN (
                         'ACTIVE', 'PROVISIONED', 'PASSWORD_EXPIRED', 'RECOVERY'
@@ -332,10 +345,11 @@ def create_saml_eligibility_preflight(
                 observed_group_rows.user_id,
                 observed_group_rows.application_user_status,
                 observed_group_rows.application_user_row_count,
-                users.status AS user_status
+                user_inventory.status AS user_status,
+                user_inventory.user_row_count
             FROM observed_group_rows
-            LEFT JOIN {schema}.users AS users
-                ON users.id = observed_group_rows.user_id
+            LEFT JOIN user_inventory
+                ON user_inventory.id = observed_group_rows.user_id
         ),
         observed_effective AS (
             SELECT
@@ -356,7 +370,9 @@ def create_saml_eligibility_preflight(
                 ), '')) AS observed_eligible_user_digest,
                 sum(
                     CASE
-                        WHEN application_user_status IS NULL OR user_status IS NULL
+                        WHEN application_user_status IS NULL
+                            OR user_row_count IS DISTINCT FROM 1
+                            OR user_status IS NULL
                         THEN 1
                         ELSE 0
                     END
@@ -394,7 +410,10 @@ def create_saml_eligibility_preflight(
                 ) AS unexpected_enabled_group_assignment_count,
                 sum(CASE
                     WHEN observed_group_users.user_id IS NOT NULL
-                    AND observed_group_users.user_status IS NULL
+                    AND (
+                        observed_group_users.user_row_count IS DISTINCT FROM 1
+                        OR observed_group_users.user_status IS NULL
+                    )
                     THEN 1 ELSE 0 END
                 ) AS unresolved_observed_user_count,
                 sum(CASE
@@ -551,6 +570,8 @@ def create_saml_eligibility_preflight(
                 AS membership_reconciliation_failure_count,
             COALESCE(reachability.unknown_or_missing_user_count, 0)
                 AS unknown_or_missing_user_count,
+            COALESCE(reachability.duplicate_canonical_user_count, 0)
+                AS duplicate_canonical_user_count,
             COALESCE(exclusion_reconciliation.unresolved_observed_user_count, 0)
                 AS unresolved_observed_user_count,
             COALESCE(exclusion_reconciliation.missing_or_duplicate_group_assignment_count, 0)
@@ -599,6 +620,8 @@ def create_saml_eligibility_preflight(
                     THEN 'membership_count_mismatch' END,
                 CASE WHEN COALESCE(reachability.unknown_or_missing_user_count, 0) > 0
                     THEN 'unknown_or_missing_user' END,
+                CASE WHEN COALESCE(reachability.duplicate_canonical_user_count, 0) > 0
+                    THEN 'duplicate_canonical_user' END,
                 CASE WHEN COALESCE(exclusion_reconciliation.unresolved_observed_user_count, 0) > 0
                     THEN 'unresolved_observed_user' END,
                 CASE WHEN COALESCE(exclusion_reconciliation.unknown_application_user_status_count, 0) > 0

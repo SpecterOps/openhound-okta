@@ -277,6 +277,26 @@ def test_preflight_marks_a_missing_source_user_reachability_incomplete():
     assert ledger["preflight_classification"] == "incomplete"
 
 
+def test_preflight_rejects_duplicate_canonical_user_rows():
+    connection = _connection()
+    connection.execute(
+        """
+        INSERT INTO okta.users
+        SELECT * FROM okta.users WHERE id = 'user-2'
+        """
+    )
+
+    ledger = _ledger(connection)
+
+    assert ledger["unknown_or_missing_user_count"] == 0
+    assert ledger["duplicate_canonical_user_count"] == 1
+    assert ledger["unresolved_observed_user_count"] == 1
+    assert ledger["principal_reachability_coverage"] == "incomplete"
+    assert ledger["principal_exclusion_coverage"] == "incomplete"
+    assert ledger["preflight_classification"] == "incomplete"
+    assert "duplicate_canonical_user" in ledger["reason_codes"]
+
+
 def test_preflight_rejects_unknown_application_assignment_scope():
     connection = _connection()
     connection.execute(

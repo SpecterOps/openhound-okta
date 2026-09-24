@@ -7,8 +7,10 @@ import pytest
 from dlt.extract.exceptions import ResourceExtractionError
 from dlt.pipeline.exceptions import PipelineStepFailed
 
-from openhound_okta.main import preprocessing_resources
+from openhound_okta.kinds import edges as ek
 from openhound_okta.lookup import OktaLookup
+from openhound_okta.main import preprocessing_resources
+from openhound_okta.models.application_users import ApplicationUser
 from openhound_okta.models.group_assigned_apps import GroupAssignedApp
 from openhound_okta.source import (
     APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE,
@@ -428,8 +430,14 @@ def test_shadow_mode_emits_non_traversable_group_eligibility_operand():
         eligibility.properties.eligibility_expansion_profile
         == "openhound_okta_group_membership_v1"
     )
-    assert eligibility.properties.eligibility_source_id == "source://openhound-okta/00O-ORG"
-    assert eligibility.properties.eligibility_authority_id == "https://preview1.example.invalid"
+    assert (
+        eligibility.properties.eligibility_source_id
+        == "source://openhound-okta/00O-ORG"
+    )
+    assert (
+        eligibility.properties.eligibility_authority_id
+        == "https://preview1.example.invalid"
+    )
     assert (
         eligibility.properties.canonical_policy_identity
         == "any_of:positive_set:00G-GROUP,positive_set:00G-SECOND"
@@ -443,6 +451,72 @@ def test_shadow_mode_emits_non_traversable_group_eligibility_operand():
         eligibility.properties.policy_evaluation_coverage,
         eligibility.properties.claim_evidence_coverage,
     } == {"unproven"}
+
+
+def test_shadow_group_eligibility_is_additive_for_one_hundred_users():
+    class ShadowLookup(GroupLookup):
+        def saml_group_assignment_group_ids(self, app_id: str) -> tuple[str, ...]:
+            assert app_id == "0oa-app"
+            return ("00g-group",)
+
+        def org_id(self) -> str:
+            return "00o-org"
+
+    assignment_model = GroupAssignedApp(
+        id="0oa-app",
+        group_id="00g-group",
+        name="example_saml",
+        label="Example SAML",
+        status="ACTIVE",
+        app_sign_on_mode="SAML_2_0",
+    )
+    assignment_model._lookup = ShadowLookup()
+    assignment_model._extras = {
+        "tenant": "example.okta.test",
+        "saml_group_eligibility_mode": "shadow",
+    }
+
+    users = [
+        ApplicationUser.model_validate(
+            {
+                "id": f"00u-{index:03d}",
+                "created": "2026-08-20T00:00:00Z",
+                "profile": {"login": f"user-{index}@example.test"},
+                "credentials": {"userName": f"user-{index}@example.test"},
+                "status": "ACTIVE",
+                "app_id": "0oa-app",
+                "app_name": "example_saml",
+                "app_label": "Example SAML",
+                "app_status": "ACTIVE",
+                "app_sign_on_mode": "SAML_2_0",
+                "app_user_name_template": "${source.login}",
+                "scope": "GROUP",
+            }
+        )
+        for index in range(100)
+    ]
+    for user in users:
+        user._extras = {"saml_group_eligibility_mode": "shadow"}
+
+    expanded = [
+        edge
+        for user in users
+        for edge in user.edges
+        if edge.kind == ek.SAML_ELIGIBLE_FOR
+    ]
+    shadow = [
+        edge for edge in assignment_model.edges if edge.kind == ek.SAML_ELIGIBLE_FOR
+    ]
+
+    assert len(expanded) == 100
+    assert {edge.start.value for edge in expanded} == {
+        f"00U-{index:03d}" for index in range(100)
+    }
+    assert all(
+        edge.properties.assignment_source == "group_assignment" for edge in expanded
+    )
+    assert len(shadow) == 1
+    assert shadow[0].start.value == "00G-GROUP"
 
 
 def test_shadow_mode_consumes_only_contract_coverage_from_a_preflight_ledger():
@@ -615,7 +689,9 @@ def test_group_assignment_table_replaces_stale_rows(tmp_path):
     assert stored_group_ids() == []
 
 
-def test_group_assignment_failed_continuation_preserves_prior_replacement_snapshot(tmp_path):
+def test_group_assignment_failed_continuation_preserves_prior_replacement_snapshot(
+    tmp_path,
+):
     pipeline = dlt.pipeline(
         pipeline_name="group_assignment_atomic_replace_test",
         pipelines_dir=str(tmp_path / "pipelines"),
