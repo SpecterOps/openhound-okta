@@ -3,9 +3,10 @@ from typing import Any
 
 from openhound.core.asset import BaseAsset
 from openhound.core.models.entries_dataclass import Edge, EdgeProperties
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from openhound_okta.graph import OktaOwnedEdgePath
+from openhound_okta.lookup import OktaLookup
 from openhound_okta.kinds import edges as ek
 from openhound_okta.models.built_in_role import (
     SUPPORTED_ROLE_ASSIGNMENT_TYPES,
@@ -51,6 +52,10 @@ class RoleAssignmentGroupTarget(BaseModel):
 
 
 class RoleAssignment(BaseAsset):
+    # Narrow the BaseAsset annotation: openhound injects the lookup class
+    # registered via @app.convert, which is OktaLookup for this source.
+    _lookup: OktaLookup = PrivateAttr()
+
     id: str
     from_resource: str
     source_id: str
@@ -141,9 +146,7 @@ class RoleAssignment(BaseAsset):
         )
         non_admin_group_ids = set(self._ids(self._lookup.non_admin_groups()))
         return tuple(
-            group_id
-            for group_id in target_group_ids
-            if group_id in non_admin_group_ids
+            group_id for group_id in target_group_ids if group_id in non_admin_group_ids
         )
 
     @property

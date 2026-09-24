@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 import dlt
@@ -36,9 +36,7 @@ def _telemetry_settings_from_config() -> TelemetrySettings:
         name: value
         for name, expected_type in fields
         if (
-            value := dlt.config.get(
-                f"{_TELEMETRY_CONFIG_PREFIX}.{name}", expected_type
-            )
+            value := dlt.config.get(f"{_TELEMETRY_CONFIG_PREFIX}.{name}", expected_type)
         )
         is not None
     }
@@ -122,7 +120,7 @@ def collect(ctx: CollectContext) -> DltSource:
         telemetry.finish("complete")
         return result
 
-    ctx.pipeline.run = run_with_telemetry
+    ctx.pipeline.run = run_with_telemetry  # type: ignore[method-assign]
     return source_method
 
 
@@ -136,8 +134,11 @@ def convert(ctx: ConvertContext):
     from openhound_okta.source import source as okta_source
 
     tenant_domain = _tenant_domain_from_config()
-    if ctx.lookup:
-        ctx.lookup.tenant_domain = tenant_domain
+    # ConvertContext.lookup is annotated as Callable upstream, but openhound
+    # assigns the instantiated lookup session (or None) to it.
+    lookup = cast("OktaLookup | None", ctx.lookup)
+    if lookup is not None:
+        lookup.tenant_domain = tenant_domain
     return okta_source(), {"tenant": tenant_domain}
 
 

@@ -15,6 +15,7 @@ from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
 from dlt.common.configuration import configspec
 from dlt.common.configuration.specs import CredentialsConfiguration
+from dlt.common.typing import TSecretStrValue
 from dlt.sources.helpers.rest_client.auth import APIKeyAuth
 from dlt.sources.helpers.rest_client.client import RESTClient
 from dlt.sources.helpers.rest_client.paginators import HeaderLinkPaginator
@@ -198,11 +199,7 @@ def _role_assignment_scope(
         return {}
 
     try:
-        targets = [
-            target
-            for page in ctx.pool.paginate(target_path)
-            for target in page
-        ]
+        targets = [target for page in ctx.pool.paginate(target_path) for target in page]
     except OktaRetryExhaustedError:
         raise
     except Exception as e:
@@ -231,7 +228,7 @@ IDENTITY_PROVIDER_USERS_PAGE_SIZE = 200
 
 @configspec
 class OktaCredentials(CredentialsConfiguration):
-    base_url: str = None
+    base_url: str = dlt.config.value
 
     def auth(self):
         pass
@@ -250,8 +247,8 @@ def _app_token(okta_auth: OktaAuth, base_url: str, client_id: str) -> Token:
 
 @configspec
 class OktaAppCredentials(OktaCredentials):
-    private_key_path: str = None
-    client_id: str = None
+    private_key_path: TSecretStrValue = dlt.secrets.value
+    client_id: str = dlt.config.value
 
     def auth(self) -> str:
         return "app"
@@ -270,8 +267,8 @@ class OktaAppCredentials(OktaCredentials):
 
 @configspec
 class OktaEncodedAppCredentials(OktaCredentials):
-    private_key_b64: str = None
-    client_id: str = None
+    private_key_b64: TSecretStrValue = dlt.secrets.value
+    client_id: str = dlt.config.value
 
     def auth(self) -> str:
         return "app"
@@ -291,7 +288,7 @@ class OktaEncodedAppCredentials(OktaCredentials):
 
 @configspec
 class OktaTokenCredentials(OktaCredentials):
-    token: str = None
+    token: TSecretStrValue = dlt.secrets.value
 
     def auth(self) -> str:
         return "token"
@@ -308,7 +305,9 @@ def _request_auth(
 ):
     if isinstance(credentials, (OktaAppCredentials, OktaEncodedAppCredentials)):
         return OktaBearerAuth(credentials.fetch_token)
-    return APIKeyAuth(name="Authorization", api_key=credentials.header, location="header")
+    return APIKeyAuth(
+        name="Authorization", api_key=credentials.header, location="header"
+    )
 
 
 class ClientPool:
@@ -431,9 +430,8 @@ def _group_page_sizes(initial_page_size: int) -> tuple[int, ...]:
 
 
 def _is_read_timeout_retry_exhaustion(error: OktaRetryExhaustedError) -> bool:
-    return (
-        error.context.status_code is None
-        and isinstance(error.__cause__, requests.exceptions.ReadTimeout)
+    return error.context.status_code is None and isinstance(
+        error.__cause__, requests.exceptions.ReadTimeout
     )
 
 
@@ -679,7 +677,10 @@ def _office365_tenant_id_fields(
     application: dict[str, Any],
     get: Callable[..., requests.Response] = requests.get,
 ) -> dict[str, Any]:
-    if application.get("name") != "office365" or application.get("signOnMode") != "SAML_1_1":
+    if (
+        application.get("name") != "office365"
+        or application.get("signOnMode") != "SAML_1_1"
+    ):
         return application
 
     settings = application.get("settings")
@@ -736,7 +737,9 @@ def _microsoft_tenant_id_from_onmicrosoft_domain(
     if not isinstance(token_endpoint, str):
         return None
 
-    path_segments = [segment for segment in urlparse(token_endpoint).path.split("/") if segment]
+    path_segments = [
+        segment for segment in urlparse(token_endpoint).path.split("/") if segment
+    ]
     return path_segments[0] if path_segments else None
 
 
@@ -1026,7 +1029,9 @@ def application_group_push_mapping_row(
     name="application_secrets", columns=ApplicationSecrets, parallelized=True
 )
 def application_secrets(application: Application, ctx: SourceContext):
-    oauth_client = application.credentials.oauth_client
+    oauth_client = (
+        application.credentials.oauth_client if application.credentials else None
+    )
     if (
         oauth_client
         and oauth_client.token_endpoint_auth_method == "client_secret_basic"
@@ -1217,9 +1222,7 @@ def client_applications(ctx: SourceContext):
 )
 def client_role_assignments(client: ClientApplication, ctx: SourceContext):
     if client.application_type == "service":
-        for page in ctx.pool.paginate(
-            f"/oauth2/v1/clients/{client.client_id}/roles"
-        ):
+        for page in ctx.pool.paginate(f"/oauth2/v1/clients/{client.client_id}/roles"):
             for item in page:
                 if _is_direct_active_role_assignment(item, "client"):
                     yield {
@@ -1282,9 +1285,7 @@ def user_role_assignment_rows(user_id: str, ctx: SourceContext):
 )
 def group_role_assignments(group: Group, ctx: SourceContext):
     if group.embedded.stats.has_admin_privilege:
-        for page in ctx.pool.paginate(
-            f"/api/v1/groups/{group.id}/roles"
-        ):
+        for page in ctx.pool.paginate(f"/api/v1/groups/{group.id}/roles"):
             for role in page:
                 if _is_direct_active_role_assignment(role, "group"):
                     yield {
@@ -1415,10 +1416,7 @@ def identity_providers(ctx: SourceContext):
     for page in ctx.pool.paginate("/api/v1/idps"):
         for item in page:
             protocol = item.get("protocol") or {}
-            if (
-                item.get("type") == "SAML2"
-                and protocol.get("type") == "SAML2"
-            ):
+            if item.get("type") == "SAML2" and protocol.get("type") == "SAML2":
                 item = {**item, **_saml_idp_metadata_fields(ctx, item)}
             yield item
 
@@ -1475,7 +1473,7 @@ def agent_pools(ctx: SourceContext):
 
 @app.transformer(name="agents", columns=Agent, parallelized=True)
 def agents(agent_pool: AgentPool):
-    for agent in agent_pool.agents:
+    for agent in agent_pool.agents or []:
         yield {
             **agent.model_dump(),
             "agent_pool_name": agent_pool.name,
@@ -1604,10 +1602,7 @@ def source(
             f"{APPLICATION_USERS_PAGE_SIZE}"
         )
     if not 1 <= groups_page_size <= GROUPS_PAGE_SIZE:
-        raise ValueError(
-            "groups_page_size must be between 1 and "
-            f"{GROUPS_PAGE_SIZE}"
-        )
+        raise ValueError(f"groups_page_size must be between 1 and {GROUPS_PAGE_SIZE}")
     if not (
         APPLICATION_GROUP_ASSIGNMENTS_MIN_PAGE_SIZE
         <= application_group_assignments_page_size

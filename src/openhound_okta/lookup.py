@@ -62,7 +62,7 @@ class OktaLookup(LookupManager):
             f"""SELECT label FROM {self.schema}.custom_role_permissions WHERE role_id = ? AND label = ?""",
             [role_id, permission],
         )
-        return res
+        return res is not None
 
     @lru_cache
     def custom_role_permissions(self, role_id: str) -> tuple[str, ...]:
@@ -77,7 +77,7 @@ class OktaLookup(LookupManager):
         return tuple(label for (label,) in rows)
 
     @lru_cache
-    def application_by_id(self, app_id: str) -> bool:
+    def application_by_id(self, app_id: str) -> str | None:
         res = self._find_single_object(
             f"""SELECT id FROM {self.schema}.applications WHERE id = ?""",
             [app_id],
@@ -85,7 +85,7 @@ class OktaLookup(LookupManager):
         return res
 
     @lru_cache
-    def group_by_id(self, group_id: str) -> bool:
+    def group_by_id(self, group_id: str) -> str | None:
         res = self._find_single_object(
             f"""SELECT id FROM {self.schema}.groups WHERE id = ?""",
             [group_id],
@@ -93,7 +93,7 @@ class OktaLookup(LookupManager):
         return res
 
     @lru_cache
-    def application_settings(self, app_id: str) -> bool:
+    def application_settings(self, app_id: str) -> str | None:
         res = self._find_single_object(
             f"""SELECT settings FROM {self.schema}.applications WHERE id = ?""",
             [app_id],
@@ -261,7 +261,9 @@ class OktaLookup(LookupManager):
 
     @lru_cache
     def non_admin_users(self):
-        res = self._find_all_objects(f"""SELECT id FROM {self.schema}.non_admin_users""")
+        res = self._find_all_objects(
+            f"""SELECT id FROM {self.schema}.non_admin_users"""
+        )
         return res
 
     @lru_cache
@@ -523,9 +525,7 @@ class OktaLookup(LookupManager):
         if path == "/api/v1/authorizationServers":
             return self._all_ids("authorization_servers")
         if path.startswith("/api/v1/authorizationServers/"):
-            return self._existing_ids(
-                "authorization_servers", path.rsplit("/", 1)[-1]
-            )
+            return self._existing_ids("authorization_servers", path.rsplit("/", 1)[-1])
 
         if path == "/api/v1/devices":
             return self._all_ids("devices")
@@ -535,9 +535,7 @@ class OktaLookup(LookupManager):
         if path == "/api/v1/idps":
             return self._all_ids("identity_providers")
         if path.startswith("/api/v1/idps/"):
-            return self._existing_ids(
-                "identity_providers", path.rsplit("/", 1)[-1]
-            )
+            return self._existing_ids("identity_providers", path.rsplit("/", 1)[-1])
 
         if path == "/api/v1/policies":
             return self._all_ids("policies")
@@ -629,7 +627,9 @@ class OktaLookup(LookupManager):
     @lru_cache
     def _all_apps_and_integrations(self) -> tuple[str, ...]:
         return tuple(
-            sorted(set(self._all_ids("applications")) | set(self._all_ids("api_services")))
+            sorted(
+                set(self._all_ids("applications")) | set(self._all_ids("api_services"))
+            )
         )
 
     @lru_cache
