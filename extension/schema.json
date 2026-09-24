@@ -2,7 +2,7 @@
   "schema": {
     "name": "SOOkta",
     "display_name": "Okta Extension (by SpecterOps)",
-    "version": "v2.8.4",
+    "version": "v2.9.0",
     "namespace": "Okta"
   },
   "node_kinds": [
@@ -237,8 +237,18 @@
     },
     {
       "name": "Okta_ResourceSetContains",
-      "description": "Membership of objects within an Okta resource set",
-      "is_traversable": true
+      "description": "Direct membership of resources within an Okta resource set",
+      "is_traversable": false
+    },
+    {
+      "name": "Okta_ResourceSetContainsMembersOf",
+      "description": "An Okta resource set contains the members of a group",
+      "is_traversable": false
+    },
+    {
+      "name": "Okta_ResourceSetContainsIndirect",
+      "description": "Indirect membership of users within an Okta resource set through a group",
+      "is_traversable": false
     },
     {
       "name": "Okta_MemberOf",

@@ -26,4 +26,4 @@ Resource sets are collections of entities that can be used to scope custom role 
 
 ![Okta Resource Set displayed in BloodHound](../Images/bloodhound-resource-set.png)
 
-Okta resource sets are represented as Okta_ResourceSet nodes.
+Okta resource sets are represented as Okta_ResourceSet nodes. Their members are linked through the [Okta_ResourceSetContains](../edges/Okta_ResourceSetContains.md) edges for directly contained objects, and through the [Okta_ResourceSetContainsMembersOf](../edges/Okta_ResourceSetContainsMembersOf.md) and [Okta_ResourceSetContainsIndirect](../edges/Okta_ResourceSetContainsIndirect.md) edges when a resource set contains the members of a group.
