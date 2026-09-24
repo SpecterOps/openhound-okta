@@ -1606,6 +1606,23 @@ def test_application_grants_not_found_does_not_trip_the_breaker(caplog):
     assert not caplog.records
 
 
+def test_application_grants_not_found_does_not_shield_the_breaker():
+    # A 404 carries no permission signal: it neither counts toward the limit
+    # nor resets the denial run the way a successful response does.
+    pool = ScriptedGrantsPool([403, 404, 403, 403])
+    ctx = SimpleNamespace(
+        pool=pool,
+        application_grants_breaker=ConsecutiveAccessDeniedBreaker(3),
+    )
+    grants = inspect.unwrap(application_grants)
+
+    for index in range(5):
+        assert list(grants(_grants_application(f"0oa{index}"), ctx)) == []
+
+    assert pool.calls == 4
+    assert ctx.application_grants_breaker.tripped
+
+
 def test_api_services_access_denied_is_skipped_with_a_warning(caplog):
     pool = ScriptedGrantsPool([403])
     ctx = SimpleNamespace(pool=pool)

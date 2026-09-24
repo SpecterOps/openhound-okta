@@ -397,8 +397,11 @@ class ConsecutiveAccessDeniedBreaker:
 
     Least-privilege collector roles cannot read some per-object endpoints at
     all, so once every request in a row is denied there is no point in issuing
-    one request per remaining object. A successful request resets the run;
-    once tripped, the breaker never resets. The breaker is thread-safe.
+    one request per remaining object. Only a successful request disproves the
+    missing permission and resets the run, so callers must not record outcomes
+    that carry no permission signal (such as a 404 for a deleted object);
+    those neither count nor reset. Once tripped, the breaker never resets.
+    The breaker is thread-safe.
 
     Attributes:
         tripped: Whether the denial limit has been reached and callers should
