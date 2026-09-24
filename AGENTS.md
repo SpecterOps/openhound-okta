@@ -6,8 +6,7 @@ Guidance for coding agents working in this repository.
 
 `openhound-okta` is an Okta collector extension for OpenHound (SpecterOps' framework for building
 BloodHound OpenGraph collectors). It collects Okta resources over the Okta API and converts them into
-BloodHound-compatible graph nodes and edges. It is a Python 3.13+ project built on the
-[DLT](https://dlthub.com/docs/intro) library.
+BloodHound-compatible graph nodes and edges. It is a Python project (see `pyproject.toml`) built on the [DLT](https://dlthub.com/docs/intro) library.
 
 The package registers itself through the `openhound.sources` entry point (`openhound_okta.main:app`);
 the `openhound` CLI (and `src/main.py`) drive it.
@@ -21,7 +20,7 @@ just typecheck             # mypy src
 just test-all              # uv run pytest
 ```
 
-Pipeline stages (each wraps `openhound <stage> okta ...`):
+Pipeline stages:
 
 ```bash
 just collect      # collect Okta data into ./output (needs .dlt/secrets.toml credentials)
@@ -40,8 +39,9 @@ Three-stage pipeline driven by decorators on the OpenHound `app` object created 
 
 1. **Collect** (`@app.collect`, [source.py](src/openhound_okta/source.py)) — DLT resources and
    transformers, one per Okta endpoint family (`@app.resource` / `@app.transformer`). `SourceContext`
-   bundles a `ClientPool` of `OktaRESTClient`s, credentials, and page-size settings. Rows are validated
-   pydantic models and written to disk by DLT.
+   bundles a `ClientPool` of `OktaRESTClient`s, the tenant domain, telemetry, and page-size settings;
+   credentials are resolved separately in `source()` and used to construct the pool. Rows are
+   validated pydantic models and written to disk by DLT.
 2. **Preprocess** (`@app.preproc`, [transforms.py](src/openhound_okta/transforms.py)) — loads collected
    resources into DuckDB tables (`okta` schema; the resource→table map is
    `preprocessing_resources()` in main.py) and builds derived tables and indices.
