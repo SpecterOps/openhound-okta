@@ -1,13 +1,13 @@
-from functools import lru_cache
 import json
 import re
+from functools import lru_cache
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import duckdb
-from duckdb import DuckDBPyConnection, Error as DuckDBError
+from duckdb import DuckDBPyConnection
+from duckdb import Error as DuckDBError
 from openhound.core.lookup import LookupManager
-
 
 USER_SAML_CONTEXT_CACHE_MAXSIZE = 128
 
@@ -491,16 +491,17 @@ class OktaLookup(LookupManager):
 
         Okta lets a resource set contain the members of a group instead of the
         group itself. Such resources are exposed as ``/api/v1/groups/{id}/users``
-        URLs or ``...:groups:{id}:users`` ORNs. The URL takes precedence when it
-        is present, matching the resolution order used for the member IDs.
+        URLs or ``...:groups:{id}:contained_resources`` ORNs. The URL takes
+        precedence when it is present, matching the resolution order used for
+        the member IDs.
 
         Args:
             resource_url: Self link of the resource set member from the Okta API,
                 for example ``https://example.okta.com/api/v1/groups/00g1/users``.
                 When provided, the ORN is ignored, even if the URL does not match.
             orn: Okta Resource Name of the resource set member, for example
-                ``orn:okta:directory:00o1:groups:00g1:users``. Used only when
-                no URL is available.
+                ``orn:okta:directory:00o1:groups:00g1:contained_resources``.
+                Used only when no URL is available.
 
         Returns:
             The Okta group ID whose members the resource refers to, or ``None``
@@ -520,7 +521,7 @@ class OktaLookup(LookupManager):
         split_orn = orn.split(":")
         if (
             len(split_orn) >= 3
-            and split_orn[-1] == "users"
+            and split_orn[-1] == "contained_resources"
             and split_orn[-3] == "groups"
             and split_orn[-2]
         ):
@@ -601,9 +602,9 @@ class OktaLookup(LookupManager):
         # All policies
         if path == "/api/v1/policies":
             return self._all_ids("policies")
-        # A single policy
+        # All policies of one type, e.g. /api/v1/policies/ACCESS_POLICY.
         if path.startswith("/api/v1/policies/"):
-            return self._existing_ids("policies", path.rsplit("/", 1)[-1])
+            return self._ids_by_value("policies", "type", path.rsplit("/", 1)[-1])
 
         # Unsupported resource type, e.g. SSF receivers or Workflows
         return ()
@@ -619,14 +620,18 @@ class OktaLookup(LookupManager):
 
         Supported ORN shapes:
 
-        * ``...:groups:{groupId}:users`` resolves to the current members of
-          the group.
+        * ``...:groups:{groupId}:contained_resources`` resolves to the current
+          members of the group.
         * ``...:{collection}`` resolves to every collected object of that
           type. Supported collections are ``users``, ``groups``, ``apps``,
-          ``devices``, ``authorizationServers``, ``idps`` and ``policies``.
+          ``devices``, ``authorization_servers``, ``identity_provider`` and
+          ``policies``.
+        * ``...:apps:{appType}`` resolves to every application and API
+          service integration of that OIN type.
+        * ``...:policies:{policyType}`` resolves to every policy of that type.
         * ``...:{collection}:{id}`` resolves to that single object when it was
-          collected. For ``apps`` both OIN applications and API service
-          integrations are searched.
+          collected. For ``apps`` the ID follows the app type, and both OIN
+          applications and API service integrations are searched.
 
         Args:
             orn: Okta Resource Name of the resource set member, for example
@@ -642,34 +647,58 @@ class OktaLookup(LookupManager):
         if not orn:
             return ()
 
+        # Members of a group, e.g.
+        # orn:okta:directory:00o1:groups:00g1:contained_resources
+        # The group itself is not in scope, only its current members are.
         member_group_id = self.resource_member_group_id(None, orn)
         if member_group_id is not None:
             return self.group_user_ids((member_group_id,))
 
+        # Every other supported ORN has the form
+        # orn:{partition}:{service}:{orgId}:{objectType}[:{appType}][:{objectId}]
         split_orn = orn.split(":")
+
+        # A whole collection, e.g.
+        # orn:okta:directory:00o1:users        (all users)
+        # orn:okta:idp:00o1:apps               (all apps and API service integrations)
+        # orn:okta:idp:00o1:identity_provider  (all identity providers)
         resource_collections = {
             "users": self._all_ids("users"),
             "groups": self._all_ids("groups"),
             "apps": self._all_apps_and_integrations(),
             "devices": self._all_ids("devices"),
-            "authorizationServers": self._all_ids("authorization_servers"),
             "authorization_servers": self._all_ids("authorization_servers"),
-            "idps": self._all_ids("identity_providers"),
+            "identity_provider": self._all_ids("identity_providers"),
             "policies": self._all_ids("policies"),
         }
         if split_orn[-1] in resource_collections:
             return resource_collections[split_orn[-1]]
 
+        # All instances of one OIN application type, e.g.
+        # orn:okta:idp:00o1:apps:githubcloud
+        # Both applications and API service integrations of that type match.
+        if len(split_orn) == 6 and split_orn[4] == "apps":
+            return self._apps_and_integrations_by_type(split_orn[5])
+
+        # All policies of one type, e.g.
+        # orn:okta:idp:00o1:policies:ACCESS_POLICY
+        # Okta never references individual policies in resource sets.
+        if len(split_orn) == 6 and split_orn[4] == "policies":
+            return self._ids_by_value("policies", "type", split_orn[5])
+
+        # A single object referenced by its ID, e.g.
+        # orn:okta:directory:00o1:groups:00g1           (a group)
+        # orn:okta:idp:00o1:identity_provider:0oa1      (an identity provider)
+        # orn:okta:idp:00o1:apps:githubcloud:0oa2       (an app; the type precedes
+        #                                                the ID)
         target_id = split_orn[-1]
         for resource_type, table_names in {
             "users": ("users",),
             "groups": ("groups",),
             "apps": ("applications", "api_services"),
             "devices": ("devices",),
-            "authorizationServers": ("authorization_servers",),
             "authorization_servers": ("authorization_servers",),
-            "idps": ("identity_providers",),
-            "policies": ("policies",),
+            "identity_provider": ("identity_providers",),
         }.items():
             if resource_type not in split_orn[:-1]:
                 continue
@@ -678,6 +707,12 @@ class OktaLookup(LookupManager):
             for table_name in table_names:
                 resource_ids.update(self._existing_ids(table_name, target_id))
             return tuple(sorted(resource_ids))
+
+        # Unsupported resource, e.g.
+        # orn:okta:iam:00o1:contained_resources  (IAM resources)
+        # orn:okta:support:00o1:cases            (support cases)
+        # orn:okta:workflow:00o1:flows           (Workflows)
+        # orn:okta:idp:00o1:customizations       (customizations)
         return ()
 
     def _resource_set_ids_in_table(

@@ -69,7 +69,7 @@ def test_group_member_resource_set_urls_resolve_users_not_groups():
     insert_resource(
         lookup,
         "resource-set-1",
-        "orn:okta:directory:org-1:groups:group-1:users",
+        "orn:okta:directory:org-1:groups:group-1:contained_resources",
         resource_url,
     )
 
@@ -80,7 +80,7 @@ def test_group_member_resource_set_urls_resolve_users_not_groups():
     resource = make_resource(
         lookup,
         "resource-set-1",
-        "orn:okta:directory:org-1:groups:group-1:users",
+        "orn:okta:directory:org-1:groups:group-1:contained_resources",
         resource_url,
     )
     edges = list(resource.edges)
@@ -98,7 +98,7 @@ def test_group_member_resource_set_orns_resolve_group_members_without_urls():
     lookup.client.execute(
         "INSERT INTO okta.group_memberships VALUES ('user-1', 'group-1')"
     )
-    orn = "orn:okta:directory:org-1:groups:group-1:users"
+    orn = "orn:okta:directory:org-1:groups:group-1:contained_resources"
 
     assert lookup.resolve_resource_orn(orn) == ("user-1",)
 
@@ -120,7 +120,7 @@ def test_group_member_resources_for_unknown_groups_emit_no_edges():
     resource = make_resource(
         lookup,
         "resource-set-1",
-        "orn:okta:directory:org-1:groups:group-missing:users",
+        "orn:okta:directory:org-1:groups:group-missing:contained_resources",
         "https://example.okta.com/api/v1/groups/group-missing/users",
     )
 
@@ -143,7 +143,7 @@ def test_direct_and_indirect_edges_cover_all_resource_set_members():
             "https://example.okta.com/api/v1/users/user-1",
         ),
         (
-            "orn:okta:directory:org-1:groups:group-1:users",
+            "orn:okta:directory:org-1:groups:group-1:contained_resources",
             "https://example.okta.com/api/v1/groups/group-1/users",
         ),
         (
@@ -267,7 +267,7 @@ def test_custom_role_permissions_scoped_to_resource_sets_cover_indirect_members(
     insert_resource(
         lookup,
         "resource-set-1",
-        "orn:okta:directory:org-1:groups:retail-staff:users",
+        "orn:okta:directory:org-1:groups:retail-staff:contained_resources",
         "https://example.okta.com/api/v1/groups/retail-staff/users",
     )
     insert_resource(
@@ -340,12 +340,93 @@ def test_invalid_self_links_fall_back_to_orn_resolution():
         assert [edge.end.value for edge in resource.edges] == ["USER-1"]
 
 
-def test_policy_member_resource_set_urls_resolve_policy_ids():
+def test_policy_resource_set_members_are_never_resolved_by_policy_id():
+    # Okta only scopes resource sets to policy types, never to single policies.
     lookup = make_lookup()
     lookup.client.execute("INSERT INTO okta.policies VALUES ('policy-1', 'PASSWORD')")
-    resource_url = "https://example.okta.com/api/v1/policies/policy-1"
 
-    assert lookup.resolve_resource_url(resource_url) == ("policy-1",)
+    assert (
+        lookup.resolve_resource_url("https://example.okta.com/api/v1/policies/policy-1")
+        == ()
+    )
+    assert lookup.resolve_resource_orn("orn:okta:idp:org-1:policies:policy-1") == ()
+
+
+def test_policy_type_resource_set_members_resolve_all_policies_of_that_type():
+    lookup = make_lookup()
+    lookup.client.execute(
+        "INSERT INTO okta.policies VALUES "
+        "('policy-1', 'ACCESS_POLICY'), "
+        "('policy-2', 'ACCESS_POLICY'), "
+        "('policy-3', 'PASSWORD')"
+    )
+
+    assert lookup.resolve_resource_url(
+        "https://example.okta.com/api/v1/policies/ACCESS_POLICY"
+    ) == ("policy-1", "policy-2")
+    assert lookup.resolve_resource_orn("orn:okta:idp:org-1:policies:ACCESS_POLICY") == (
+        "policy-1",
+        "policy-2",
+    )
+
+
+def test_orn_fallback_resolves_documented_idp_service_shapes():
+    lookup = make_lookup()
+    lookup.client.execute(
+        "INSERT INTO okta.applications VALUES "
+        "('app-1', 'githubcloud'), "
+        "('app-2', 'office365')"
+    )
+    lookup.client.execute(
+        "INSERT INTO okta.api_services VALUES ('integration-1', 'githubcloud')"
+    )
+    lookup.client.execute("INSERT INTO okta.identity_providers VALUES ('idp-1')")
+    lookup.client.execute(
+        "INSERT INTO okta.authorization_servers VALUES ('auth-server-1')"
+    )
+
+    assert lookup.resolve_resource_orn("orn:okta:idp:org-1:apps") == (
+        "app-1",
+        "app-2",
+        "integration-1",
+    )
+    assert lookup.resolve_resource_orn("orn:okta:idp:org-1:apps:githubcloud") == (
+        "app-1",
+        "integration-1",
+    )
+    assert lookup.resolve_resource_orn("orn:okta:idp:org-1:apps:githubcloud:app-1") == (
+        "app-1",
+    )
+    assert lookup.resolve_resource_orn("orn:okta:idp:org-1:identity_provider") == (
+        "idp-1",
+    )
+    assert lookup.resolve_resource_orn(
+        "orn:okta:idp:org-1:identity_provider:idp-1"
+    ) == ("idp-1",)
+    assert lookup.resolve_resource_orn("orn:okta:idp:org-1:authorization_servers") == (
+        "auth-server-1",
+    )
+    assert lookup.resolve_resource_orn(
+        "orn:okta:idp:org-1:authorization_servers:auth-server-1"
+    ) == ("auth-server-1",)
+    # Undocumented spellings are not tolerated.
+    assert lookup.resolve_resource_orn("orn:okta:idp:org-1:idps") == ()
+    assert lookup.resolve_resource_orn("orn:okta:idp:org-1:idps:idp-1") == ()
+    assert lookup.resolve_resource_orn("orn:okta:idp:org-1:authorizationServers") == ()
+
+
+def test_unsupported_resource_set_members_resolve_to_nothing():
+    lookup = make_lookup()
+    lookup.client.execute("INSERT INTO okta.users VALUES ('user-1')")
+
+    for orn in (
+        "orn:okta:iam:org-1:contained_resources",
+        "orn:okta:support:org-1:cases",
+        "orn:okta:workflow:org-1:flows",
+        "orn:okta:idp:org-1:customizations",
+    ):
+        assert lookup.resolve_resource_orn(orn) == ()
+        assert lookup.resource_member_group_id(None, orn) is None
 
 
 def test_workflows_resource_set_ids_are_tenant_qualified_across_graph_edges():
