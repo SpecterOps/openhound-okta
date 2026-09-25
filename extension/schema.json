@@ -12,7 +12,37 @@
       "description": "An Okta organization",
       "is_display_kind": true,
       "icon": "globe",
-      "color": "#16a5a5"
+      "color": "#16a5a5",
+      "info": {
+        "description": {
+          "title": "Description",
+          "position": 1,
+          "markdown": {
+            "content": "The Organization entity represents the Okta tenant itself. It contains general information about the organization, such as its name, domain, and settings.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/nodes/okta_organization)"
+          }
+        },
+        "inbound_object_control": {
+          "title": "Inbound Object Control",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $objectID := .Properties.objectid | default \"\" | trim }}\n{{ $escapedObjectID := $objectID | replace \"\\\\\" \"\\\\\\\\\" | replace \"'\" \"\\\\'\" }}\n{{ if ne $objectID \"\" }}\n{{ $superAdminQuery := printf \"MATCH p = (:Okta)-[:Okta_ApiTokenFor|Okta_DeviceOf|Okta_MemberOf|Okta_SuperAdmin*1..3]->(selected:Okta_Organization {objectid: '%s'})\\nRETURN p\\nLIMIT 500\" $escapedObjectID }}\n{{ $orgAdminQuery := printf \"MATCH p = (:Okta)-[:Okta_ApiTokenFor|Okta_DeviceOf|Okta_MemberOf|Okta_HasRole*1..3]->(role:Okta_Role)<-[:Okta_Contains]-(selected:Okta_Organization {objectid: '%s'})\\nWHERE role.objectid STARTS WITH 'ORG_ADMIN@'\\nRETURN p\\nLIMIT 500\" $escapedObjectID }}\n- [Super Admins](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $superAdminQuery | b64enc | urlquery }})\n- [Org Admins](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $orgAdminQuery | b64enc | urlquery }})\n{{ else }}\nExplore navigation is unavailable because this object has no stable identifier.\n{{ end }}"
+          }
+        },
+        "management": {
+          "title": "Management",
+          "position": 3,
+          "markdown": {
+            "content": "{{ $objectID := .Properties.objectid | default \"\" | trim }}\n{{ $escapedObjectID := $objectID | replace \"\\\\\" \"\\\\\\\\\" | replace \"'\" \"\\\\'\" }}\n{{ if ne $objectID \"\" }}\n{{ $adminConsoleQuery := printf \"MATCH p = (selected:Okta_Organization {objectid: '%s'})-[:Okta_Contains]->(:Okta)-[:Okta_AppAssignment]->(console:Okta_Application)\\nWHERE console.app_type = 'saasure'\\nRETURN p\\nLIMIT 500\" $escapedObjectID }}\n{{ $orgScopedQuery := printf \"MATCH p = (:Okta)-[:Okta_HasRoleAssignment|Okta_MemberOf*1..2]->(:Okta_RoleAssignment)-[:Okta_ScopedTo]->(selected:Okta_Organization {objectid: '%s'})\\nRETURN p\\nLIMIT 500\" $escapedObjectID }}\n- [Admin Console Access](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $adminConsoleQuery | b64enc | urlquery }})\n- [Organization-Scoped Role Assignments](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $orgScopedQuery | b64enc | urlquery }})\n{{ else }}\nExplore navigation is unavailable because this object has no stable identifier.\n{{ end }}"
+          }
+        },
+        "cross_tenant_trust": {
+          "title": "Cross-Tenant Trust Relationships",
+          "position": 4,
+          "markdown": {
+            "content": "{{ $objectID := .Properties.objectid | default \"\" | trim }}\n{{ $escapedObjectID := $objectID | replace \"\\\\\" \"\\\\\\\\\" | replace \"'\" \"\\\\'\" }}\n{{ if ne $objectID \"\" }}\n{{ $inboundTrustQuery := printf \"MATCH p = (selected:Okta_Organization {objectid: '%s'})-[:Okta_Contains]->(local:Okta)<-[:Okta_InboundOrgSSO|Okta_OutboundOrgSSO|Okta_KerberosSSO]-(external)\\nWHERE local:Okta_IdentityProvider OR local:Okta_Application\\nRETURN p\\nLIMIT 500\" $escapedObjectID }}\n{{ $outboundTrustQuery := printf \"MATCH p = (selected:Okta_Organization {objectid: '%s'})-[:Okta_Contains]->(app:Okta_Application)-[:Okta_OutboundOrgSSO|Okta_OrgSWA]->(external)\\nRETURN p\\nLIMIT 500\" $escapedObjectID }}\n- [Inbound Trusts](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $inboundTrustQuery | b64enc | urlquery }})\n- [Outbound Trusts](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $outboundTrustQuery | b64enc | urlquery }})\n{{ else }}\nExplore navigation is unavailable because this object has no stable identifier.\n{{ end }}"
+          }
+        }
+      }
     },
     {
       "name": "Okta_Realm",
