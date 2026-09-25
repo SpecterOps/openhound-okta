@@ -487,8 +487,8 @@ def users(ctx: SourceContext):
 # factor id) is written, so downstream the authentication_factors node
 # property can distinguish:
 #   NULL - user not covered (not privileged, factors never fetched)
-#   0    - user covered, no enrolled factors
-#   N    - user covered, N enrolled factors
+#   0    - user covered, no factors usable for MFA
+#   N    - user covered, N factors in ACTIVE status
 # (see OktaLookup.user_authentication_factors_count and
 # descriptions/nodes/Okta_User.md).
 class UserFactorClaims:

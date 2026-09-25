@@ -139,27 +139,36 @@ def test_user_node_falls_back_to_login_when_display_name_is_missing() -> None:
 
 
 def test_user_lookup_distinguishes_uncollected_from_factorless_users() -> None:
-    """The lookup maps factor rows to N, scope markers to 0, absence to None."""
+    """The lookup counts ACTIVE factors, maps markers to 0 and absence to None."""
     import duckdb
 
     from openhound_okta.lookup import OktaLookup
 
     con = duckdb.connect()
     con.execute("CREATE SCHEMA okta")
-    con.execute("CREATE TABLE okta.user_factors (user_id VARCHAR, id VARCHAR)")
+    con.execute(
+        "CREATE TABLE okta.user_factors (user_id VARCHAR, id VARCHAR, status VARCHAR)"
+    )
     con.execute(
         "INSERT INTO okta.user_factors VALUES "
-        "('user-1', 'factor-1'), ('user-1', 'factor-2'), ('user-1', 'factor-3'), "
-        "('user-2', NULL)"
+        "('user-1', 'factor-1', 'ACTIVE'), ('user-1', 'factor-2', 'ACTIVE'), "
+        "('user-1', 'factor-3', 'PENDING_ACTIVATION'), "
+        "('user-2', NULL, NULL), "
+        "('user-4', 'factor-4', 'PENDING_ACTIVATION'), "
+        "('user-5', 'factor-5', 'EXPIRED')"
     )
 
     lookup = OktaLookup(con)
 
-    assert lookup.user_authentication_factors_count("user-1") == 3
-    # Scope marker only: collected privileged user without enrolled factors.
+    # Non-ACTIVE factors are not usable for MFA and are excluded.
+    assert lookup.user_authentication_factors_count("user-1") == 2
+    # Scope marker only: collected privileged user without factors.
     assert lookup.user_authentication_factors_count("user-2") == 0
     # Never collected: unprivileged user.
     assert lookup.user_authentication_factors_count("user-3") is None
+    # Only unusable factors: reads as having no MFA.
+    assert lookup.user_authentication_factors_count("user-4") == 0
+    assert lookup.user_authentication_factors_count("user-5") == 0
 
     # Without a user_factors table every user reads as "not collected".
     empty_lookup = OktaLookup(duckdb.connect())
@@ -634,13 +643,17 @@ def test_factor_pipeline_loads_one_deduplicated_replaced_snapshot(tmp_path) -> N
         return table
 
     # user-1 is a multi-path super admin: direct assignee AND admin-group
-    # member. user-2 is direct only, user-3 admin-group only (no factors),
-    # user-4 is only in a non-admin group, user-5 is unprivileged.
+    # member. user-2 is direct only (with an unusable pending factor),
+    # user-3 admin-group only (no factors), user-4 is only in a non-admin
+    # group, user-5 is unprivileged.
     pool = run_collection(
         assignees=[{"id": "user-1"}, {"id": "user-2"}],
         factors_by_user={
-            "user-1": [{"id": "factor-1"}, {"id": "factor-2"}],
-            "user-2": [{"id": "factor-3"}],
+            "user-1": [
+                {"id": "factor-1", "status": "ACTIVE"},
+                {"id": "factor-2", "status": "ACTIVE"},
+            ],
+            "user-2": [{"id": "factor-3", "status": "PENDING_ACTIVATION"}],
         },
     )
 
@@ -662,7 +675,8 @@ def test_factor_pipeline_loads_one_deduplicated_replaced_snapshot(tmp_path) -> N
     con.close()
     assert counts == {
         "user-1": 2,
-        "user-2": 1,
+        # Collected, but the only factor is pending activation: no usable MFA.
+        "user-2": 0,
         "user-3": 0,
         "user-4": None,
         "user-5": None,
@@ -672,7 +686,7 @@ def test_factor_pipeline_loads_one_deduplicated_replaced_snapshot(tmp_path) -> N
     # replace disposition must rebuild the snapshot, not append to it.
     run_collection(
         assignees=[{"id": "user-1"}],
-        factors_by_user={"user-1": [{"id": "factor-9"}]},
+        factors_by_user={"user-1": [{"id": "factor-9", "status": "ACTIVE"}]},
     )
 
     assert factor_table() == {"user-1": ["factor-9"], "user-3": [None]}

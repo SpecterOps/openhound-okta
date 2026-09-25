@@ -296,7 +296,7 @@ class OktaLookup(LookupManager):
 
     @lru_cache
     def user_authentication_factors_count(self, user_id: str) -> int | None:
-        """Enrolled factor count, or None when factors were not collected.
+        """Active factor count, or None when factors were not collected.
 
         The collector writes a scope-marker row (NULL factor id) for every
         privileged user it covered, so an absent user means "not collected"
@@ -306,14 +306,21 @@ class OktaLookup(LookupManager):
             user_id: Okta user ID to look up.
 
         Returns:
-            Number of enrolled factors (0 for a covered user without factors),
-            or None when the user's factors were never collected.
+            Number of factors usable for MFA (0 for a covered user without
+            any), or None when the user's factors were never collected.
         """
         if not self._table_exists("user_factors"):
             return None
 
+        # Okta factor statuses: ACTIVE, DISABLED, ENROLLED, EXPIRED, INACTIVE,
+        # NOT_SETUP, and PENDING_ACTIVATION. Okta does not document how each
+        # state affects sign-in, so only ACTIVE - the one state known to be
+        # usable for MFA verification - is counted. Counting any of the others
+        # could hide a privileged user without working MFA behind e.g. an
+        # expired or pending factor.
         row = self.client.execute(
-            f"""SELECT COUNT(*), COUNT(id) FROM {self.schema}.user_factors
+            f"""SELECT COUNT(*), COUNT(id) FILTER (WHERE status = 'ACTIVE')
+                FROM {self.schema}.user_factors
                 WHERE user_id = ?""",
             [user_id],
         ).fetchone()
