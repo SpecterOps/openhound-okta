@@ -361,9 +361,20 @@ def test_policy_type_resource_set_members_resolve_all_policies_of_that_type():
         "('policy-3', 'PASSWORD')"
     )
 
+    # Path form observed in Okta API responses
     assert lookup.resolve_resource_url(
         "https://example.okta.com/api/v1/policies/ACCESS_POLICY"
     ) == ("policy-1", "policy-2")
+    # Query string form documented by Okta
+    assert lookup.resolve_resource_url(
+        "https://example.okta.com/api/v1/policies?type=ACCESS_POLICY"
+    ) == ("policy-1", "policy-2")
+    # No type at all means every policy
+    assert lookup.resolve_resource_url("https://example.okta.com/api/v1/policies") == (
+        "policy-1",
+        "policy-2",
+        "policy-3",
+    )
     assert lookup.resolve_resource_orn("orn:okta:idp:org-1:policies:ACCESS_POLICY") == (
         "policy-1",
         "policy-2",

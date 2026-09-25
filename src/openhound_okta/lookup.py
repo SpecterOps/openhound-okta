@@ -599,10 +599,18 @@ class OktaLookup(LookupManager):
         if path.startswith("/api/v1/idps/"):
             return self._existing_ids("identity_providers", path.rsplit("/", 1)[-1])
 
-        # All policies
         if path == "/api/v1/policies":
+            # All policies of one type in the form documented by Okta, e.g.
+            # /api/v1/policies?type=ACCESS_POLICY. Observed API responses use
+            # the path form handled below instead, but accept both.
+            policy_type = parse_qs(parsed_url.query).get("type", [None])[0]
+            if policy_type:
+                return self._ids_by_value("policies", "type", policy_type)
+            # All policies
             return self._all_ids("policies")
-        # All policies of one type, e.g. /api/v1/policies/ACCESS_POLICY.
+        # All policies of one type in the form actually returned by the Okta
+        # API, e.g. /api/v1/policies/ACCESS_POLICY. Okta never references
+        # individual policies by ID in resource sets.
         if path.startswith("/api/v1/policies/"):
             return self._ids_by_value("policies", "type", path.rsplit("/", 1)[-1])
 
