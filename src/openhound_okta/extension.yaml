@@ -1,7 +1,7 @@
 name: okta
 version: 0.0.3
-schema_version: v0.0.3
-description: "OpenHound collector for okta using OpenHound"
+schema_version: v2.9.0
+description: "OpenHound collector for Okta using OpenHound"
 authors:
   - name: Michael Grafnetter
     email: mgrafnetter@specterops.io

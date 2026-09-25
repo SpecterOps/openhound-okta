@@ -19,15 +19,24 @@ The edge is calculated based on custom role scoping.
 graph TD
     u1("Okta_User john\@contoso.com")
     u2("Okta_User alice\@contoso.com")
+    u3("Okta_User bob\@contoso.com")
     g1("Okta_Group Help Desk")
+    g2("Okta_Group Retail Staff")
     rs("Okta_ResourceSet Frontline Workers")
     a("Okta_RoleAssignment Authentication Admins")
     r("Okta_CustomRole Authentication Admins")
     g1 -. Okta_HasRole .-> r
     a -. Okta_ScopedTo .-> rs
     g1 -. Okta_HasRoleAssignment .-> a
-    rs -- Okta_ResourceSetContains --> u2
+    rs -. Okta_ResourceSetContains .-> u2
+    rs -. Okta_ResourceSetContainsMembersOf .-> g2
+    u3 -- Okta_MemberOf --> g2
+    rs -. Okta_ResourceSetContainsIndirect .-> u3
     u1 -- Okta_MemberOf --> g1
     g1 -- Okta_ResetPassword --> u2
     g1 -- Okta_ResetFactors --> u2
+    g1 -- Okta_ResetPassword --> u3
+    g1 -- Okta_ResetFactors --> u3
 ```
+
+Alice is a direct member of the resource set, while Bob is a member indirectly through the Retail Staff group. Both are therefore in scope of the role assignment.
