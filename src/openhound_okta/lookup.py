@@ -62,7 +62,7 @@ class OktaLookup(LookupManager):
             f"""SELECT label FROM {self.schema}.custom_role_permissions WHERE role_id = ? AND label = ?""",
             [role_id, permission],
         )
-        return res
+        return res is not None
 
     @lru_cache
     def custom_role_permissions(self, role_id: str) -> tuple[str, ...]:
@@ -77,7 +77,7 @@ class OktaLookup(LookupManager):
         return tuple(label for (label,) in rows)
 
     @lru_cache
-    def application_by_id(self, app_id: str) -> bool:
+    def application_by_id(self, app_id: str) -> str | None:
         res = self._find_single_object(
             f"""SELECT id FROM {self.schema}.applications WHERE id = ?""",
             [app_id],
@@ -85,7 +85,7 @@ class OktaLookup(LookupManager):
         return res
 
     @lru_cache
-    def group_by_id(self, group_id: str) -> bool:
+    def group_by_id(self, group_id: str) -> str | None:
         res = self._find_single_object(
             f"""SELECT id FROM {self.schema}.groups WHERE id = ?""",
             [group_id],
@@ -93,7 +93,7 @@ class OktaLookup(LookupManager):
         return res
 
     @lru_cache
-    def application_settings(self, app_id: str) -> bool:
+    def application_settings(self, app_id: str) -> str | None:
         res = self._find_single_object(
             f"""SELECT settings FROM {self.schema}.applications WHERE id = ?""",
             [app_id],

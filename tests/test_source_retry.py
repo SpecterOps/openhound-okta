@@ -32,6 +32,7 @@ from openhound_okta.source import (
     api_services,
     application_grants,
     application_group_assignment_rows,
+    application_secrets,
     application_group_push_mapping_row,
     application_group_push_mappings,
     application_jwk_rows,
@@ -1644,6 +1645,22 @@ def test_api_services_other_http_errors_propagate():
 
     with pytest.raises(requests.HTTPError):
         list(inspect.unwrap(api_services)(ctx))
+
+
+def test_application_secrets_skips_applications_without_credentials():
+    application = SimpleNamespace(
+        id="0oa123",
+        name="example_app",
+        credentials=None,
+    )
+
+    class UnexpectedPool:
+        def paginate(self, path, **kwargs):
+            raise AssertionError("the secrets endpoint must not be requested")
+
+    ctx = SimpleNamespace(pool=UnexpectedPool())
+
+    assert list(inspect.unwrap(application_secrets)(application, ctx)) == []
 
 
 class FailingPool:

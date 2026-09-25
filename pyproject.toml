@@ -36,9 +36,16 @@ dev = [
     "ruff>=0.15.5",
     "mypy>=1.19.1",
     "zensical>=0.0.27",
+    "types-defusedxml>=0.7.0.20260504",
 ]
 [project.entry-points."openhound.sources"]
 okta = "openhound_okta.main:app"
+
+# TODO: Remove this override once openhound ships a py.typed marker (PEP 561)
+# and the minimum openhound version is bumped accordingly.
+[[tool.mypy.overrides]]
+module = "openhound.*"
+follow_untyped_imports = true
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

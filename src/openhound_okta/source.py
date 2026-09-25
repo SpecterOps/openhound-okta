@@ -16,6 +16,7 @@ from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
 from dlt.common.configuration import configspec
 from dlt.common.configuration.specs import CredentialsConfiguration
+from dlt.common.typing import TSecretStrValue
 from dlt.sources.helpers.rest_client.auth import APIKeyAuth
 from dlt.sources.helpers.rest_client.client import RESTClient
 from dlt.sources.helpers.rest_client.paginators import HeaderLinkPaginator
@@ -232,7 +233,7 @@ IDENTITY_PROVIDER_USERS_PAGE_SIZE = 200
 
 @configspec
 class OktaCredentials(CredentialsConfiguration):
-    base_url: str = None
+    base_url: str = dlt.config.value
 
     def auth(self):
         pass
@@ -251,8 +252,8 @@ def _app_token(okta_auth: OktaAuth, base_url: str, client_id: str) -> Token:
 
 @configspec
 class OktaAppCredentials(OktaCredentials):
-    private_key_path: str = None
-    client_id: str = None
+    private_key_path: TSecretStrValue = dlt.secrets.value
+    client_id: str = dlt.config.value
 
     def auth(self) -> str:
         return "app"
@@ -271,8 +272,8 @@ class OktaAppCredentials(OktaCredentials):
 
 @configspec
 class OktaEncodedAppCredentials(OktaCredentials):
-    private_key_b64: str = None
-    client_id: str = None
+    private_key_b64: TSecretStrValue = dlt.secrets.value
+    client_id: str = dlt.config.value
 
     def auth(self) -> str:
         return "app"
@@ -292,7 +293,7 @@ class OktaEncodedAppCredentials(OktaCredentials):
 
 @configspec
 class OktaTokenCredentials(OktaCredentials):
-    token: str = None
+    token: TSecretStrValue = dlt.secrets.value
 
     def auth(self) -> str:
         return "token"
@@ -1163,7 +1164,9 @@ def application_group_push_mapping_row(
     name="application_secrets", columns=ApplicationSecrets, parallelized=True
 )
 def application_secrets(application: Application, ctx: SourceContext):
-    oauth_client = application.credentials.oauth_client
+    oauth_client = (
+        application.credentials.oauth_client if application.credentials else None
+    )
     if (
         oauth_client
         and oauth_client.token_endpoint_auth_method == "client_secret_basic"
@@ -1605,7 +1608,7 @@ def agent_pools(ctx: SourceContext):
 
 @app.transformer(name="agents", columns=Agent, parallelized=True)
 def agents(agent_pool: AgentPool):
-    for agent in agent_pool.agents:
+    for agent in agent_pool.agents or []:
         yield {
             **agent.model_dump(),
             "agent_pool_name": agent_pool.name,
