@@ -1,3 +1,5 @@
+import logging
+
 import duckdb
 
 from openhound_okta.lookup import OktaLookup
@@ -316,3 +318,18 @@ def test_application_lookup_derives_scopes_and_domain_sid():
         "okta.users.read",
     )
     assert lookup.application_domain_sid("app-1") == "S-1-5-21-111-222-333"
+
+
+def test_application_lookup_tolerates_tables_missing_under_least_privilege(caplog):
+    # A least-privilege collector role cannot read app grants or API service
+    # integrations, so neither table exists in the lookup database.
+    con = duckdb.connect()
+    con.execute("CREATE SCHEMA okta")
+    lookup = OktaLookup(con)
+
+    with caplog.at_level(logging.ERROR):
+        assert lookup.application_oauth_scopes("app-1") == ()
+        assert lookup.all_api_services() == []
+        assert lookup.api_service_ids_by_name("my_app_cie") == []
+
+    assert not caplog.records

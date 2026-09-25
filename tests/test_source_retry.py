@@ -1,5 +1,6 @@
 import inspect
 import logging
+from collections.abc import Iterator
 from threading import Event, Thread
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -15,17 +16,20 @@ from dlt.sources.helpers.requests.session import Session
 
 from openhound_okta.models.token import Token
 from openhound_okta.source import (
+    APPLICATION_GRANTS_ACCESS_DENIED_LIMIT,
     APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE,
     APPLICATION_USERS_PAGE_SIZE,
     GROUPS_PAGE_SIZE,
     GROUP_PUSH_MAPPINGS_PAGE_SIZE,
     IDENTITY_PROVIDER_USERS_PAGE_SIZE,
+    ConsecutiveAccessDeniedBreaker,
     OktaTokenCredentials,
     _microsoft_tenant_id_from_onmicrosoft_domain,
     _office365_tenant_id_fields,
     _saml_idp_metadata_fields,
     _saml_metadata_fields,
     _tenant_domain_from_base_url,
+    api_services,
     application_grants,
     application_group_assignment_rows,
     application_secrets,
@@ -1486,12 +1490,161 @@ def test_application_grants_retry_exhaustion_is_not_silently_discarded():
         sign_on_mode="OPENID_CONNECT",
         settings=None,
     )
-    ctx = SimpleNamespace(pool=FailingGrantPool())
+    ctx = SimpleNamespace(
+        pool=FailingGrantPool(),
+        application_grants_breaker=ConsecutiveAccessDeniedBreaker(
+            APPLICATION_GRANTS_ACCESS_DENIED_LIMIT
+        ),
+    )
 
     with pytest.raises(OktaRetryExhaustedError) as exc:
         next(inspect.unwrap(application_grants)(application, ctx))
 
     assert exc.value is error
+
+
+def _grants_application(app_id: str) -> SimpleNamespace:
+    """Return a minimal stand-in for an OIDC application record."""
+    return SimpleNamespace(id=app_id, sign_on_mode="OPENID_CONNECT", settings=None)
+
+
+ScriptedPoolAction = int | list[dict[str, str]]
+
+
+class ScriptedGrantsPool:
+    """Pool whose paginate replies follow a per-call script.
+
+    Attributes:
+        script: Remaining actions, consumed one per paginate call. An int
+            entry is an HTTP status code (the call raises an HTTPError with
+            that status); a list entry is one page of items the call yields.
+        calls: Number of paginate calls made so far.
+    """
+
+    def __init__(self, script: list[ScriptedPoolAction]) -> None:
+        self.script: list[ScriptedPoolAction] = list(script)
+        self.calls: int = 0
+
+    def paginate(self, path: str) -> Iterator[list[dict[str, str]]]:
+        """Replay the next scripted action for a paginated request.
+
+        Args:
+            path: Requested API path, used only to build the error URL.
+
+        Yields:
+            The next scripted page of items.
+
+        Raises:
+            requests.HTTPError: When the next scripted action is a status code.
+        """
+        self.calls += 1
+        action = self.script.pop(0)
+        if isinstance(action, int):
+            raise requests.HTTPError(
+                response=_response(action, f"https://example.okta.test{path}")
+            )
+        yield action
+
+
+def test_application_grants_stop_after_consecutive_access_denied(caplog):
+    pool = ScriptedGrantsPool([403] * 3)
+    ctx = SimpleNamespace(
+        pool=pool,
+        application_grants_breaker=ConsecutiveAccessDeniedBreaker(3),
+    )
+    grants = inspect.unwrap(application_grants)
+
+    with caplog.at_level(logging.WARNING):
+        for index in range(6):
+            assert list(grants(_grants_application(f"0oa{index}"), ctx)) == []
+
+    assert pool.calls == 3
+    assert ctx.application_grants_breaker.tripped
+    # Pre-trip denials log at debug level, so the whole run emits exactly one
+    # warning-or-above record: the breaker trip message.
+    warnings = [
+        record for record in caplog.records if record.levelno >= logging.WARNING
+    ]
+    assert len(warnings) == 1
+    assert "Skipping app grant collection" in warnings[0].getMessage()
+    assert warnings[0].levelno == logging.WARNING
+
+
+def test_application_grants_success_resets_consecutive_access_denied_count():
+    grant_page = [{"id": "grant-1", "scopeId": "okta.users.read"}]
+    pool = ScriptedGrantsPool([403, 403, grant_page, 403, 403, 403])
+    ctx = SimpleNamespace(
+        pool=pool,
+        application_grants_breaker=ConsecutiveAccessDeniedBreaker(3),
+    )
+    grants = inspect.unwrap(application_grants)
+
+    rows = []
+    for index in range(7):
+        rows.extend(grants(_grants_application(f"0oa{index}"), ctx))
+
+    # Two denials, one success (resetting the run), then three denials trip
+    # the breaker; the seventh application must not trigger a request.
+    assert pool.calls == 6
+    assert ctx.application_grants_breaker.tripped
+    assert rows == [{"app_id": "0oa2", "id": "grant-1", "scopeId": "okta.users.read"}]
+
+
+def test_application_grants_not_found_does_not_trip_the_breaker(caplog):
+    pool = ScriptedGrantsPool([404] * 5)
+    ctx = SimpleNamespace(
+        pool=pool,
+        application_grants_breaker=ConsecutiveAccessDeniedBreaker(1),
+    )
+    grants = inspect.unwrap(application_grants)
+
+    with caplog.at_level(logging.WARNING):
+        for index in range(5):
+            assert list(grants(_grants_application(f"0oa{index}"), ctx)) == []
+
+    assert pool.calls == 5
+    assert not ctx.application_grants_breaker.tripped
+    assert not caplog.records
+
+
+def test_application_grants_not_found_does_not_shield_the_breaker():
+    # A 404 carries no permission signal: it neither counts toward the limit
+    # nor resets the denial run the way a successful response does.
+    pool = ScriptedGrantsPool([403, 404, 403, 403])
+    ctx = SimpleNamespace(
+        pool=pool,
+        application_grants_breaker=ConsecutiveAccessDeniedBreaker(3),
+    )
+    grants = inspect.unwrap(application_grants)
+
+    for index in range(5):
+        assert list(grants(_grants_application(f"0oa{index}"), ctx)) == []
+
+    assert pool.calls == 4
+    assert ctx.application_grants_breaker.tripped
+
+
+def test_api_services_access_denied_is_skipped_with_a_warning(caplog):
+    pool = ScriptedGrantsPool([403])
+    ctx = SimpleNamespace(pool=pool)
+
+    with caplog.at_level(logging.WARNING):
+        assert list(inspect.unwrap(api_services)(ctx)) == []
+
+    assert pool.calls == 1
+    assert any(
+        "Access denied listing API service integrations" in record.getMessage()
+        for record in caplog.records
+    )
+    assert not any(record.levelno >= logging.ERROR for record in caplog.records)
+
+
+def test_api_services_other_http_errors_propagate():
+    pool = ScriptedGrantsPool([400])
+    ctx = SimpleNamespace(pool=pool)
+
+    with pytest.raises(requests.HTTPError):
+        list(inspect.unwrap(api_services)(ctx))
 
 
 def test_application_secrets_skips_applications_without_credentials():
