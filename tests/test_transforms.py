@@ -121,7 +121,7 @@ def test_users_id_index_ignores_same_name_in_another_schema() -> None:
     connection.close()
 
 
-def test_transforms_creates_users_index_after_derived_tables(monkeypatch) -> None:
+def test_transforms_creates_users_index_before_derived_work(monkeypatch) -> None:
     calls = []
     for name in (
         "principals_with_admin_roles",
@@ -140,10 +140,10 @@ def test_transforms_creates_users_index_after_derived_tables(monkeypatch) -> Non
     transforms_module.transforms(object(), "tenant_schema")
 
     assert calls == [
+        "ensure_users_id_index",
         "principals_with_admin_roles",
         "insert_principals_with_admin_roles",
         "non_admin_users",
         "non_admin_groups",
         "non_admin_apps",
-        "ensure_users_id_index",
     ]

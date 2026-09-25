@@ -1,6 +1,5 @@
 import duckdb
 
-
 USERS_ID_INDEX_NAME = "users_id_idx"
 
 
@@ -111,9 +110,9 @@ def non_admin_apps(con, schema: str = "okta") -> None:
 
 
 def transforms(con: duckdb.DuckDBPyConnection, schema: str = "okta") -> None:
+    ensure_users_id_index(con, schema)
     principals_with_admin_roles(con, schema)
     insert_principals_with_admin_roles(con, schema)
     non_admin_users(con, schema)
     non_admin_groups(con, schema)
     non_admin_apps(con, schema)
-    ensure_users_id_index(con, schema)

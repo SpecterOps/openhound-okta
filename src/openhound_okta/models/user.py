@@ -21,7 +21,9 @@ class UserProperties(OktaNodeProperties):
     created: datetime
     enabled: bool = False
     has_role_assignments: bool = False
-    authentication_factors: int = 0
+    # None means factors were not collected for the user (not privileged);
+    # 0 means the user is privileged and has no enrolled factors.
+    authentication_factors: int | None = None
     login: str | None = None
     email: str | None = None
     last_login: datetime | None = None
@@ -139,9 +141,7 @@ class User(BaseAsset):
                 displayname=display_name,
                 okta_domain=self._extras["tenant"],
                 enabled=self.enabled,
-                has_role_assignments=self._lookup.has_role_assignments(
-                    self.id, "user"
-                ),
+                has_role_assignments=self._lookup.has_role_assignments(self.id, "user"),
                 authentication_factors=self._lookup.user_authentication_factors_count(
                     self.id
                 ),
