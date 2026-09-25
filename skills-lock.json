@@ -1,14 +1,22 @@
 {
   "version": 1,
   "skills": {
+    "openhound": {
+      "source": "SpecterOps/openhound-template",
+      "sourceType": "github",
+      "skillPath": "{{ cookiecutter.project_slug }}/.agents/skills/openhound/SKILL.md",
+      "computedHash": "c12933d92051ef0a4b655758fcc049e6261d3dca430be766f5b038031e277bb1"
+    },
     "openhound-edge-docs": {
-      "source": "./docs/og-docs-automation/skills",
-      "sourceType": "local",
+      "source": "SpecterOps/og-docs-automation",
+      "sourceType": "github",
+      "skillPath": "skills/openhound-edge-docs/SKILL.md",
       "computedHash": "82321f5516baaf32c4bf14cafe581a4a1598759b643ab40d753f34c4b72576fb"
     },
     "openhound-entity-panels": {
-      "source": "./docs/og-docs-automation/skills",
-      "sourceType": "local",
+      "source": "SpecterOps/og-docs-automation",
+      "sourceType": "github",
+      "skillPath": "skills/openhound-entity-panels/SKILL.md",
       "computedHash": "bba91aa73406e55731d9b057a77e20f4d57694375d02e17c1e68ddb7675f3335"
     }
   }

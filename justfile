@@ -23,7 +23,8 @@ sync:
 
 skills:
     @echo "Installing shared agent skills"
-    npx skills add ./docs/og-docs-automation/skills --skill '*' --agent codex claude-code --project --yes
+    npx skills add https://github.com/SpecterOps/og-docs-automation --skill '*' --agent codex claude-code --project --yes
+    npx skills add https://github.com/SpecterOps/openhound-template --skill '*' --agent codex claude-code --project --yes
 
 db:
     @echo "Opening the lookup database in the DuckDB UI"
