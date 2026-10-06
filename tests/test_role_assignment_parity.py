@@ -414,6 +414,79 @@ def test_targetable_standard_role_assignment_without_collected_scope_does_not_in
     assert list(assignment._scoped_to_org_edge) == []
 
 
+class StubLookupWithAdminPrincipals(StubLookup):
+    def all_users(self):
+        return [("user-1",), ("admin-user",)]
+
+    def non_admin_users(self):
+        return [("user-1",)]
+
+    def all_groups(self):
+        return [("group-1",), ("admin-group",)]
+
+    def non_admin_groups(self):
+        return [("group-1",)]
+
+    def all_devices(self):
+        return (("device-1",),)
+
+
+@pytest.mark.parametrize(
+    ("model_cls", "from_resource", "assignment_type"),
+    [
+        (UserRoleAssignment, "user", "USER"),
+        (GroupRoleAssignment, "group", "GROUP"),
+        (ClientRoleAssignment, "client", "CLIENT"),
+    ],
+)
+def test_org_admin_targets_only_non_admin_principals_and_devices(
+    model_cls, from_resource, assignment_type
+):
+    assignment = make_assignment(
+        model_cls,
+        from_resource=from_resource,
+        source_id=f"{from_resource}-1",
+        assignment_type=assignment_type,
+        role_type="ORG_ADMIN",
+    )
+    assignment._lookup = StubLookupWithAdminPrincipals()
+
+    edges = list(assignment._org_admin_edges)
+
+    assert {edge.kind for edge in edges} == {ek.ORG_ADMIN}
+    assert {edge.start.value for edge in edges} == {f"{from_resource}-1".upper()}
+    # Principals with role assignments and applications are not targets.
+    assert sorted(edge.end.value for edge in edges) == [
+        "DEVICE-1",
+        "GROUP-1",
+        "USER-1",
+    ]
+
+
+def test_org_admin_ignores_embedded_targets():
+    assignment = make_assignment(
+        UserRoleAssignment,
+        from_resource="user",
+        source_id="user-1",
+        assignment_type="USER",
+        role_type="ORG_ADMIN",
+        _embedded={
+            "targets": {
+                "groups": [
+                    {"id": "admin-group", "type": "OKTA_GROUP", "objectClass": []}
+                ]
+            }
+        },
+    )
+    assignment._lookup = StubLookupWithAdminPrincipals()
+
+    assert sorted(edge.end.value for edge in assignment._org_admin_edges) == [
+        "DEVICE-1",
+        "GROUP-1",
+        "USER-1",
+    ]
+
+
 def test_group_targeted_standard_role_assignment_is_not_scoped_to_org():
     assignment = make_assignment(
         UserRoleAssignment,

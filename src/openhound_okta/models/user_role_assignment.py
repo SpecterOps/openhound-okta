@@ -2,11 +2,10 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from openhound.core.asset import EdgeDef, NodeDef
-from openhound.core.models.entries_dataclass import Edge, EdgeProperties
 from pydantic import BaseModel
 from pydantic import ConfigDict, Field
 
-from openhound_okta.graph import OktaOwnedEdgePath, OktaNode, OktaNodeProperties
+from openhound_okta.graph import OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
 from openhound_okta.models.role_assignment import RoleAssignment
@@ -303,7 +302,7 @@ class Embedded(BaseModel):
             start=nk.USER,
             end=nk.USER,
             kind=ek.ORG_ADMIN,
-            description="Group has ORG_ADMIN role",
+            description="User has ORG_ADMIN role",
             traversable=True,
         ),
         EdgeDef(
@@ -317,7 +316,7 @@ class Embedded(BaseModel):
             start=nk.USER,
             end=nk.DEVICE,
             kind=ek.ORG_ADMIN,
-            description="Application has ORG_ADMIN role",
+            description="User has ORG_ADMIN role",
             traversable=True,
         ),
         # Org admin
@@ -474,91 +473,7 @@ class UserRoleAssignment(RoleAssignment):
 
     @property
     def _org_admin_edges(self):
-        """
-        ORG_ADMIN permission edges: (:Assignee)-[:Okta_OrgAdmin]->(:User|:Group|:Device|:Application)
-        Org admins have permissions on users, groups, and devices.
-        If role has specific targets, emit edges only to those targets.
-        If no targets, emit to all users, groups, devices, and applications.
-        Entities with role assignments cannot be managed by ORG_ADMIN.
-        """
-        if self.type == "ORG_ADMIN":
-            has_targets = (
-                    self.embedded
-                    and self.embedded.targets
-                    and (
-                            (
-                                    self.embedded.targets.groups
-                                    and len(self.embedded.targets.groups) > 0
-                            )
-                            or (
-                                    self.embedded.targets.catalog
-                                    and self.embedded.targets.catalog.apps
-                                    and len(self.embedded.targets.catalog.apps) > 0
-                            )
-                    )
-            )
-
-            if has_targets:
-                # Emit only to scoped targets
-                if self.embedded.targets.groups:
-                    for group in self.embedded.targets.groups:
-                        yield Edge(
-                            kind=ek.ORG_ADMIN,
-                            start=OktaOwnedEdgePath(
-                                value=self.source_id, match_by="id"
-                            ),
-                            end=OktaOwnedEdgePath(value=group.id, match_by="id"),
-                            properties=EdgeProperties(traversable=True),
-                        )
-
-                if self.embedded.targets.catalog and self.embedded.targets.catalog.apps:
-                    for app in self.embedded.targets.catalog.apps:
-                        if app.id:
-                            yield Edge(
-                                kind=ek.ORG_ADMIN,
-                                start=OktaOwnedEdgePath(
-                                    value=self.source_id, match_by="id"
-                                ),
-                                end=OktaOwnedEdgePath(value=app.id, match_by="id"),
-                                properties=EdgeProperties(traversable=True),
-                            )
-            else:
-                # No targets specified, emit to all users, groups, devices, and apps
-                all_devices = self._lookup.all_devices()
-                for (device_id,) in all_devices:
-                    yield Edge(
-                        kind=ek.ORG_ADMIN,
-                        start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
-                        end=OktaOwnedEdgePath(value=device_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
-                    )
-
-                all_users = self._lookup.all_users()
-                for (user_id,) in all_users:
-                    yield Edge(
-                        kind=ek.ORG_ADMIN,
-                        start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
-                        end=OktaOwnedEdgePath(value=user_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
-                    )
-
-                all_groups = self._lookup.all_groups()
-                for (group_id,) in all_groups:
-                    yield Edge(
-                        kind=ek.ORG_ADMIN,
-                        start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
-                        end=OktaOwnedEdgePath(value=group_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
-                    )
-
-                all_apps = self._lookup.all_applications()
-                for (app_id,) in all_apps:
-                    yield Edge(
-                        kind=ek.ORG_ADMIN,
-                        start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
-                        end=OktaOwnedEdgePath(value=app_id, match_by="id"),
-                        properties=EdgeProperties(traversable=True),
-                    )
+        yield from super()._org_admin_edges
 
     @property
     def _user_admin_edges(self):

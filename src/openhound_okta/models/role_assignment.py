@@ -408,6 +408,29 @@ class RoleAssignment(BaseAsset):
             )
 
     @property
+    def _org_admin_edges(self):
+        """
+        ORG_ADMIN is an org-wide role that cannot be scoped to specific principals.
+        It manages all users and groups without role assignments, and all devices.
+        It cannot manage applications.
+        """
+        if self.type != "ORG_ADMIN":
+            return
+
+        target_ids = (
+            *self._ids(self._lookup.non_admin_users()),
+            *self._ids(self._lookup.non_admin_groups()),
+            *self._ids(self._lookup.all_devices()),
+        )
+        for target_id in target_ids:
+            yield Edge(
+                kind=ek.ORG_ADMIN,
+                start=OktaOwnedEdgePath(value=self.source_id, match_by="id"),
+                end=OktaOwnedEdgePath(value=target_id, match_by="id"),
+                properties=EdgeProperties(traversable=True),
+            )
+
+    @property
     def _user_admin_edges(self):
         if self.type != "USER_ADMIN":
             return
