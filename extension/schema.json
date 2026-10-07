@@ -356,7 +356,7 @@
           "title": "Edge Composition",
           "position": 2,
           "markdown": {
-            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $query := printf \"MATCH p1 = (source:Okta {objectid: '%s'})-[:Okta_SuperAdmin]->(target:Okta_Organization {objectid: '%s'})\\nMATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment)-[:Okta_ScopedTo]->(scope:Okta)\\nWHERE assignment.type = 'SUPER_ADMIN'\\nOPTIONAL MATCH p3 = (source)-[:Okta_HasRole]->(role:Okta_Role)\\nWHERE role.objectid STARTS WITH 'SUPER_ADMIN@'\\nRETURN p1, p2, p3\\nLIMIT 500\" $sourceID $targetID }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $query := printf \"MATCH p1 = (source:Okta {objectid: '%s'})-[:Okta_SuperAdmin]->(target:Okta_Organization {objectid: '%s'})\\nMATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment)-[:Okta_ScopedTo]->(org:Okta_Organization)\\nWHERE assignment.type = 'SUPER_ADMIN'\\nOPTIONAL MATCH p3 = (source)-[:Okta_HasRole]->(role:Okta_Role)\\nWHERE role.objectid STARTS WITH 'SUPER_ADMIN@'\\nOPTIONAL MATCH p4 = (org)-[:Okta_Contains]->(role)\\nRETURN p1, p2, p3, p4\\nLIMIT 500\" $sourceID $targetID }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
           }
         }
       }
@@ -364,7 +364,23 @@
     {
       "name": "Okta_OrgAdmin",
       "description": "Organization administrator role assignment",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_OrgAdmin edges represent Organization Administrator role assignments. Organization Administrators can manage most organizational settings except for administrative role assignments and some security settings.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_orgadmin)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $query := printf \"MATCH p1 = (source:Okta {objectid: '%s'})-[:Okta_OrgAdmin]->(target:Okta {objectid: '%s'})\\nMATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment)-[:Okta_ScopedTo]->(org:Okta_Organization)\\nWHERE assignment.type = 'ORG_ADMIN'\\nOPTIONAL MATCH p3 = (source)-[:Okta_HasRole]->(role:Okta_Role)\\nWHERE role.objectid STARTS WITH 'ORG_ADMIN@'\\nOPTIONAL MATCH p4 = (org)-[:Okta_Contains]->(target)\\nRETURN p1, p2, p3, p4\\nLIMIT 500\" $sourceID $targetID }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_MobileAdmin",
