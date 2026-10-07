@@ -283,7 +283,23 @@
     {
       "name": "Okta_MemberOf",
       "description": "Membership of a user in an Okta group",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_MemberOf edges represent the membership relationships between users and groups in Okta.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_memberof)"
+          }
+        },
+        "membership": {
+          "title": "Membership",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $membersQuery := printf \"MATCH p = (member:Okta_User)-[:Okta_MemberOf]->(group:Okta_Group {objectid: '%s'})\\nRETURN p\\nLIMIT 500\" $targetID }}\n{{ $membershipsQuery := printf \"MATCH p = (user:Okta_User {objectid: '%s'})-[:Okta_MemberOf]->(group:Okta_Group)\\nRETURN p\\nLIMIT 500\" $sourceID }}\n- [Group Members](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $membersQuery | b64enc | urlquery }})\n- [Group Memberships](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $membershipsQuery | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_HasRole",
