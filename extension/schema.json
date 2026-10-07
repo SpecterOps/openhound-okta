@@ -323,7 +323,23 @@
     {
       "name": "Okta_AppAdmin",
       "description": "Application administrator role assignment",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_AppAdmin edges represent Application Administrator role assignments. Application Administrators can manage application configurations, user assignments, and provisioning settings for their assigned applications.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_appadmin)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $sourceKind := \"Okta\" }}{{ range .Source.Kinds }}{{ if ne .Name \"Okta\" }}{{ $sourceKind = .Name }}{{ end }}{{ end }}\n{{ $targetKind := \"Okta\" }}{{ range .Target.Kinds }}{{ if ne .Name \"Okta\" }}{{ $targetKind = .Name }}{{ end }}{{ end }}\n{{ $match1 := printf \"MATCH p1 = (source:%s {objectid: '%s'})-[:Okta_AppAdmin]->(target:%s {objectid: '%s'})\" $sourceKind $sourceID $targetKind $targetID }}\n{{ $match2 := printf \"MATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment {type: 'APP_ADMIN'})-[:Okta_ScopedTo]->(scope:Okta)\\nWHERE scope:Okta_Organization OR scope.objectid = '%s'\" $targetID }}\n{{ $match3 := \"OPTIONAL MATCH p3 = (source)-[:Okta_HasRole]->(role:Okta_Role)\\nWHERE role.objectid STARTS WITH 'APP_ADMIN@'\" }}\n{{ $match4 := \"OPTIONAL MATCH p4 = (scope:Okta_Organization)-[:Okta_Contains]->(target)\" }}\n{{ $result := \"RETURN p1, p2, p3, p4\\nLIMIT 500\" }}\n{{ $query := join \"\\n\" (list $match1 $match2 $match3 $match4 $result) }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_GroupAdmin",
