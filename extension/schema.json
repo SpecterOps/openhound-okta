@@ -343,7 +343,23 @@
     {
       "name": "Okta_SuperAdmin",
       "description": "Super administrator role assignment",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_SuperAdmin edges represent Super Administrator role assignments, which are scoped to the entire Okta organization. Super Administrators have full access to all features and settings in the Okta organization.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_superadmin)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $query := printf \"MATCH p1 = (source:Okta {objectid: '%s'})-[:Okta_SuperAdmin]->(target:Okta_Organization {objectid: '%s'})\\nMATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment)-[:Okta_ScopedTo]->(scope:Okta)\\nWHERE assignment.type = 'SUPER_ADMIN'\\nOPTIONAL MATCH p3 = (source)-[:Okta_HasRole]->(role:Okta_Role)\\nWHERE role.objectid STARTS WITH 'SUPER_ADMIN@'\\nRETURN p1, p2, p3\\nLIMIT 500\" $sourceID $targetID }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_OrgAdmin",
