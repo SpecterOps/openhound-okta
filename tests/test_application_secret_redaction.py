@@ -24,6 +24,7 @@ from openhound_okta.source import (
     SourceContext,
     application_secrets,
     applications,
+    identity_providers,
     organization,
 )
 from openhound_okta.transforms import transforms
@@ -73,6 +74,34 @@ SECRET_ITEM = {
 }
 
 
+# Shape of GET /api/v1/idps for an OIDC identity provider, whose protocol
+# credentials include the plaintext client_secret.
+IDP_PLAINTEXT_SECRET = "SYNTHETIC-IDP-SECRET-bed10001"
+IDENTITY_PROVIDER = {
+    "id": "idp-1",
+    "type": "OIDC",
+    "name": "Example OIDC IdP",
+    "status": "ACTIVE",
+    "created": "2026-01-01T00:00:00Z",
+    "lastUpdated": "2026-01-02T00:00:00Z",
+    "protocol": {
+        "type": "OIDC",
+        "endpoints": {
+            "authorization": {
+                "url": "https://idp.example.com/authorize",
+                "binding": "HTTP-REDIRECT",
+            }
+        },
+        "credentials": {
+            "client": {
+                "client_id": "idp-client-id",
+                "client_secret": IDP_PLAINTEXT_SECRET,
+            }
+        },
+    },
+}
+
+
 class StubPool:
     """ClientPool stand-in serving canned pages for the secret collection path."""
 
@@ -81,6 +110,7 @@ class StubPool:
             "/api/v1/org": [ORG],
             "/api/v1/apps": [[APPLICATION]],
             "/api/v1/apps/app-1/credentials/secrets": [[SECRET_ITEM]],
+            "/api/v1/idps": [[IDENTITY_PROVIDER]],
         }
         return pages[path]
 
@@ -104,13 +134,16 @@ def test_collect_and_preproc_artifacts_contain_no_plaintext_client_secret(
         yield organization(ctx)
         yield applications_resource
         yield applications_resource | application_secrets(ctx)
+        yield identity_providers(ctx)
 
     Collector(name="okta", output_path=raw_dir).run(fake_source())
 
     # Raw JSONL collection artifacts.
     jsonl_files = list(raw_dir.rglob("*.jsonl.gz"))
     for path in jsonl_files:
-        assert PLAINTEXT_SECRET not in gzip.decompress(path.read_bytes()).decode()
+        content = gzip.decompress(path.read_bytes()).decode()
+        assert PLAINTEXT_SECRET not in content
+        assert IDP_PLAINTEXT_SECRET not in content
 
     secret_rows = [
         json.loads(line)
@@ -147,6 +180,7 @@ def test_collect_and_preproc_artifacts_contain_no_plaintext_client_secret(
             "organization": "organization",
             "applications": "applications",
             "application_secrets": "application_secrets",
+            "identity_providers": "identity_providers",
         }
     )
 
@@ -173,6 +207,15 @@ def test_collect_and_preproc_artifacts_contain_no_plaintext_client_secret(
             assert "client_secret" not in columns, table
             for row in con.execute(f'SELECT * FROM okta."{table}"').fetchall():
                 assert PLAINTEXT_SECRET not in repr(row), table
+                assert IDP_PLAINTEXT_SECRET not in repr(row), table
+
+        # The IdP keeps its client_id; only the nested client_secret is gone.
+        (protocol,) = con.execute(
+            "SELECT protocol FROM okta.identity_providers"
+        ).fetchone()
+        assert json.loads(protocol)["credentials"]["client"] == {
+            "client_id": "idp-client-id"
+        }
 
         # Metadata needed to model the secret survives the full path.
         (secret_id, secret_hash, status, created, last_updated, links) = con.execute(

@@ -1761,7 +1761,31 @@ def identity_providers(ctx: SourceContext):
             protocol = item.get("protocol") or {}
             if item.get("type") == "SAML2" and protocol.get("type") == "SAML2":
                 item = {**item, **_saml_idp_metadata_fields(ctx, item)}
-            yield item
+            yield _redact_idp_client_secret(item)
+
+
+def _redact_idp_client_secret(item: dict[str, Any]) -> dict[str, Any]:
+    # Okta returns the plaintext client_secret of OIDC and social identity
+    # providers under protocol.credentials.client; only client_id is modeled.
+    protocol = item.get("protocol")
+    if not isinstance(protocol, dict):
+        return item
+    credentials = protocol.get("credentials")
+    if not isinstance(credentials, dict):
+        return item
+    client = credentials.get("client")
+    if not isinstance(client, dict) or "client_secret" not in client:
+        return item
+    return {
+        **item,
+        "protocol": {
+            **protocol,
+            "credentials": {
+                **credentials,
+                "client": {k: v for k, v in client.items() if k != "client_secret"},
+            },
+        },
+    }
 
 
 @app.transformer(name="identity_provider_users", columns=IDPUser, parallelized=True)
