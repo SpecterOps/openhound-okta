@@ -330,7 +330,23 @@
     {
       "name": "Okta_ResetFactors",
       "description": "Ability to reset MFA factors for scoped Okta users",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_ResetFactors edges represent custom role permissions that allow a principal to reset MFA authenticators for scoped Okta users. These edges are created when a custom role includes the `okta.users.credentials.resetFactors` or `okta.users.credentials.manage` permissions.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_resetfactors)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $sourceKind := \"Okta\" }}{{ range .Source.Kinds }}{{ if ne .Name \"Okta\" }}{{ $sourceKind = .Name }}{{ end }}{{ end }}\n{{ $match1 := printf \"MATCH p1 = (source:%s {objectid: '%s'})-[:Okta_ResetFactors]->(target:Okta_User {objectid: '%s'})\" $sourceKind $sourceID $targetID }}\n{{ $match2 := \"MATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment {type: 'CUSTOM'})-[:Okta_ScopedTo]->(resourceSet:Okta_ResourceSet)-[:Okta_ResourceSetContains|Okta_ResourceSetContainsIndirect]->(target)\" }}\n{{ $match3 := \"OPTIONAL MATCH p3 = (source)-[:Okta_HasRole]->(role:Okta_CustomRole)\\nWHERE 'okta.users.credentials.resetFactors' IN role.permissions OR 'okta.users.credentials.manage' IN role.permissions OR 'okta.users.manage' IN role.permissions\" }}\n{{ $match4 := \"OPTIONAL MATCH p4 = (resourceSet)-[:Okta_ResourceSetContainsMembersOf]->(group:Okta_Group)<-[:Okta_MemberOf]-(target)\" }}\n{{ $result := \"RETURN p1, p2, p3, p4\\nLIMIT 500\" }}\n{{ $query := join \"\\n\" (list $match1 $match2 $match3 $match4 $result) }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_AddMember",
