@@ -25,21 +25,21 @@
           "title": "Inbound Object Control",
           "position": 2,
           "markdown": {
-            "content": "{{ $objectID := .Properties.objectid | default \"\" | trim }}\n{{ $escapedObjectID := $objectID | replace \"\\\\\" \"\\\\\\\\\" | replace \"'\" \"\\\\'\" }}\n{{ if ne $objectID \"\" }}\n{{ $superAdminQuery := printf \"MATCH p = (:Okta)-[:Okta_ApiTokenFor|Okta_DeviceOf|Okta_MemberOf|Okta_SuperAdmin*1..3]->(selected:Okta_Organization {objectid: '%s'})\\nRETURN p\\nLIMIT 500\" $escapedObjectID }}\n{{ $orgAdminQuery := printf \"MATCH p = (:Okta)-[:Okta_ApiTokenFor|Okta_DeviceOf|Okta_MemberOf|Okta_HasRole*1..3]->(role:Okta_Role)<-[:Okta_Contains]-(selected:Okta_Organization {objectid: '%s'})\\nWHERE role.objectid STARTS WITH 'ORG_ADMIN@'\\nRETURN p\\nLIMIT 500\" $escapedObjectID }}\n- [Super Admins](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $superAdminQuery | b64enc | urlquery }})\n- [Org Admins](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $orgAdminQuery | b64enc | urlquery }})\n{{ else }}\nExplore navigation is unavailable because this object has no stable identifier.\n{{ end }}"
+            "content": "{{ $objectID := .Properties.objectid | default \"UnknownId\" }}\n{{ $superAdminQuery := printf \"MATCH p = (:Okta)-[:Okta_ApiTokenFor|Okta_DeviceOf|Okta_MemberOf|Okta_SuperAdmin*1..3]->(selected:Okta_Organization {objectid: '%s'})\\nRETURN p\\nLIMIT 500\" $objectID }}\n{{ $orgAdminQuery := printf \"MATCH p = (:Okta)-[:Okta_ApiTokenFor|Okta_DeviceOf|Okta_MemberOf|Okta_HasRole*1..3]->(role:Okta_Role)<-[:Okta_Contains]-(selected:Okta_Organization {objectid: '%s'})\\nWHERE role.objectid STARTS WITH 'ORG_ADMIN@'\\nRETURN p\\nLIMIT 500\" $objectID }}\n- [Super Admins](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $superAdminQuery | b64enc | urlquery }})\n- [Org Admins](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $orgAdminQuery | b64enc | urlquery }})"
           }
         },
         "management": {
           "title": "Management",
           "position": 3,
           "markdown": {
-            "content": "{{ $objectID := .Properties.objectid | default \"\" | trim }}\n{{ $escapedObjectID := $objectID | replace \"\\\\\" \"\\\\\\\\\" | replace \"'\" \"\\\\'\" }}\n{{ if ne $objectID \"\" }}\n{{ $adminConsoleQuery := printf \"MATCH p = (selected:Okta_Organization {objectid: '%s'})-[:Okta_Contains]->(:Okta)-[:Okta_AppAssignment]->(console:Okta_Application)\\nWHERE console.app_type = 'saasure'\\nRETURN p\\nLIMIT 500\" $escapedObjectID }}\n{{ $orgScopedQuery := printf \"MATCH p = (:Okta)-[:Okta_HasRoleAssignment|Okta_MemberOf*1..2]->(:Okta_RoleAssignment)-[:Okta_ScopedTo]->(selected:Okta_Organization {objectid: '%s'})\\nRETURN p\\nLIMIT 500\" $escapedObjectID }}\n- [Admin Console Access](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $adminConsoleQuery | b64enc | urlquery }})\n- [Organization-Scoped Role Assignments](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $orgScopedQuery | b64enc | urlquery }})\n{{ else }}\nExplore navigation is unavailable because this object has no stable identifier.\n{{ end }}"
+            "content": "{{ $objectID := .Properties.objectid | default \"UnknownId\" }}\n{{ $adminConsoleQuery := printf \"MATCH p = (selected:Okta_Organization {objectid: '%s'})-[:Okta_Contains]->(:Okta)-[:Okta_AppAssignment]->(console:Okta_Application)\\nWHERE console.app_type = 'saasure'\\nRETURN p\\nLIMIT 500\" $objectID }}\n{{ $orgScopedQuery := printf \"MATCH p = (:Okta)-[:Okta_HasRoleAssignment|Okta_MemberOf*1..2]->(:Okta_RoleAssignment)-[:Okta_ScopedTo]->(selected:Okta_Organization {objectid: '%s'})\\nRETURN p\\nLIMIT 500\" $objectID }}\n- [Admin Console Access](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $adminConsoleQuery | b64enc | urlquery }})\n- [Organization-Scoped Role Assignments](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $orgScopedQuery | b64enc | urlquery }})"
           }
         },
         "cross_tenant_trust": {
           "title": "Cross-Tenant Trust Relationships",
           "position": 4,
           "markdown": {
-            "content": "{{ $objectID := .Properties.objectid | default \"\" | trim }}\n{{ $escapedObjectID := $objectID | replace \"\\\\\" \"\\\\\\\\\" | replace \"'\" \"\\\\'\" }}\n{{ if ne $objectID \"\" }}\n{{ $inboundTrustQuery := printf \"MATCH p = (selected:Okta_Organization {objectid: '%s'})-[:Okta_Contains]->(local:Okta)<-[:Okta_InboundOrgSSO|Okta_OutboundOrgSSO|Okta_KerberosSSO]-(external)\\nWHERE local:Okta_IdentityProvider OR local:Okta_Application\\nRETURN p\\nLIMIT 500\" $escapedObjectID }}\n{{ $outboundTrustQuery := printf \"MATCH p = (selected:Okta_Organization {objectid: '%s'})-[:Okta_Contains]->(app:Okta_Application)-[:Okta_OutboundOrgSSO|Okta_OrgSWA]->(external)\\nRETURN p\\nLIMIT 500\" $escapedObjectID }}\n- [Inbound Trusts](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $inboundTrustQuery | b64enc | urlquery }})\n- [Outbound Trusts](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $outboundTrustQuery | b64enc | urlquery }})\n{{ else }}\nExplore navigation is unavailable because this object has no stable identifier.\n{{ end }}"
+            "content": "{{ $objectID := .Properties.objectid | default \"UnknownId\" }}\n{{ $inboundTrustQuery := printf \"MATCH p = (selected:Okta_Organization {objectid: '%s'})-[:Okta_Contains]->(local:Okta)<-[:Okta_InboundOrgSSO|Okta_OutboundOrgSSO|Okta_KerberosSSO]-(external)\\nWHERE local:Okta_IdentityProvider OR local:Okta_Application\\nRETURN p\\nLIMIT 500\" $objectID }}\n{{ $outboundTrustQuery := printf \"MATCH p = (selected:Okta_Organization {objectid: '%s'})-[:Okta_Contains]->(app:Okta_Application)-[:Okta_OutboundOrgSSO|Okta_OrgSWA]->(external)\\nRETURN p\\nLIMIT 500\" $objectID }}\n- [Inbound Trusts](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $inboundTrustQuery | b64enc | urlquery }})\n- [Outbound Trusts](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $outboundTrustQuery | b64enc | urlquery }})"
           }
         }
       }
@@ -402,7 +402,23 @@
     {
       "name": "Okta_HelpDeskAdmin",
       "description": "Help desk administrator role assignment",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_HelpDeskAdmin edges represent Help Desk Administrator role assignments. Help Desk Administrators can perform password resets, unlock accounts, and reset MFA factors for users within their assigned scope.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_helpdeskadmin)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $sourceKind := \"Okta\" }}{{ range .Source.Kinds }}{{ if ne .Name \"Okta\" }}{{ $sourceKind = .Name }}{{ end }}{{ end }}\n{{ $match1 := printf \"MATCH p1 = (source:%s {objectid: '%s'})-[:Okta_HelpDeskAdmin]->(target:Okta_User {objectid: '%s'})\" $sourceKind $sourceID $targetID }}\n{{ $match2 := \"MATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment {type: 'HELP_DESK_ADMIN'})-[:Okta_ScopedTo]->(scope:Okta)\\nWHERE scope:Okta_Organization OR scope:Okta_Group\" }}\n{{ $match3 := \"OPTIONAL MATCH p3 = (source)-[:Okta_HasRole]->(role:Okta_Role)\\nWHERE role.objectid STARTS WITH 'HELP_DESK_ADMIN@'\" }}\n{{ $match4 := \"OPTIONAL MATCH p4 = (scope:Okta_Organization)-[:Okta_Contains]->(target)\" }}\n{{ $match5 := \"OPTIONAL MATCH p5 = (target)-[:Okta_MemberOf]->(scope:Okta_Group)\" }}\n{{ $result := \"RETURN p1, p2, p3, p4, p5\\nLIMIT 500\" }}\n{{ $query := join \"\\n\" (list $match1 $match2 $match3 $match4 $match5 $result) }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_SuperAdmin",
