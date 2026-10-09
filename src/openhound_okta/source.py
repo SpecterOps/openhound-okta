@@ -1371,7 +1371,13 @@ def application_secrets(application: Application, ctx: SourceContext):
             f"/api/v1/apps/{application.id}/credentials/secrets"
         ):
             for item in page:
-                yield {"app_id": application.id, "app_name": application.name, **item}
+                # Okta always returns the plaintext client_secret here and offers
+                # no way to suppress it; secret_hash is enough to model the secret.
+                yield {
+                    "app_id": application.id,
+                    "app_name": application.name,
+                    **{k: v for k, v in item.items() if k != "client_secret"},
+                }
 
 
 @app.transformer(
@@ -1386,7 +1392,13 @@ def api_service_secret_rows(api_service: ApiService, ctx: SourceContext):
         f"/integrations/api/v1/api-services/{api_service.id}/credentials/secrets"
     ):
         for item in page:
-            yield {"app_id": api_service.id, "app_name": api_service.name, **item}
+            # Okta already redacts this value (e.g. "***************bHuy"), but it
+            # is dropped anyway, matching the application secrets handling.
+            yield {
+                "app_id": api_service.id,
+                "app_name": api_service.name,
+                **{k: v for k, v in item.items() if k != "client_secret"},
+            }
 
 
 @app.transformer(name="application_users", columns=ApplicationUser, parallelized=True)
@@ -1749,7 +1761,31 @@ def identity_providers(ctx: SourceContext):
             protocol = item.get("protocol") or {}
             if item.get("type") == "SAML2" and protocol.get("type") == "SAML2":
                 item = {**item, **_saml_idp_metadata_fields(ctx, item)}
-            yield item
+            yield _redact_idp_client_secret(item)
+
+
+def _redact_idp_client_secret(item: dict[str, Any]) -> dict[str, Any]:
+    # Okta returns the plaintext client_secret of OIDC and social identity
+    # providers under protocol.credentials.client; only client_id is modeled.
+    protocol = item.get("protocol")
+    if not isinstance(protocol, dict):
+        return item
+    credentials = protocol.get("credentials")
+    if not isinstance(credentials, dict):
+        return item
+    client = credentials.get("client")
+    if not isinstance(client, dict) or "client_secret" not in client:
+        return item
+    return {
+        **item,
+        "protocol": {
+            **protocol,
+            "credentials": {
+                **credentials,
+                "client": {k: v for k, v in client.items() if k != "client_secret"},
+            },
+        },
+    }
 
 
 @app.transformer(name="identity_provider_users", columns=IDPUser, parallelized=True)
