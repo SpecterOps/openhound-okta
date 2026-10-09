@@ -1371,7 +1371,13 @@ def application_secrets(application: Application, ctx: SourceContext):
             f"/api/v1/apps/{application.id}/credentials/secrets"
         ):
             for item in page:
-                yield {"app_id": application.id, "app_name": application.name, **item}
+                # Okta always returns the plaintext client_secret here and offers
+                # no way to suppress it; secret_hash is enough to model the secret.
+                yield {
+                    "app_id": application.id,
+                    "app_name": application.name,
+                    **{k: v for k, v in item.items() if k != "client_secret"},
+                }
 
 
 @app.transformer(
