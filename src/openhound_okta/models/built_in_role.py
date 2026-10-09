@@ -71,6 +71,7 @@ class BuiltInRoleProperties(OktaNodeProperties):
 
     okta_domain: str
     permissions: list[str]
+    type: str
     description: str | None = None
 
 
@@ -116,6 +117,7 @@ class BuiltInRole(BaseAsset):
                 displayname=role_label,
                 okta_domain=tenant_domain,
                 permissions=BUILT_IN_PERMISSIONS.get(self.type, []),
+                type=self.type,
                 description=role_metadata.get("description"),
                 environmentid=self._lookup.org_id(),
             ),
