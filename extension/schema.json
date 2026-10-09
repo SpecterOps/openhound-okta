@@ -278,7 +278,23 @@
     {
       "name": "Okta_ResourceSetContainsIndirect",
       "description": "Indirect membership of users within an Okta resource set through a group",
-      "is_traversable": false
+      "is_traversable": false,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The non-traversable Okta_ResourceSetContainsIndirect edges represent users that are members of a resource set indirectly through a group membership in Okta.\n\nThese edges are created when a resource set contains the members of a group, which is represented by the Okta_ResourceSetContainsMembersOf edge. The collector resolves the current group membership and creates one Okta_ResourceSetContainsIndirect edge per member user. As a result, users who join or leave the group gain or lose the corresponding resource set membership, and thereby become or stop being targets of any custom role assignment scoped to the resource set.\n\nUsers that are added to a resource set directly are represented by the Okta_ResourceSetContains edges. The union of Okta_ResourceSetContains and Okta_ResourceSetContainsIndirect edges covers all objects that a role assignment scoped to the resource set applies to.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_resourcesetcontainsindirect)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $match1 := printf \"MATCH p1 = (resourceSet:Okta_ResourceSet {objectid: '%s'})-[:Okta_ResourceSetContainsIndirect]->(user:Okta_User {objectid: '%s'})\" $sourceID $targetID }}\n{{ $match2 := \"MATCH p2 = (resourceSet)-[:Okta_ResourceSetContainsMembersOf]->(group:Okta_Group)<-[:Okta_MemberOf]-(user)\" }}\n{{ $result := \"RETURN p1, p2\\nLIMIT 500\" }}\n{{ $query := join \"\\n\" (list $match1 $match2 $result) }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_MemberOf",
