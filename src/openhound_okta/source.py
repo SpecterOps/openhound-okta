@@ -1392,7 +1392,13 @@ def api_service_secret_rows(api_service: ApiService, ctx: SourceContext):
         f"/integrations/api/v1/api-services/{api_service.id}/credentials/secrets"
     ):
         for item in page:
-            yield {"app_id": api_service.id, "app_name": api_service.name, **item}
+            # Okta already redacts this value (e.g. "***************bHuy"), but it
+            # is dropped anyway, matching the application secrets handling.
+            yield {
+                "app_id": api_service.id,
+                "app_name": api_service.name,
+                **{k: v for k, v in item.items() if k != "client_secret"},
+            }
 
 
 @app.transformer(name="application_users", columns=ApplicationUser, parallelized=True)
