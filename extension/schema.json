@@ -325,7 +325,23 @@
     {
       "name": "Okta_ResetPassword",
       "description": "Ability to reset passwords or temporary credentials for scoped Okta users",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_ResetPassword edges represent custom role permissions that allow a principal (user, group, or application) to reset passwords or temporary credentials for scoped Okta users. These edges are created when a custom role includes password management permissions such as `okta.users.credentials.resetPassword`, `okta.users.credentials.manage`, `okta.users.credentials.manageTemporaryAccessCode`, or `okta.users.manage`.\n\nThe edge is calculated based on custom role scoping.\n\nAlice is a direct member of the resource set, while Bob is a member indirectly through the Retail Staff group. Both are therefore in scope of the role assignment.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_resetpassword)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $sourceKind := \"Okta\" }}{{ range .Source.Kinds }}{{ if ne .Name \"Okta\" }}{{ $sourceKind = .Name }}{{ end }}{{ end }}\n{{ $match1 := printf \"MATCH p1 = (source:%s {objectid: '%s'})-[:Okta_ResetPassword]->(target:Okta_User {objectid: '%s'})\" $sourceKind $sourceID $targetID }}\n{{ $match2 := \"MATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment {type: 'CUSTOM'})-[:Okta_ScopedTo]->(resourceSet:Okta_ResourceSet)-[:Okta_ResourceSetContains|Okta_ResourceSetContainsIndirect]->(target)\" }}\n{{ $match3 := \"OPTIONAL MATCH p3 = (source)-[:Okta_HasRole]->(role:Okta_CustomRole)\\nWHERE 'okta.users.credentials.resetPassword' IN role.permissions OR 'okta.users.credentials.manage' IN role.permissions OR 'okta.users.credentials.manageTemporaryAccessCode' IN role.permissions OR 'okta.users.credentials.expirePassword' IN role.permissions OR 'okta.users.manage' IN role.permissions\" }}\n{{ $match4 := \"OPTIONAL MATCH p4 = (resourceSet)-[:Okta_ResourceSetContainsMembersOf]->(group:Okta_Group)<-[:Okta_MemberOf]-(target)\" }}\n{{ $result := \"RETURN p1, p2, p3, p4\\nLIMIT 500\" }}\n{{ $query := join \"\\n\" (list $match1 $match2 $match3 $match4 $result) }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_ResetFactors",
