@@ -263,7 +263,23 @@
     {
       "name": "Okta_ReadClientSecret",
       "description": "Ability to read client secrets for scoped Okta applications",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_ReadClientSecret edges represent permissions that allow a principal (user, group, or application) to read OAuth client secrets for scoped Okta applications. These edges are created for the **Application Administrator**, **API Access Management Administrator**, and **Read-only Administrator** built-in roles and for custom roles with the `okta.apps.clientCredentials.read` permission.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_readclientsecret)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $sourceKind := \"Okta\" }}{{ range .Source.Kinds }}{{ if ne .Name \"Okta\" }}{{ $sourceKind = .Name }}{{ end }}{{ end }}\n{{ $match1 := printf \"MATCH p1 = (source:%s {objectid: '%s'})-[:Okta_ReadClientSecret]->(target:Okta_ClientSecret {objectid: '%s'})\" $sourceKind $sourceID $targetID }}\n{{ $match2 := \"MATCH p2 = (target)-[:Okta_SecretOf]->(client:Okta)\" }}\n{{ $match3 := \"MATCH p3 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment)-[:Okta_ScopedTo]->(scope:Okta)\\nWHERE (assignment.type = 'APP_ADMIN' AND (scope:Okta_Organization OR scope.objectid = client.objectid)) OR ((assignment.type = 'API_ACCESS_MANAGEMENT_ADMIN' OR assignment.type = 'READ_ONLY_ADMIN') AND scope:Okta_Organization) OR (assignment.type = 'CUSTOM' AND scope:Okta_ResourceSet)\" }}\n{{ $match4 := \"OPTIONAL MATCH p4 = (scope:Okta_ResourceSet)-[:Okta_ResourceSetContains]->(client)\" }}\n{{ $match5 := \"OPTIONAL MATCH p5 = (scope:Okta_Organization)-[:Okta_Contains]->(client)\" }}\n{{ $match6 := \"OPTIONAL MATCH p6 = (source)-[:Okta_HasRole]->(role)\\nWHERE (role:Okta_Role AND (role.objectid STARTS WITH 'APP_ADMIN@' OR role.objectid STARTS WITH 'API_ACCESS_MANAGEMENT_ADMIN@' OR role.objectid STARTS WITH 'READ_ONLY_ADMIN@')) OR (role:Okta_CustomRole AND 'okta.apps.clientCredentials.read' IN role.permissions)\" }}\n{{ $result := \"RETURN p1, p2, p3, p4, p5, p6\\nLIMIT 500\" }}\n{{ $query := join \"\\n\" (list $match1 $match2 $match3 $match4 $match5 $match6 $result) }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_ResourceSetContains",
