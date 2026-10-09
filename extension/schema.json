@@ -268,12 +268,44 @@
     {
       "name": "Okta_ResourceSetContains",
       "description": "Direct membership of resources within an Okta resource set",
-      "is_traversable": false
+      "is_traversable": false,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The non-traversable Okta_ResourceSetContains edges represent the direct membership relationships between resource sets and their member entities in Okta.\n\nResource sets can contain users, groups, applications, API service integrations, devices, authorization servers, identity providers, and policies. When a resource set contains a group, only the group object itself is in scope; its members are not.\n\nOkta also allows a resource set to contain the members of a group instead of the group itself. Such memberships are represented by the Okta_ResourceSetContainsMembersOf edge to the group and by Okta_ResourceSetContainsIndirect edges to the users who are members of that group. The union of Okta_ResourceSetContains and Okta_ResourceSetContainsIndirect edges therefore covers all objects that a role assignment scoped to the resource set applies to.\n\nThese edges are informational. The effective permissions granted by custom roles scoped to a resource set are represented by dedicated traversable edges, such as Okta_ResetPassword, Okta_AddMember, and Okta_ManageApp.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_resourcesetcontains)"
+          }
+        },
+        "membership": {
+          "title": "Membership",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $membersQuery := printf \"MATCH p = (resourceSet:Okta_ResourceSet {objectid: '%s'})-[:Okta_ResourceSetContains|Okta_ResourceSetContainsMembersOf|Okta_ResourceSetContainsIndirect]->(member:Okta)\\nRETURN p\\nLIMIT 500\" $sourceID }}\n{{ $setsQuery := printf \"MATCH p = (resourceSet:Okta_ResourceSet)-[:Okta_ResourceSetContains|Okta_ResourceSetContainsMembersOf|Okta_ResourceSetContainsIndirect]->(member:Okta {objectid: '%s'})\\nRETURN p\\nLIMIT 500\" $targetID }}\n- [Resource Set Members](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $membersQuery | b64enc | urlquery }})\n- [Containing Resource Sets](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $setsQuery | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_ResourceSetContainsMembersOf",
       "description": "An Okta resource set contains the members of a group",
-      "is_traversable": false
+      "is_traversable": false,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The non-traversable Okta_ResourceSetContainsMembersOf edges represent resource sets that contain the members of a group in Okta, as opposed to the group object itself.\n\nIn the Okta Admin Console, this corresponds to adding a group to a resource set with the *Users in group* option instead of *Group*.\n\nA custom role scoped to the resource set applies to the users who are members of the group, not to the group itself. For example, a Help Desk role scoped to this resource set can reset passwords of the group's members but cannot manage the group's membership. The individual users in scope are represented by the Okta_ResourceSetContainsIndirect edges, while directly contained objects are represented by the Okta_ResourceSetContains edges.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_resourcesetcontainsmembersof)"
+          }
+        },
+        "membership": {
+          "title": "Membership",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $scopedMembersQuery := printf \"MATCH p = (resourceSet:Okta_ResourceSet {objectid: '%s'})-[:Okta_ResourceSetContainsMembersOf]->(group:Okta_Group {objectid: '%s'})<-[:Okta_MemberOf]-(member:Okta_User)\\nRETURN p\\nLIMIT 500\" $sourceID $targetID }}\n- [Scoped Group Members](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $scopedMembersQuery | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_ResourceSetContainsIndirect",
@@ -320,7 +352,16 @@
     {
       "name": "Okta_HasRole",
       "description": "Assignment of a built-in or custom role to a principal",
-      "is_traversable": false
+      "is_traversable": false,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The non-traversable Okta_HasRole edges represent the role assignments for users, groups, and applications in Okta.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_hasrole)"
+          }
+        }
+      }
     },
     {
       "name": "Okta_ResetPassword",
@@ -409,12 +450,30 @@
     {
       "name": "Okta_HasRoleAssignment",
       "description": "Relationship between a principal and a role assignment",
-      "is_traversable": false
+      "is_traversable": false,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The Okta_HasRoleAssignment edges connect users, groups, and applications to their respective Okta_RoleAssignment nodes.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_hasroleassignment)"
+          }
+        }
+      }
     },
     {
       "name": "Okta_ScopedTo",
       "description": "Scope relationship between a role assignment and its target",
-      "is_traversable": false
+      "is_traversable": false,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The Okta_ScopedTo edges connect the Okta_RoleAssignment nodes to the resources they are scoped to, such as the organization or specific groups or applications.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_scopedto)"
+          }
+        }
+      }
     },
     {
       "name": "Okta_AppAdmin",
