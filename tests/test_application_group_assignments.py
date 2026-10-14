@@ -273,7 +273,7 @@ def test_application_inventory_pipeline_propagates_continuation_failure():
     class FailingApplicationsPool:
         def paginate(self, path, **kwargs):
             if path == "/api/v1/apps":
-                assert kwargs == {}
+                assert kwargs == {"params": {"limit": 200}}
                 yield [
                     {
                         "id": "0oa-app",
@@ -292,6 +292,7 @@ def test_application_inventory_pipeline_propagates_continuation_failure():
             yield []
 
     ctx = SimpleNamespace(
+        applications_page_size=200,
         pool=FailingApplicationsPool(),
         application_group_assignments_page_size=200,
     )
@@ -459,7 +460,9 @@ def test_group_assignment_table_replaces_stale_rows(tmp_path):
     assert stored_group_ids() == []
 
 
-def test_group_assignment_failed_continuation_preserves_prior_replacement_snapshot(tmp_path):
+def test_group_assignment_failed_continuation_preserves_prior_replacement_snapshot(
+    tmp_path,
+):
     pipeline = dlt.pipeline(
         pipeline_name="group_assignment_atomic_replace_test",
         pipelines_dir=str(tmp_path / "pipelines"),

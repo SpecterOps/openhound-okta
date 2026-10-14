@@ -1,7 +1,7 @@
 import inspect
 import logging
 from collections.abc import Iterator
-from threading import Event, Thread
+from threading import BoundedSemaphore, Event, Thread
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -16,12 +16,15 @@ from dlt.sources.helpers.requests.session import Session
 
 from openhound_okta.models.token import Token
 from openhound_okta.source import (
+    API_RATE_LIMIT_ENDPOINTS,
+    APPLICATIONS_PAGE_SIZE,
     APPLICATION_GRANTS_ACCESS_DENIED_LIMIT,
     APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE,
     APPLICATION_USERS_PAGE_SIZE,
     GROUPS_PAGE_SIZE,
     GROUP_PUSH_MAPPINGS_PAGE_SIZE,
     IDENTITY_PROVIDER_USERS_PAGE_SIZE,
+    ClientPool,
     ConsecutiveAccessDeniedBreaker,
     OktaTokenCredentials,
     _microsoft_tenant_id_from_onmicrosoft_domain,
@@ -37,20 +40,28 @@ from openhound_okta.source import (
     application_group_push_mappings,
     application_jwk_rows,
     application_user_rows,
+    applications,
     _group_page_sizes,
     groups,
     identity_provider_users,
+    resources,
     source,
     user_role_assignment_rows,
 )
 from openhound_okta.utils.auth import OktaBearerAuth, UnauthorizedClassification
 from openhound_okta.utils.http import (
+    DEFAULT_REQUESTS_PER_MINUTE,
     EndpointThrottle,
     InitialReadTimeoutBudget,
     OktaRESTClient,
     OktaRetryContext,
     OktaRetryExhaustedError,
+    RATE_LIMIT_PROBE_INTERVAL_SECONDS,
 )
+
+
+# Pacing applied between requests before any rate limit headers are observed.
+PACING_INTERVAL = 60.0 / DEFAULT_REQUESTS_PER_MINUTE
 
 
 class FakeClock:
@@ -139,7 +150,6 @@ def _client(
         rate_limit_max_elapsed_seconds=rate_limit_max_elapsed_seconds,
         clock=fake_clock.time,
         elapsed_clock=fake_clock.time,
-        sleep=fake_clock.sleep,
         jitter=lambda: 0.0,
     ), fake_clock
 
@@ -200,7 +210,7 @@ def test_dlt_paginator_retries_the_same_cursor_through_the_real_session_path():
         {"Link": f'<{cursor_url}>; rel="next"'},
     )
     first_page._content = b'[{"id":"00u123"}]'
-    rate_limited_page = _response(429, cursor_url, {"Retry-After": "1"})
+    rate_limited_page = _response(429, cursor_url, {"Retry-After": "2"})
     second_page = _response(200, cursor_url)
     second_page._content = b'[{"id":"00u456"}]'
     adapter = SequencedAdapter([first_page, rate_limited_page, second_page])
@@ -214,7 +224,6 @@ def test_dlt_paginator_retries_the_same_cursor_through_the_real_session_path():
         session=session,
         clock=clock.time,
         elapsed_clock=clock.time,
-        sleep=clock.sleep,
         jitter=lambda: 0.0,
     )
 
@@ -225,7 +234,7 @@ def test_dlt_paginator_retries_the_same_cursor_through_the_real_session_path():
         [{"id": "00u456"}],
     ]
     assert adapter.requested_urls == [first_url, cursor_url, cursor_url]
-    assert clock.sleeps == [1.0]
+    assert clock.sleeps == pytest.approx([PACING_INTERVAL, 2.0])
 
 
 def test_initial_read_timeout_retry_budget_only_applies_to_the_first_page():
@@ -264,7 +273,7 @@ def test_initial_read_timeout_retry_budget_only_applies_to_the_first_page():
         [{"id": "00g456"}],
     ]
     assert client.requested_urls == [first_url, cursor_url, cursor_url, cursor_url]
-    assert clock.sleeps == [1.0, 2.0]
+    assert clock.sleeps == pytest.approx([PACING_INTERVAL, PACING_INTERVAL, 2.0])
 
 
 def test_initial_read_timeout_retry_budget_limits_the_first_page():
@@ -285,7 +294,7 @@ def test_initial_read_timeout_retry_budget_limits_the_first_page():
         )
 
     assert client.requested_urls == [url, url]
-    assert clock.sleeps == [1.0]
+    assert clock.sleeps == pytest.approx([PACING_INTERVAL])
 
 
 def test_initial_read_timeout_retry_budget_does_not_limit_other_transient_errors():
@@ -306,7 +315,7 @@ def test_initial_read_timeout_retry_budget_does_not_limit_other_transient_errors
 
     assert response.status_code == 200
     assert client.requested_urls == [url, url, url]
-    assert clock.sleeps == [1.0, 2.0]
+    assert clock.sleeps == pytest.approx([PACING_INTERVAL, 2.0])
 
 
 def test_application_group_assignments_follow_opaque_next_link_without_query_expansion():
@@ -409,7 +418,6 @@ def test_dlt_paginator_refreshes_expired_bearer_token_between_pages():
         session=session,
         clock=clock.time,
         elapsed_clock=clock.time,
-        sleep=clock.sleep,
         jitter=lambda: 0.0,
         auth=auth,
     )
@@ -733,7 +741,7 @@ def test_retries_the_same_application_users_cursor_after_timeout():
 
     assert response.status_code == 200
     assert client.requested_urls == [cursor_url, cursor_url]
-    assert clock.sleeps == [1.0]
+    assert clock.sleeps == pytest.approx([PACING_INTERVAL])
 
 
 def test_retries_truncated_responses():
@@ -751,7 +759,7 @@ def test_retries_truncated_responses():
 
     assert response.status_code == 200
     assert client.requested_urls == [cursor_url, cursor_url]
-    assert clock.sleeps == [1.0]
+    assert clock.sleeps == pytest.approx([PACING_INTERVAL])
 
 
 def test_rate_limit_attempts_do_not_inflate_server_error_backoff():
@@ -769,7 +777,34 @@ def test_rate_limit_attempts_do_not_inflate_server_error_backoff():
     response = client._send_request(Request("GET", cursor_url))
 
     assert response.status_code == 200
-    assert clock.sleeps == [1.0, 1.0]
+    assert clock.sleeps == pytest.approx([PACING_INTERVAL, PACING_INTERVAL])
+
+
+def test_server_error_backoff_is_applied_through_the_shared_throttle():
+    cursor_url = (
+        "https://example.okta.test/api/v1/apps/0oa123/users?after=00u456&limit=500"
+    )
+    clock = FakeClock()
+    telemetry = Mock()
+    client = SequencedOktaClient(
+        [
+            _response(500, cursor_url),
+            _response(500, cursor_url),
+            _response(200, cursor_url),
+        ],
+        throttle=EndpointThrottle(clock=clock.time, sleep=clock.sleep),
+        clock=clock.time,
+        elapsed_clock=clock.time,
+        jitter=lambda: 0.0,
+        telemetry=telemetry,
+    )
+
+    response = client._send_request(Request("GET", cursor_url))
+
+    assert response.status_code == 200
+    assert clock.sleeps == pytest.approx([PACING_INTERVAL, 2.0])
+    throttle_wait = telemetry.record_http_response.call_args.kwargs["throttle_wait"]
+    assert throttle_wait["retry_backoff_wait_seconds"] == pytest.approx(2.0)
 
 
 def test_transient_request_exhaustion_includes_app_and_cursor_context():
@@ -832,7 +867,8 @@ def test_endpoint_throttle_rechecks_a_cooldown_extended_while_sleeping():
 
 
 def test_endpoint_throttle_bounds_concurrent_requests():
-    throttle = EndpointThrottle(max_concurrency=1)
+    clock = FakeClock()
+    throttle = EndpointThrottle(max_concurrency=1, clock=clock.time, sleep=clock.sleep)
     second_acquired = Event()
 
     throttle.acquire()
@@ -851,6 +887,154 @@ def test_endpoint_throttle_bounds_concurrent_requests():
     assert second_acquired.wait(1.0)
     worker.join(timeout=1.0)
     assert not worker.is_alive()
+
+
+def test_endpoint_throttles_sharing_an_org_gate_bound_in_flight_requests():
+    clock = FakeClock()
+    org_gate = BoundedSemaphore(1)
+    first = EndpointThrottle(clock=clock.time, sleep=clock.sleep, org_gate=org_gate)
+    second = EndpointThrottle(clock=clock.time, sleep=clock.sleep, org_gate=org_gate)
+    second_acquired = Event()
+
+    first.acquire()
+
+    def acquire_second_family():
+        second.acquire()
+        second_acquired.set()
+        second.release()
+
+    worker = Thread(target=acquire_second_family)
+    worker.start()
+    assert not second_acquired.wait(0.05)
+
+    first.release()
+
+    assert second_acquired.wait(1.0)
+    worker.join(timeout=1.0)
+    assert not worker.is_alive()
+    assert clock.sleeps == []
+
+
+def test_source_wires_one_org_gate_across_all_endpoint_families(monkeypatch):
+    created: list[EndpointThrottle] = []
+
+    class GateRecordingPool(ClientPool):
+        def __init__(self, *args, **kwargs):
+            def throttle_factory(**throttle_kwargs):
+                throttle = EndpointThrottle(**throttle_kwargs)
+                created.append(throttle)
+                return throttle
+
+            super().__init__(*args, throttle_factory=throttle_factory, **kwargs)
+
+    monkeypatch.setattr("openhound_okta.source.ClientPool", GateRecordingPool)
+    credentials = OktaTokenCredentials(
+        base_url="https://example.okta.test",
+        token="token",
+    )
+
+    inspect.unwrap(source)(credentials=credentials, org_concurrency=1)
+
+    assert len(created) == len(API_RATE_LIMIT_ENDPOINTS)
+    gates = {id(throttle._org_gate) for throttle in created}
+    assert len(gates) == 1
+    assert isinstance(created[0]._org_gate, BoundedSemaphore)
+
+
+@pytest.mark.parametrize("org_concurrency", [0, -1])
+def test_source_rejects_invalid_org_concurrency(org_concurrency):
+    credentials = OktaTokenCredentials(
+        base_url="https://example.okta.test",
+        token="token",
+    )
+
+    with pytest.raises(ValueError, match="org_concurrency must be at least 1"):
+        inspect.unwrap(source)(
+            credentials=credentials,
+            org_concurrency=org_concurrency,
+        )
+
+
+def _pool() -> ClientPool:
+    return ClientPool(
+        base_url="https://example.okta.test",
+        auth=None,
+        paginator=HeaderLinkPaginator(),
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "family"),
+    [
+        ("/api/v1/users", "/api/v1/users*"),
+        ("/api/v1/users?limit=200", "/api/v1/users*"),
+        ("/api/v1/users/00u1/factors", "/api/v1/users/*"),
+        ("/api/v1/users/00u1/roles", "/api/v1/users/*"),
+        ("/api/v1/users/00u1/roles/ra1/targets/catalog/apps", "/api/v1/users/*"),
+        ("/api/v1/users/00u1/roles/ra1/targets/groups", "/api/v1/users/*"),
+        ("/api/v1/groups?expand=stats", "/api/v1/groups*"),
+        ("/api/v1/groups/00g1", "/api/v1/groups*"),
+        ("/api/v1/groups/00g1/users", "/api/v1/groups*"),
+        ("/api/v1/groups/00g1/roles", "/api/v1/groups*"),
+        ("/api/v1/groups/00g1/roles/ra1/targets/groups", "/api/v1/groups*"),
+        ("/api/v1/apps", "/api/v1/apps*"),
+        ("/api/v1/apps/0oa1/users", "/api/v1/apps*"),
+        ("/api/v1/apps/0oa1/groups", "/api/v1/apps*"),
+        ("/api/v1/apps/0oa1/grants", "/api/v1/apps*"),
+        ("/api/v1/apps/0oa1/group-push/mappings", "/api/v1/apps*"),
+        ("/api/v1/apps/0oa1/credentials/secrets", "/api/v1/apps*"),
+        ("/api/v1/apps/0oa1/credentials/jwks", "/api/v1/apps*"),
+        ("/api/v1/apps/0oa1/sso/saml/metadata", "/api/v1/apps*"),
+        ("/api/v1/iam/roles", "/api/v1/iam*"),
+        ("/api/v1/iam/roles/r1/permissions", "/api/v1/iam*"),
+        ("/api/v1/iam/assignees/users", "/api/v1/iam*"),
+        ("/api/v1/iam/resource-sets", "/api/v1/iam*"),
+        ("/api/v1/iam/resource-sets/rs1/resources", "/api/v1/iam*"),
+        ("/api/v1/iam/resource-sets/rs1/bindings", "/api/v1/iam*"),
+        ("/api/v1/iam/resource-sets/rs1/bindings/r1/members", "/api/v1/iam*"),
+        ("/api/v1/devices?expand=userSummary", "/api/v1/devices*"),
+        ("/oauth2/v1/clients", "/oauth2/v1/clients*"),
+        ("/oauth2/v1/clients/c1/roles", "/oauth2/v1/clients*"),
+        ("/oauth2/v1/clients/c1/roles/ra1/targets/groups", "/oauth2/v1/clients*"),
+        ("/integrations/api/v1/api-services", "/integrations/*"),
+        ("/integrations/api/v1/api-services/s1/credentials/secrets", "/integrations/*"),
+        ("/api/v1/org", "*"),
+        ("/api/v1/policies", "*"),
+        ("/api/v1/policies/p1/mappings", "*"),
+        ("/api/v1/realms", "*"),
+        ("/api/v1/idps", "*"),
+        ("/api/v1/idps/i1/users", "*"),
+        ("/api/v1/idps/i1/metadata.xml", "*"),
+        ("/api/v1/authorizationServers", "*"),
+        ("/api/v1/agentPools", "*"),
+        ("/api/v1/api-tokens", "*"),
+    ],
+)
+def test_get_client_maps_each_collector_path_to_its_okta_bucket_family(path, family):
+    pool = _pool()
+
+    assert pool.get_client(path) is pool._clients[family]
+
+
+def test_saml_metadata_clients_share_their_family_throttle():
+    pool = _pool()
+    apps_client = pool._saml_metadata_clients["/api/v1/apps*"]
+    idps_client = pool._saml_metadata_clients["*"]
+
+    assert apps_client.throttle is pool.get_client("/api/v1/apps/0oa1/users").throttle
+    assert idps_client.throttle is pool.get_client("/api/v1/idps/i1/users").throttle
+    assert apps_client.throttle is not idps_client.throttle
+
+
+def test_resources_paginate_an_absolute_iam_path():
+    pool = RecordingPool(pages=[[{"id": "r1"}]])
+
+    rows = list(
+        inspect.unwrap(resources)(SimpleNamespace(id="rs1"), SimpleNamespace(pool=pool))
+    )
+
+    assert pool.path == "/api/v1/iam/resource-sets/rs1/resources"
+    assert rows == [{"resource_set_id": "rs1", "id": "r1"}]
 
 
 def test_occupied_throttle_slots_are_not_reported_as_active_http_requests():
@@ -941,6 +1125,83 @@ def test_successful_rate_headers_pace_the_next_request():
     assert clock.sleeps == [2.5]
 
 
+def test_in_flight_requests_are_held_back_from_the_usable_budget():
+    clock = FakeClock()
+    throttle = EndpointThrottle(
+        clock=clock.time,
+        wall_clock=clock.time,
+        sleep=clock.sleep,
+        remaining_reserve=1,
+    )
+    throttle.begin_http_request()
+    throttle.begin_http_request()
+    response = _response(
+        200,
+        "https://example.okta.test/api/v1/apps/0oa123/users",
+        {
+            "X-Rate-Limit-Remaining": "5",
+            "X-Rate-Limit-Reset": "1010",
+        },
+    )
+
+    throttle.observe_response(response)
+    throttle.wait()
+
+    assert clock.sleeps == [5.0]
+
+
+def test_late_response_from_a_reset_window_does_not_delay_the_next_request():
+    clock = FakeClock()
+    throttle = EndpointThrottle(
+        clock=clock.time,
+        wall_clock=clock.time,
+        sleep=clock.sleep,
+    )
+    response = _response(
+        200,
+        "https://example.okta.test/api/v1/apps/0oa123/users",
+        {
+            "X-Rate-Limit-Remaining": "0",
+            "X-Rate-Limit-Reset": str(clock.now - 1.0),
+        },
+    )
+
+    throttle.observe_response(response)
+    throttle.wait()
+
+    assert clock.sleeps == []
+
+
+def test_cooldown_resets_pacing_to_the_default_for_the_next_window():
+    clock = FakeClock()
+    throttle = EndpointThrottle(
+        clock=clock.time,
+        wall_clock=clock.time,
+        sleep=clock.sleep,
+        remaining_reserve=1,
+    )
+    url = "https://example.okta.test/api/v1/apps/0oa123/users"
+    throttle.observe_response(
+        _response(
+            200,
+            url,
+            {"X-Rate-Limit-Remaining": "2", "X-Rate-Limit-Reset": "1010"},
+        )
+    )
+    throttle.observe_response(
+        _response(
+            200,
+            url,
+            {"X-Rate-Limit-Remaining": "1", "X-Rate-Limit-Reset": "1010"},
+        )
+    )
+
+    throttle.wait()
+    throttle.wait()
+
+    assert clock.sleeps == pytest.approx([11.0, PACING_INTERVAL])
+
+
 def test_out_of_order_headers_keep_the_lowest_remaining_value_for_a_window():
     clock = FakeClock()
     throttle = EndpointThrottle(
@@ -1007,6 +1268,33 @@ def test_successful_rate_header_cooldown_is_clamped():
     assert clock.sleeps == [300.0]
 
 
+def test_probe_floor_is_lifted_by_a_response_without_rate_limit_headers():
+    clock = FakeClock()
+    throttle = EndpointThrottle(
+        clock=clock.time,
+        wall_clock=clock.time,
+        sleep=clock.sleep,
+    )
+    url = "https://example.okta.test/api/v1/apps/0oa123/users"
+    throttle.observe_response(
+        _response(
+            200,
+            url,
+            {
+                "X-Rate-Limit-Remaining": "101",
+                "X-Rate-Limit-Reset": str(clock.now + 10.0),
+            },
+        )
+    )
+    throttle.defer(1.0, minimum_interval=RATE_LIMIT_PROBE_INTERVAL_SECONDS)
+
+    throttle.observe_response(_response(200, url))
+    throttle.wait()
+    throttle.wait()
+
+    assert clock.sleeps == pytest.approx([1.0, 0.1])
+
+
 class RecordingPool:
     def __init__(self, pages=None, responses=None):
         self.pages = pages or []
@@ -1023,6 +1311,46 @@ class RecordingPool:
     def get(self, path, **kwargs):
         self.get_paths.append(path)
         return SimpleNamespace(json=lambda: self.responses[path])
+
+
+def test_applications_request_the_default_page_size():
+    pool = RecordingPool(
+        pages=[[{"id": "0oa123", "name": "app", "signOnMode": "AUTO_LOGIN"}]]
+    )
+    ctx = SimpleNamespace(pool=pool, applications_page_size=APPLICATIONS_PAGE_SIZE)
+
+    rows = list(applications.__wrapped__(ctx))
+
+    assert [row["id"] for row in rows] == ["0oa123"]
+    assert pool.path == "/api/v1/apps"
+    assert pool.kwargs == {"params": {"limit": 200}}
+
+
+def test_applications_request_a_custom_page_size():
+    pool = RecordingPool(
+        pages=[[{"id": "0oa123", "name": "app", "signOnMode": "AUTO_LOGIN"}]]
+    )
+    ctx = SimpleNamespace(pool=pool, applications_page_size=50)
+
+    list(applications.__wrapped__(ctx))
+
+    assert pool.kwargs == {"params": {"limit": 50}}
+
+
+@pytest.mark.parametrize("applications_page_size", [0, -1, APPLICATIONS_PAGE_SIZE + 1])
+def test_source_rejects_invalid_applications_page_size(applications_page_size):
+    credentials = OktaTokenCredentials(
+        base_url="https://example.okta.test",
+        token="token",
+    )
+
+    with pytest.raises(
+        ValueError, match="applications_page_size must be between 1 and 200"
+    ):
+        inspect.unwrap(source)(
+            credentials=credentials,
+            applications_page_size=applications_page_size,
+        )
 
 
 def test_groups_request_the_default_expanded_page_size():
@@ -1382,7 +1710,7 @@ def test_saml_metadata_rejects_entity_declarations():
 def test_inbound_idp_metadata_retry_exhaustion_is_not_silently_discarded():
     error = OktaRetryExhaustedError(
         OktaRetryContext(
-            endpoint_family="/api/v1/idps*",
+            endpoint_family="*",
             url="https://example.okta.test/api/v1/idps/0oa123/metadata.xml",
             status_code=429,
             attempts=4,
@@ -1408,7 +1736,7 @@ def test_inbound_idp_metadata_retry_exhaustion_is_not_silently_discarded():
 def test_user_role_retry_exhaustion_is_not_silently_discarded():
     error = OktaRetryExhaustedError(
         OktaRetryContext(
-            endpoint_family="/api/v1/users*",
+            endpoint_family="/api/v1/users/*",
             url="https://example.okta.test/api/v1/users/00u123/roles",
             status_code=429,
             attempts=4,

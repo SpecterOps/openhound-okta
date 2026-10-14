@@ -37,6 +37,7 @@ dev = [
     "mypy>=1.19.1",
     "zensical>=0.0.27",
     "types-defusedxml>=0.7.0.20260504",
+    "rich>=15.0.0",
 ]
 [project.entry-points."openhound.sources"]
 okta = "openhound_okta.main:app"

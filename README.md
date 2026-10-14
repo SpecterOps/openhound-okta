@@ -72,7 +72,10 @@ remains static.
 
 ## Rate-limit behavior
 
-The collector coordinates requests by Okta API endpoint family. It limits concurrent requests, observes
+The collector coordinates requests by Okta API endpoint family. Families are aligned one-to-one with the Okta
+rate-limit buckets observed for the collector's endpoints (per-user reads, the users listing, groups, apps, IAM,
+devices, OAuth clients, API service integrations, and the `/api/v1` catch-all); the per-minute limits of those
+buckets differ by org tier. It limits concurrent requests, observes
 `X-Rate-Limit-Remaining` and `X-Rate-Limit-Reset` on successful responses, and paces later requests before a bucket
 is exhausted. HTTP 429 responses retry the same request and pagination cursor until a bounded elapsed-time budget is
 reached. Transport failures and HTTP 5xx responses retain DLT's retry coverage.
@@ -93,12 +96,14 @@ non-secret settings:
 
 | Environment variable | Default | Purpose |
 | --- | ---: | --- |
+| `SOURCES__SOURCE__OKTA__APPLICATIONS_PAGE_SIZE` | `200` | Applications per page, from 1 through 200 |
 | `SOURCES__SOURCE__OKTA__APPLICATION_USERS_PAGE_SIZE` | `500` | Application users per page, from 1 through 500 |
 | `SOURCES__SOURCE__OKTA__GROUPS_PAGE_SIZE` | `200` | Expanded groups per page, from 1 through 200 |
 | `SOURCES__SOURCE__OKTA__APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE` | `200` | Application-group assignments per page, from 20 through 200 |
 | `SOURCES__SOURCE__OKTA__GROUP_PUSH_MAPPINGS_PAGE_SIZE` | `1000` | Group push mappings per page, from 1 through 1,000 |
 | `SOURCES__SOURCE__OKTA__IDENTITY_PROVIDER_USERS_PAGE_SIZE` | `200` | Identity-provider users per page, from 1 through 200 |
-| `SOURCES__SOURCE__OKTA__ENDPOINT_CONCURRENCY` | `2` | Maximum simultaneous requests per endpoint family |
+| `SOURCES__SOURCE__OKTA__ENDPOINT_CONCURRENCY` | `32` | Maximum simultaneous requests per endpoint family |
+| `SOURCES__SOURCE__OKTA__ORG_CONCURRENCY` | `32` | Maximum simultaneous requests across all endpoint families, kept under Okta's per-org concurrency limit (35 on Integrator Free, 75 on production orgs) |
 | `SOURCES__SOURCE__OKTA__RATE_LIMIT_MAX_ELAPSED_SECONDS` | `900` | Maximum elapsed retry window for an individual 429 request |
 | `SOURCES__SOURCE__OKTA__RATE_LIMIT_REMAINING_RESERVE` | `1` | Requests held in reserve when pacing against a rate-limit window |
 
@@ -139,7 +144,7 @@ backoff, and HTTP execution. HTTP execution includes response-body transfer but
 not JSON decoding or downstream row conversion. Wait distributions are summed
 worker samples, not additive wall-clock attribution. Pages and rows are API
 yield progress and do not mean DLT committed the output. Collector endpoint
-families are limiter groups, not verified Okta provider buckets. In particular,
+families mirror Okta's bucket layout as observed in one org; they are not verified against the provider at runtime. In particular,
 zero HTTP 429 responses does not prove that quota was unused.
 
 The summary records DLT's effective `extract_workers` and

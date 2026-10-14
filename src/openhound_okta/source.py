@@ -6,7 +6,7 @@ import threading
 from base64 import b64decode
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
-from threading import Lock
+from threading import BoundedSemaphore, Lock
 from typing import Any, Callable, Final, Union
 from urllib.parse import urlparse
 from xml.etree.ElementTree import Element
@@ -94,6 +94,7 @@ from .telemetry import NullTelemetryRecorder, Telemetry
 from .utils.auth import OktaAuth, OktaBearerAuth
 from .utils.http import (
     DEFAULT_ENDPOINT_CONCURRENCY,
+    DEFAULT_ORG_CONCURRENCY,
     DEFAULT_RATE_LIMIT_MAX_ELAPSED_SECONDS,
     DEFAULT_RATE_LIMIT_REMAINING_RESERVE,
     EndpointThrottle,
@@ -126,26 +127,67 @@ OKTA_DEFAULT_SCOPE = [
     "okta.realmAssignments.read",
 ]
 
+# One entry per Okta rate limit bucket the collector touches. Each family's
+# EndpointThrottle paces itself from the X-Rate-Limit-* headers of its own
+# responses, so a family must map to exactly one Okta bucket: two families on
+# one bucket overshoot it, and one family across two buckets paces both from
+# whichever headers arrived last. First fnmatch match wins and fnmatch's "*"
+# matches "/" too, so narrower patterns precede broader ones. The per-minute
+# values are what one org's Rate Limit Buckets table reported; they vary by
+# org tier and are documentation only, the throttle never hard-codes them.
+# An OAuth app is allocated 50% of each bucket by default, so the collector
+# typically sees half of every value quoted here.
 API_RATE_LIMIT_ENDPOINTS = [
-    # Dedicated family for per-user factor enumeration: it must precede the
-    # broader /api/v1/users* pattern so the potentially large volume of factor
-    # requests cannot queue-starve or rate-limit-clamp the users listing,
-    # which Okta serves from a different rate-limit bucket.
-    "/api/v1/users/*/factors",
+    # Bucket /api/v1/users/{id:.+} READ (2000/min): every GET below /users/<id>,
+    # that is factors, roles and role targets. The greedy {id:.+} template is
+    # what separates these from the listing. The literal "/users/" keeps
+    # "/api/v1/users" and "/api/v1/users?limit=..." out of this family.
+    "/api/v1/users/*",
+    # Bucket /api/v1/users (600/min): the users listing.
     "/api/v1/users*",
+    # Bucket /api/v1/groups (500/min): listing, /groups/{id}/users, roles and
+    # role targets. GET /api/v1/groups/{id} has its own bucket (1000/min) but
+    # fnmatch cannot express "exactly one more segment"; it is folded in here
+    # on purpose (one call per group push mapping, and pacing against the
+    # smaller budget is the safe error).
     "/api/v1/groups*",
+    # Bucket /api/v1/apps (100/min): the listing and every per-app sub-resource
+    # (users, groups, grants, group push mappings, credentials, SAML metadata).
+    # GET /api/v1/apps/{id} has its own bucket (500/min) but is never called;
+    # {id} matches one segment, so /apps/{id}/users lands here (confirmed).
     "/api/v1/apps*",
-    "/api/v1/idps*",
+    # Bucket /api/v1/iam (1600/min): roles, resource sets, assignees.
     "/api/v1/iam*",
+    # Bucket /api/v1/devices (100/min): the devices listing.
     "/api/v1/devices*",
+    # Bucket /oauth2/v1/clients (100/min): listing, roles and role targets.
     "/oauth2/v1/clients*",
+    # API service integrations have their own bucket (100/min), undocumented
+    # and absent from the Rate Limit Buckets table: api-services and their
+    # secrets.
+    "/integrations/*",
+    # Bucket /api/v1 (1000/min): the catch-all for org, policies and their
+    # mappings, realms, idps (listing, metadata.xml, users), authorization
+    # servers, agent pools and API tokens. There is no idps bucket.
     "*",
 ]
+
+# Families whose endpoints also serve SAML metadata as XML.
+SAML_METADATA_FAMILIES: Final = ("/api/v1/apps*", "*")
 
 
 def _is_direct_active_role_assignment(
     item: Mapping[str, object], from_resource: str
 ) -> bool:
+    """Tell whether a role assignment is active, direct, and of a supported type.
+
+    Args:
+        item: Role assignment record from Okta.
+        from_resource: Principal kind the assignment belongs to: user, group, or client.
+
+    Returns:
+        True if the assignment should be collected.
+    """
     return (
         item.get("status") == "ACTIVE"
         and item.get("assignmentType") == DIRECT_ASSIGNMENT_TYPES.get(from_resource)
@@ -154,6 +196,11 @@ def _is_direct_active_role_assignment(
 
 
 def _last_href_path_segment(href: str | None) -> str | None:
+    """Return the last path segment of a link href, or None if there is none.
+
+    Args:
+        href: Link URL from an Okta _links entry.
+    """
     if not href:
         return None
 
@@ -162,6 +209,14 @@ def _last_href_path_segment(href: str | None) -> str | None:
 
 
 def _resource_set_binding_assignee_id(member: Mapping[str, object]) -> str | None:
+    """Extract the assignee id from a resource set binding member's self link.
+
+    Args:
+        member: Binding member record from Okta.
+
+    Returns:
+        The id from the member's self link, or None if the link is missing.
+    """
     links = member.get("_links")
     if not isinstance(links, Mapping):
         return None
@@ -174,6 +229,15 @@ def _resource_set_binding_assignee_id(member: Mapping[str, object]) -> str | Non
 
 
 def _role_assignment_base_path(from_resource: str, source_id: str) -> str:
+    """Build the roles collection path for a principal.
+
+    Args:
+        from_resource: Principal kind: user, group, or client.
+        source_id: The principal's id.
+
+    Returns:
+        The Okta API path listing the principal's role assignments.
+    """
     if from_resource == "client":
         return f"/oauth2/v1/clients/{source_id}/roles"
     return f"/api/v1/{from_resource}s/{source_id}/roles"
@@ -185,6 +249,20 @@ def _role_assignment_scope(
     source_id: str,
     ctx: "SourceContext",
 ) -> dict[str, list[object]]:
+    """Fetch the targets a scoped role assignment is limited to.
+
+    Only APP_ADMIN assignments (app targets) and group-targeted role types carry
+    a scope. Fetch errors other than retry exhaustion are logged and yield none.
+
+    Args:
+        item: Role assignment record from Okta.
+        from_resource: Principal kind: user, group, or client.
+        source_id: The principal's id.
+        ctx: Source context providing the client pool.
+
+    Returns:
+        {"scope_apps": [...]} or {"scope_groups": [...]}, or {} when unscoped.
+    """
     role_type = item.get("type")
     assignment_id = item.get("id")
     if not isinstance(assignment_id, str):
@@ -227,6 +305,8 @@ APPLICATION_GRANTS_ACCESS_DENIED_LIMIT: Final[int] = 10
 """Consecutive access-denied (403) responses after which application OAuth 2.0
 grant collection is abandoned for all remaining applications."""
 
+# Okta returns 20 applications per page unless asked; 200 is its maximum.
+APPLICATIONS_PAGE_SIZE = 200
 APPLICATION_USERS_PAGE_SIZE = 500
 GROUPS_PAGE_SIZE = 200
 GROUPS_PAGE_SIZE_FALLBACK_DIVISORS = (1, 2, 4)
@@ -239,13 +319,26 @@ IDENTITY_PROVIDER_USERS_PAGE_SIZE = 200
 
 @configspec
 class OktaCredentials(CredentialsConfiguration):
+    """Base Okta credentials: the org base URL plus a credential kind label."""
+
     base_url: str = dlt.config.value
 
     def auth(self):
+        """Credential kind label; overridden by concrete credentials."""
         pass
 
 
 def _app_token(okta_auth: OktaAuth, base_url: str, client_id: str) -> Token:
+    """Exchange a signed JWT assertion for an OAuth 2.0 access token.
+
+    Args:
+        okta_auth: Holder of the app's private key.
+        base_url: Okta org base URL.
+        client_id: OAuth 2.0 client id of the collector app.
+
+    Returns:
+        The token response for the collector's default scopes.
+    """
     private_key = okta_auth.private_key
     jwt = okta_auth.jwt(
         private_key=private_key,
@@ -258,13 +351,21 @@ def _app_token(okta_auth: OktaAuth, base_url: str, client_id: str) -> Token:
 
 @configspec
 class OktaAppCredentials(OktaCredentials):
+    """OAuth 2.0 app credentials with the private key read from a file."""
+
     private_key_path: TSecretStrValue = dlt.secrets.value
     client_id: str = dlt.config.value
 
     def auth(self) -> str:
+        """Credential kind label: "app"."""
         return "app"
 
     def fetch_token(self) -> Token:
+        """Fetch a fresh access token with the app's private key.
+
+        Returns:
+            The token response.
+        """
         return _app_token(
             OktaAuth(private_key_path=self.private_key_path),
             self.base_url,
@@ -273,18 +374,27 @@ class OktaAppCredentials(OktaCredentials):
 
     @property
     def header(self) -> str:
+        """Authorization header value with a freshly fetched bearer token."""
         return f"Bearer {self.fetch_token().access_token}"
 
 
 @configspec
 class OktaEncodedAppCredentials(OktaCredentials):
+    """OAuth 2.0 app credentials with the private key supplied base64-encoded."""
+
     private_key_b64: TSecretStrValue = dlt.secrets.value
     client_id: str = dlt.config.value
 
     def auth(self) -> str:
+        """Credential kind label: "app"."""
         return "app"
 
     def fetch_token(self) -> Token:
+        """Fetch a fresh access token with the decoded private key.
+
+        Returns:
+            The token response.
+        """
         decoded_credentials = b64decode(self.private_key_b64).decode("utf-8")
         return _app_token(
             OktaAuth(private_key_string=decoded_credentials),
@@ -294,18 +404,23 @@ class OktaEncodedAppCredentials(OktaCredentials):
 
     @property
     def header(self) -> str:
+        """Authorization header value with a freshly fetched bearer token."""
         return f"Bearer {self.fetch_token().access_token}"
 
 
 @configspec
 class OktaTokenCredentials(OktaCredentials):
+    """Static SSWS API token credentials."""
+
     token: TSecretStrValue = dlt.secrets.value
 
     def auth(self) -> str:
+        """Credential kind label: "token"."""
         return "token"
 
     @property
     def header(self) -> str:
+        """Authorization header value carrying the SSWS token."""
         return f"SSWS {self.token}"
 
 
@@ -314,6 +429,15 @@ def _request_auth(
         OktaAppCredentials, OktaEncodedAppCredentials, OktaTokenCredentials
     ],
 ):
+    """Build the requests auth for the configured credentials.
+
+    Args:
+        credentials: App or token credentials.
+
+    Returns:
+        A refreshing bearer auth for app credentials, or a static header auth
+        for an SSWS token.
+    """
     if isinstance(credentials, (OktaAppCredentials, OktaEncodedAppCredentials)):
         return OktaBearerAuth(credentials.fetch_token)
     return APIKeyAuth(
@@ -322,6 +446,14 @@ def _request_auth(
 
 
 class ClientPool:
+    """REST clients for the Okta org, one per endpoint family.
+
+    Each family has its own EndpointThrottle pacing requests from the rate limit
+    headers of its own Okta bucket; all throttles share one org-wide in-flight
+    gate. A request is routed to its family by matching the path against
+    API_RATE_LIMIT_ENDPOINTS.
+    """
+
     def __init__(
         self,
         base_url: str,
@@ -329,15 +461,32 @@ class ClientPool:
         paginator,
         throttle_factory: Callable[..., EndpointThrottle] = EndpointThrottle,
         endpoint_concurrency: int = DEFAULT_ENDPOINT_CONCURRENCY,
+        org_concurrency: int = DEFAULT_ORG_CONCURRENCY,
         rate_limit_max_elapsed_seconds: float = DEFAULT_RATE_LIMIT_MAX_ELAPSED_SECONDS,
         rate_limit_remaining_reserve: int = DEFAULT_RATE_LIMIT_REMAINING_RESERVE,
         telemetry: Telemetry | None = None,
     ):
+        """Create the throttles and clients for every endpoint family.
+
+        Args:
+            base_url: Okta org base URL.
+            auth: requests auth applied to every request.
+            paginator: dlt paginator following Link headers.
+            throttle_factory: Builds a throttle per family; tests substitute fakes.
+            endpoint_concurrency: Maximum in-flight requests per family.
+            org_concurrency: Maximum in-flight requests across all families.
+            rate_limit_max_elapsed_seconds: Retry budget for a request stuck on 429.
+            rate_limit_remaining_reserve: Requests kept as headroom in each window.
+            telemetry: Collection telemetry recorder, or None to disable.
+        """
         self._telemetry = telemetry or NullTelemetryRecorder()
+        # One gate per source, shared by every endpoint family's throttle.
+        org_gate = BoundedSemaphore(org_concurrency)
         throttles = {
             pattern: throttle_factory(
                 max_concurrency=endpoint_concurrency,
                 remaining_reserve=rate_limit_remaining_reserve,
+                org_gate=org_gate,
             )
             for pattern in API_RATE_LIMIT_ENDPOINTS
         }
@@ -354,34 +503,55 @@ class ClientPool:
             )
             for pattern in API_RATE_LIMIT_ENDPOINTS
         }
-        self._saml_metadata_client = OktaRESTClient(
-            base_url=base_url,
-            headers={"accept": "application/xml"},
-            auth=auth,
-            paginator=paginator,
-            endpoint_family="/api/v1/apps*",
-            throttle=throttles["/api/v1/apps*"],
-            rate_limit_max_elapsed_seconds=rate_limit_max_elapsed_seconds,
-            telemetry=self._telemetry,
-        )
-        self._idp_saml_metadata_client = OktaRESTClient(
-            base_url=base_url,
-            headers={"accept": "application/xml"},
-            auth=auth,
-            paginator=paginator,
-            endpoint_family="/api/v1/idps*",
-            throttle=throttles["/api/v1/idps*"],
-            rate_limit_max_elapsed_seconds=rate_limit_max_elapsed_seconds,
-            telemetry=self._telemetry,
-        )
+        # SAML metadata is XML; one client per family that serves it, sharing
+        # that family's throttle.
+        self._saml_metadata_clients: dict[str, RESTClient] = {
+            pattern: OktaRESTClient(
+                base_url=base_url,
+                headers={"accept": "application/xml"},
+                auth=auth,
+                paginator=paginator,
+                endpoint_family=pattern,
+                throttle=throttles[pattern],
+                rate_limit_max_elapsed_seconds=rate_limit_max_elapsed_seconds,
+                telemetry=self._telemetry,
+            )
+            for pattern in SAML_METADATA_FAMILIES
+        }
+
+    @staticmethod
+    def _endpoint_family(path: str) -> str:
+        """Map a request path to its endpoint family pattern.
+
+        Args:
+            path: Request path, possibly with a query string.
+
+        Returns:
+            The first matching pattern in API_RATE_LIMIT_ENDPOINTS, else "*".
+        """
+        for pattern in API_RATE_LIMIT_ENDPOINTS:
+            if fnmatch.fnmatch(path, pattern):
+                return pattern
+        return "*"
 
     def get_client(self, path: str) -> RESTClient:
-        for pattern in self._clients:
-            if fnmatch.fnmatch(path, pattern):
-                return self._clients[pattern]
-        return self._clients["*"]
+        """Return the JSON client for the path's endpoint family.
+
+        Args:
+            path: Request path.
+        """
+        return self._clients[self._endpoint_family(path)]
 
     def paginate(self, path: str, **kwargs):
+        """Paginate a path through its family's client, recording pages in telemetry.
+
+        Args:
+            path: Request path.
+            **kwargs: Passed to the client's paginate, such as params or data_selector.
+
+        Yields:
+            Each page of items.
+        """
         for page in self.get_client(path).paginate(path, **kwargs):
             try:
                 row_count = len(page)
@@ -391,12 +561,27 @@ class ClientPool:
             yield page
 
     def get(self, path: str, **kwargs):
+        """Issue a single GET through the path's family client.
+
+        Args:
+            path: Request path.
+            **kwargs: Passed to the client's get.
+
+        Returns:
+            The response.
+        """
         return self.get_client(path).get(path, **kwargs)
 
     def get_saml_metadata(self, path: str):
-        if fnmatch.fnmatch(path, "/api/v1/idps*"):
-            return self._idp_saml_metadata_client.get(path)
-        return self._saml_metadata_client.get(path)
+        """Fetch SAML metadata XML through the path's family client.
+
+        Args:
+            path: Metadata path of an application or identity provider.
+
+        Returns:
+            The response with XML content.
+        """
+        return self._saml_metadata_clients[self._endpoint_family(path)].get(path)
 
 
 class ConsecutiveAccessDeniedBreaker:
@@ -477,6 +662,7 @@ class SourceContext:
         application_grants_breaker: Shared breaker that stops application
             OAuth 2.0 grant collection after consecutive access-denied
             responses.
+        applications_page_size: Applications requested per applications page.
         application_users_page_size: Users requested per application-users
             page.
         groups_page_size: Groups requested per expanded groups page.
@@ -495,6 +681,7 @@ class SourceContext:
             APPLICATION_GRANTS_ACCESS_DENIED_LIMIT
         )
     )
+    applications_page_size: int = APPLICATIONS_PAGE_SIZE
     application_users_page_size: int = APPLICATION_USERS_PAGE_SIZE
     groups_page_size: int = GROUPS_PAGE_SIZE
     application_group_assignments_page_size: int = (
@@ -505,6 +692,17 @@ class SourceContext:
 
 
 def _tenant_domain_from_base_url(base_url: str) -> str:
+    """Derive the case-folded tenant hostname from the Okta base URL.
+
+    Args:
+        base_url: Okta org base URL.
+
+    Returns:
+        The hostname, case-folded.
+
+    Raises:
+        ValueError: If the URL is missing or lacks a scheme or hostname.
+    """
     if not isinstance(base_url, str) or not base_url.strip():
         raise ValueError("Okta base URL is unavailable during collection")
     try:
@@ -521,6 +719,14 @@ def _tenant_domain_from_base_url(base_url: str) -> str:
 
 
 def _group_page_sizes(initial_page_size: int) -> tuple[int, ...]:
+    """Page sizes to try for the groups listing, largest first.
+
+    Args:
+        initial_page_size: Configured page size.
+
+    Returns:
+        Distinct sizes from GROUPS_PAGE_SIZE_FALLBACK_DIVISORS, each at least 1.
+    """
     return tuple(
         dict.fromkeys(
             max(initial_page_size // divisor, 1)
@@ -530,6 +736,11 @@ def _group_page_sizes(initial_page_size: int) -> tuple[int, ...]:
 
 
 def _is_read_timeout_retry_exhaustion(error: OktaRetryExhaustedError) -> bool:
+    """Tell whether retry exhaustion came from read timeouts rather than HTTP errors.
+
+    Args:
+        error: The exhaustion error.
+    """
     return error.context.status_code is None and isinstance(
         error.__cause__, requests.exceptions.ReadTimeout
     )
@@ -595,6 +806,7 @@ class UserFactorClaims:
     """
 
     def __init__(self) -> None:
+        """Start with no claimed users."""
         self._claimed: set[str] = set()
         self._lock = threading.Lock()
 
@@ -952,7 +1164,9 @@ def applications(ctx: SourceContext):
     Yields:
         application (Application): Okta application record.
     """
-    for page in ctx.pool.paginate("/api/v1/apps"):
+    for page in ctx.pool.paginate(
+        "/api/v1/apps", params={"limit": ctx.applications_page_size}
+    ):
         for item in page:
             if item.get("signOnMode") == "SAML_2_0":
                 item = {**item, **_saml_metadata_fields(ctx, item)}
@@ -967,6 +1181,19 @@ def _office365_tenant_id_fields(
     application: dict[str, Any],
     get: Callable[..., requests.Response] = requests.get,
 ) -> dict[str, Any]:
+    """Add the Microsoft tenant id to an Office 365 SAML 1.1 application.
+
+    Applies only to the office365 app with SAML_1_1 sign-on that has an
+    msftTenant but no microsoftTenantId; the id is resolved from Microsoft's
+    OpenID configuration.
+
+    Args:
+        application: Raw application record.
+        get: HTTP GET function, replaceable in tests.
+
+    Returns:
+        The application, with settings.app.microsoftTenantId filled when resolved.
+    """
     if (
         application.get("name") != "office365"
         or application.get("signOnMode") != "SAML_1_1"
@@ -1002,6 +1229,18 @@ def _microsoft_tenant_id_from_onmicrosoft_domain(
     *,
     get: Callable[..., requests.Response] = requests.get,
 ) -> str | None:
+    """Resolve a Microsoft tenant id from an onmicrosoft.com domain prefix.
+
+    Reads the tenant's OpenID configuration and takes the tenant id from the
+    token endpoint path. Failures are logged and yield None.
+
+    Args:
+        onmicrosoft_domain: Domain prefix, without ".onmicrosoft.com".
+        get: HTTP GET function, replaceable in tests.
+
+    Returns:
+        The tenant id, or None if it could not be resolved.
+    """
     domain_name = f"{onmicrosoft_domain}.onmicrosoft.com"
     config_url = (
         f"https://login.microsoftonline.com/{domain_name}/"
@@ -1036,6 +1275,17 @@ def _microsoft_tenant_id_from_onmicrosoft_domain(
 def _saml_metadata_fields(
     ctx: SourceContext, application: dict[str, Any]
 ) -> dict[str, str]:
+    """Read entity id and SSO URL from an application's SAML metadata.
+
+    Args:
+        ctx: Source context providing the client pool.
+        application: Raw application record.
+
+    Returns:
+        saml_metadata_entity_id and saml_metadata_sso_url when present, preferring
+        the HTTP-POST binding; {} when the app has no metadata link or it is
+        unavailable.
+    """
     metadata_link = (application.get("_links") or {}).get("metadata") or {}
     if not metadata_link.get("href"):
         return {}
@@ -1074,6 +1324,11 @@ def _saml_metadata_fields(
 
 
 def _user_name_template_value(user_name_template: object) -> str | None:
+    """Return the template string of a user name template, from a mapping or model.
+
+    Args:
+        user_name_template: Mapping or object with a template attribute.
+    """
     if isinstance(user_name_template, Mapping):
         value = user_name_template.get("template")
         return value if isinstance(value, str) else None
@@ -1087,6 +1342,21 @@ def _saml_metadata_root(
     object_kind: str,
     object_id: str,
 ) -> Element | None:
+    """Fetch and parse SAML metadata XML for an Okta object.
+
+    Args:
+        ctx: Source context providing the client pool.
+        path: Metadata path.
+        object_kind: Object kind for log messages, such as "app".
+        object_id: Object id for log messages.
+
+    Returns:
+        The XML root, or None when the metadata is forbidden, missing, or invalid.
+
+    Raises:
+        OktaRetryExhaustedError: If the request exhausted its retries.
+        requests.HTTPError: For HTTP errors other than 403 and 404.
+    """
     try:
         response = ctx.pool.get_saml_metadata(path)
         return ET.fromstring(response.content)
@@ -1123,6 +1393,16 @@ def _saml_idp_metadata_fields(
     ctx: SourceContext,
     identity_provider: dict[str, Any],
 ) -> dict[str, Any]:
+    """Read entity id and assertion consumer services from an IdP's SAML metadata.
+
+    Args:
+        ctx: Source context providing the client pool.
+        identity_provider: Raw identity provider record.
+
+    Returns:
+        saml_metadata_entity_id and saml_metadata_acs_endpoints when present; {}
+        when the IdP has no metadata link or it is unavailable.
+    """
     metadata_link = (identity_provider.get("_links") or {}).get("metadata") or {}
     idp_id = identity_provider.get("id")
     if not metadata_link.get("href") or not idp_id:
@@ -1175,10 +1455,27 @@ def _saml_idp_metadata_fields(
 
 @app.transformer(name="application_jwks", columns=ApplicationJWKS, parallelized=True)
 def application_jwks(application: Application, ctx: SourceContext):
+    """DLT transformer, yields an application's JWKs; see application_jwk_rows.
+
+    Args:
+        application: Parent application record.
+        ctx: Source context providing the client pool.
+
+    Yields:
+        JWK rows tagged with app_id and app_name.
+    """
     yield from application_jwk_rows(application, ctx)
 
 
 def _embedded_application_jwk_rows(application: Application):
+    """Yield the JWKs embedded in the application's OAuth client settings.
+
+    Args:
+        application: Parent application record.
+
+    Yields:
+        One row per embedded key, tagged with app_id and app_name.
+    """
     oauth_client = application.settings.oauth_client if application.settings else None
     if not oauth_client or not oauth_client.jwks:
         return
@@ -1192,6 +1489,14 @@ def _embedded_application_jwk_rows(application: Application):
 
 
 def _jwk_page_items(page: object):
+    """Extract the key list from a JWKS page in any of Okta's response shapes.
+
+    Args:
+        page: A page from the credentials/jwks endpoint.
+
+    Returns:
+        The keys list, or the page itself when it is already a list.
+    """
     if isinstance(page, Mapping):
         keys = page.get("keys")
         if isinstance(keys, list):
@@ -1204,6 +1509,21 @@ def _jwk_page_items(page: object):
 
 
 def application_jwk_rows(application: Application, ctx: SourceContext):
+    """Yield an application's JWKs, preferring the API over the embedded copy.
+
+    Only applications with embedded JWKs are queried. API errors other than 404
+    are logged; on any error the embedded keys are yielded instead.
+
+    Args:
+        application: Parent application record.
+        ctx: Source context providing the client pool.
+
+    Yields:
+        JWK rows tagged with app_id and app_name.
+
+    Raises:
+        OktaRetryExhaustedError: If the request exhausted its retries.
+    """
     embedded_rows = list(_embedded_application_jwk_rows(application))
     if not embedded_rows:
         return
@@ -1309,6 +1629,15 @@ def application_grants(
     parallelized=True,
 )
 def application_group_push_mappings(application: Application, ctx: SourceContext):
+    """DLT transformer, fetches group push mappings of GROUP_PUSH applications.
+
+    Args:
+        application: Parent application record.
+        ctx: Source context providing the client pool and page size.
+
+    Yields:
+        Mapping rows with the target group name resolved.
+    """
     if "GROUP_PUSH" in application.features:
         for page in ctx.pool.paginate(
             f"/api/v1/apps/{application.id}/group-push/mappings",
@@ -1323,6 +1652,20 @@ def application_group_push_mapping_row(
     mapping: Mapping[str, object],
     ctx: SourceContext,
 ) -> dict[str, object]:
+    """Build a group push mapping row, adding the target group's name when readable.
+
+    Args:
+        application: Parent application record.
+        mapping: Raw mapping record.
+        ctx: Source context providing the client pool.
+
+    Returns:
+        The mapping tagged with app_id and app_name, plus target_group_name if
+        the target group could be fetched.
+
+    Raises:
+        OktaRetryExhaustedError: If the group request exhausted its retries.
+    """
     row = {"app_id": application.id, "app_name": application.name, **mapping}
     target_group_id = mapping.get("targetGroupId")
     if not isinstance(target_group_id, str):
@@ -1360,6 +1703,15 @@ def application_group_push_mapping_row(
     name="application_secrets", columns=ApplicationSecrets, parallelized=True
 )
 def application_secrets(application: Application, ctx: SourceContext):
+    """DLT transformer, fetches client secrets of client_secret_basic applications.
+
+    Args:
+        application: Parent application record.
+        ctx: Source context providing the client pool.
+
+    Yields:
+        Secret rows tagged with app_id and app_name.
+    """
     oauth_client = (
         application.credentials.oauth_client if application.credentials else None
     )
@@ -1384,10 +1736,28 @@ def application_secrets(application: Application, ctx: SourceContext):
     name="api_service_secrets", columns=ApiServiceSecrets, parallelized=True
 )
 def api_service_secrets(api_service: ApiService, ctx: SourceContext):
+    """DLT transformer, fetches client secrets of API service integrations.
+
+    Args:
+        api_service: Parent API service integration record.
+        ctx: Source context providing the client pool.
+
+    Yields:
+        Secret rows tagged with app_id and app_name.
+    """
     yield from api_service_secret_rows(api_service, ctx)
 
 
 def api_service_secret_rows(api_service: ApiService, ctx: SourceContext):
+    """Yield client secret rows for one API service integration.
+
+    Args:
+        api_service: Parent API service integration record.
+        ctx: Source context providing the client pool.
+
+    Yields:
+        Secret rows tagged with app_id and app_name.
+    """
     for page in ctx.pool.paginate(
         f"/integrations/api/v1/api-services/{api_service.id}/credentials/secrets"
     ):
@@ -1416,6 +1786,17 @@ def application_users(application: Application, ctx: SourceContext):
 
 
 def application_user_rows(application: Application, ctx: SourceContext):
+    """Yield user assignment rows for one application, tagged with app details.
+
+    Records the stream outcome in telemetry and re-raises any failure.
+
+    Args:
+        application: Parent application record.
+        ctx: Source context providing the client pool, page size, and telemetry.
+
+    Yields:
+        Assignment rows with app_* fields prepended.
+    """
     row_count = 0
     telemetry = getattr(ctx, "telemetry", NullTelemetryRecorder())
     sign_on = application.settings.sign_on if application.settings else None
@@ -1474,6 +1855,14 @@ def application_user_rows(application: Application, ctx: SourceContext):
 )
 def saml_federation_providers(application: Application):
     # Keep SAML row builders pure; DLT transformer boundaries recompute by design.
+    """DLT transformer, yields an application's SAML federation provider row.
+
+    Args:
+        application: Parent application record.
+
+    Yields:
+        At most one row.
+    """
     row = saml_federation_provider_row(application)
     if row:
         yield row
@@ -1481,6 +1870,14 @@ def saml_federation_providers(application: Application):
 
 @app.transformer(name="saml_issuers", columns=SamlIssuer, parallelized=True)
 def saml_issuers(application: Application):
+    """DLT transformer, yields an application's SAML issuer row.
+
+    Args:
+        application: Parent application record.
+
+    Yields:
+        At most one row.
+    """
     row = saml_issuer_row(application)
     if row:
         yield row
@@ -1492,6 +1889,14 @@ def saml_issuers(application: Application):
     parallelized=True,
 )
 def saml_assertion_consumer_services(application: Application):
+    """DLT transformer, yields an application's SAML assertion consumer services.
+
+    Args:
+        application: Parent application record.
+
+    Yields:
+        One row per assertion consumer service.
+    """
     yield from saml_acs_rows(application)
 
 
@@ -1499,6 +1904,14 @@ def saml_assertion_consumer_services(application: Application):
     name="saml_claim_mappings", columns=SamlClaimMapping, parallelized=True
 )
 def saml_claim_mappings(application: Application):
+    """DLT transformer, yields an application's SAML claim mappings.
+
+    Args:
+        application: Parent application record.
+
+    Yields:
+        One row per claim mapping.
+    """
     yield from saml_claim_mapping_rows(application)
 
 
@@ -1508,6 +1921,15 @@ def saml_claim_mappings(application: Application):
     parallelized=True,
 )
 def saml_service_providers(identity_provider: IdentityProvider, ctx: SourceContext):
+    """DLT transformer, yields an inbound IdP's SAML service provider row.
+
+    Args:
+        identity_provider: Parent identity provider record.
+        ctx: Source context providing the tenant domain.
+
+    Yields:
+        At most one row.
+    """
     row = saml_service_provider_row(identity_provider, ctx.tenant_domain)
     if row:
         yield row
@@ -1519,6 +1941,14 @@ def saml_service_providers(identity_provider: IdentityProvider, ctx: SourceConte
     parallelized=True,
 )
 def saml_account_resolution_rules(identity_provider: IdentityProvider):
+    """DLT transformer, yields an IdP's SAML account resolution rule row.
+
+    Args:
+        identity_provider: Parent identity provider record.
+
+    Yields:
+        At most one row.
+    """
     row = saml_account_resolution_rule_row(identity_provider)
     if row:
         yield row
@@ -1530,6 +1960,14 @@ def saml_account_resolution_rules(identity_provider: IdentityProvider):
     parallelized=True,
 )
 def saml_account_resolution_fields(identity_provider: IdentityProvider):
+    """DLT transformer, yields an IdP's SAML account resolution field row.
+
+    Args:
+        identity_provider: Parent identity provider record.
+
+    Yields:
+        At most one row.
+    """
     row = saml_account_resolution_field_row(identity_provider)
     if row:
         yield row
@@ -1539,6 +1977,15 @@ def saml_account_resolution_fields(identity_provider: IdentityProvider):
     name="saml_trusted_issuers", columns=SamlTrustedIssuer, parallelized=True
 )
 def saml_trusted_issuers(identity_provider: IdentityProvider, ctx: SourceContext):
+    """DLT transformer, yields an IdP's SAML trusted issuer row.
+
+    Args:
+        identity_provider: Parent identity provider record.
+        ctx: Source context providing the tenant domain.
+
+    Yields:
+        At most one row.
+    """
     row = saml_trusted_issuer_row(identity_provider, ctx.tenant_domain)
     if row:
         yield row
@@ -1550,11 +1997,27 @@ def saml_trusted_issuers(identity_provider: IdentityProvider, ctx: SourceContext
     parallelized=True,
 )
 def saml_sp_assertion_consumer_services(identity_provider: IdentityProvider):
+    """DLT transformer, yields an IdP's service provider assertion consumer services.
+
+    Args:
+        identity_provider: Parent identity provider record.
+
+    Yields:
+        One row per assertion consumer service.
+    """
     yield from saml_sp_acs_rows(identity_provider)
 
 
 @app.resource(name="client_applications", columns=ClientApplication, parallelized=True)
 def client_applications(ctx: SourceContext):
+    """DLT resource, fetches OAuth 2.0 clients via GET /oauth2/v1/clients.
+
+    Args:
+        ctx: Source context providing the client pool.
+
+    Yields:
+        client (ClientApplication): Client application record.
+    """
     for page in ctx.pool.paginate("/oauth2/v1/clients"):
         for item in page:
             yield item
@@ -1564,6 +2027,15 @@ def client_applications(ctx: SourceContext):
     name="client_role_assignments", columns=ClientRoleAssignment, parallelized=True
 )
 def client_role_assignments(client: ClientApplication, ctx: SourceContext):
+    """DLT transformer, fetches direct active role assignments of service clients.
+
+    Args:
+        client: Parent client application record.
+        ctx: Source context providing the client pool.
+
+    Yields:
+        Role assignment rows with from_resource, source_id, and any scope targets.
+    """
     if client.application_type == "service":
         for page in ctx.pool.paginate(f"/oauth2/v1/clients/{client.client_id}/roles"):
             for item in page:
@@ -1590,6 +2062,14 @@ def built_in_roles():
 
 @app.resource(name="privileged_users", columns=PrivilegedUser, parallelized=True)
 def privileged_users(ctx: SourceContext):
+    """DLT resource, fetches admin role holders via GET /api/v1/iam/assignees/users.
+
+    Args:
+        ctx: Source context providing the client pool.
+
+    Yields:
+        user (PrivilegedUser): Privileged user record.
+    """
     for page in ctx.pool.paginate("/api/v1/iam/assignees/users"):
         for item in page:
             yield item
@@ -1599,6 +2079,17 @@ def privileged_users(ctx: SourceContext):
     name="user_role_assignments", columns=UserRoleAssignment, parallelized=True
 )
 def user_role_assignments(user: PrivilegedUser, ctx: SourceContext):
+    """DLT transformer, fetches a privileged user's direct active role assignments.
+
+    Errors other than retry exhaustion are logged and end the user's rows.
+
+    Args:
+        user: Parent privileged user record.
+        ctx: Source context providing the client pool.
+
+    Yields:
+        Role assignment rows; see user_role_assignment_rows.
+    """
     try:
         yield from user_role_assignment_rows(user.id, ctx)
     except OktaRetryExhaustedError:
@@ -1612,6 +2103,15 @@ def user_role_assignments(user: PrivilegedUser, ctx: SourceContext):
 
 
 def user_role_assignment_rows(user_id: str, ctx: SourceContext):
+    """Yield a user's direct active role assignments with their scope targets.
+
+    Args:
+        user_id: The user's id.
+        ctx: Source context providing the client pool.
+
+    Yields:
+        Role assignment rows with from_resource, source_id, and any scope targets.
+    """
     for roles in ctx.pool.paginate(f"/api/v1/users/{user_id}/roles"):
         for role in roles:
             if _is_direct_active_role_assignment(role, "user"):
@@ -1627,6 +2127,15 @@ def user_role_assignment_rows(user_id: str, ctx: SourceContext):
     name="group_role_assignments", columns=GroupRoleAssignment, parallelized=True
 )
 def group_role_assignments(group: Group, ctx: SourceContext):
+    """DLT transformer, fetches direct active role assignments of admin groups.
+
+    Args:
+        group: Parent group record.
+        ctx: Source context providing the client pool.
+
+    Yields:
+        Role assignment rows with from_resource, source_id, and any scope targets.
+    """
     if group.embedded.stats.has_admin_privilege:
         for page in ctx.pool.paginate(f"/api/v1/groups/{group.id}/roles"):
             for role in page:
@@ -1700,6 +2209,11 @@ def devices(ctx: SourceContext):
 
 @app.resource(name="policy_types", parallelized=True, columns=PolicyType)
 def policy_types():
+    """DLT resource, yields the policy types whose policies are collected.
+
+    Yields:
+        {"policy_type": type} for each collected type.
+    """
     okta_policies = [
         "OKTA_SIGN_ON",
         "PASSWORD",
@@ -1730,6 +2244,15 @@ def policies(policy: dict, ctx: SourceContext):
 
 @app.transformer(name="policy_mappings", columns=PolicyMapping, parallelized=True)
 def policy_mappings(policy: Policy, ctx: SourceContext):
+    """DLT transformer, fetches a policy's resource mappings via GET /policies/{id}/mappings.
+
+    Args:
+        policy: Parent policy record.
+        ctx: Source context providing the client pool.
+
+    Yields:
+        Mapping rows tagged with policy_id.
+    """
     for page in ctx.pool.paginate(f"/api/v1/policies/{policy.id}/mappings"):
         for item in page:
             yield {
@@ -1790,6 +2313,15 @@ def _redact_idp_client_secret(item: dict[str, Any]) -> dict[str, Any]:
 
 @app.transformer(name="identity_provider_users", columns=IDPUser, parallelized=True)
 def identity_provider_users(idp: IdentityProvider, ctx: SourceContext):
+    """DLT transformer, fetches users linked to an IdP via GET /idps/{id}/users.
+
+    Args:
+        idp: Parent identity provider record.
+        ctx: Source context providing the client pool and page size.
+
+    Yields:
+        Linked user rows with idp_* fields prepended.
+    """
     for page in ctx.pool.paginate(
         f"/api/v1/idps/{idp.id}/users",
         params={"limit": ctx.identity_provider_users_page_size},
@@ -1840,6 +2372,14 @@ def agent_pools(ctx: SourceContext):
 
 @app.transformer(name="agents", columns=Agent, parallelized=True)
 def agents(agent_pool: AgentPool):
+    """DLT transformer, yields the agents embedded in an agent pool.
+
+    Args:
+        agent_pool: Parent agent pool record.
+
+    Yields:
+        Agent rows tagged with agent_pool_name and agent_type.
+    """
     for agent in agent_pool.agents or []:
         yield {
             **agent.model_dump(),
@@ -1862,8 +2402,17 @@ def resource_sets(ctx: SourceContext):
 
 @app.transformer(name="resources", columns=Resource, parallelized=True)
 def resources(resource_set: ResourceSet, ctx: SourceContext):
+    """DLT transformer, fetches a resource set's resources via GET /resource-sets/{id}/resources.
+
+    Args:
+        resource_set: Parent resource set record.
+        ctx: Source context providing the client pool.
+
+    Yields:
+        Resource rows tagged with resource_set_id.
+    """
     for page in ctx.pool.paginate(
-        f"api/v1/iam/resource-sets/{resource_set.id}/resources"
+        f"/api/v1/iam/resource-sets/{resource_set.id}/resources"
     ):
         for item in page:
             yield {"resource_set_id": resource_set.id, **item}
@@ -1875,6 +2424,17 @@ def resources(resource_set: ResourceSet, ctx: SourceContext):
     parallelized=True,
 )
 def resource_set_role_assignments(resource_set: ResourceSet, ctx: SourceContext):
+    """DLT transformer, fetches the members bound to each role of a resource set.
+
+    Members without an assignee link are skipped with a warning.
+
+    Args:
+        resource_set: Parent resource set record.
+        ctx: Source context providing the client pool.
+
+    Yields:
+        Member rows tagged with resource_set_id, role_id, and assignee_id.
+    """
     for page in ctx.pool.paginate(
         f"/api/v1/iam/resource-sets/{resource_set.id}/bindings",
         data_selector="roles",
@@ -1950,6 +2510,7 @@ def source(
     credentials: Union[
         OktaAppCredentials, OktaEncodedAppCredentials, OktaTokenCredentials
     ] = dlt.secrets.value,
+    applications_page_size: int = APPLICATIONS_PAGE_SIZE,
     application_users_page_size: int = APPLICATION_USERS_PAGE_SIZE,
     groups_page_size: int = GROUPS_PAGE_SIZE,
     application_group_assignments_page_size: int = (
@@ -1958,6 +2519,7 @@ def source(
     group_push_mappings_page_size: int = GROUP_PUSH_MAPPINGS_PAGE_SIZE,
     identity_provider_users_page_size: int = IDENTITY_PROVIDER_USERS_PAGE_SIZE,
     endpoint_concurrency: int = DEFAULT_ENDPOINT_CONCURRENCY,
+    org_concurrency: int = DEFAULT_ORG_CONCURRENCY,
     rate_limit_max_elapsed_seconds: float = DEFAULT_RATE_LIMIT_MAX_ELAPSED_SECONDS,
     rate_limit_remaining_reserve: int = DEFAULT_RATE_LIMIT_REMAINING_RESERVE,
     telemetry: Telemetry | None = None,
@@ -1966,12 +2528,14 @@ def source(
 
     Args:
         credentials: Okta API credentials based on key path, encoded key or SSWS for authentication.
+        applications_page_size: Applications requested per applications page.
         application_users_page_size: Users requested per application-users page.
         groups_page_size: Groups requested per expanded groups page.
         application_group_assignments_page_size: Groups requested per application page.
         group_push_mappings_page_size: Mappings requested per group-push page.
         identity_provider_users_page_size: Users requested per identity-provider page.
         endpoint_concurrency: Maximum simultaneous requests for each endpoint family.
+        org_concurrency: Maximum simultaneous requests across all endpoint families.
         rate_limit_max_elapsed_seconds: Maximum retry window for an individual 429 request.
         rate_limit_remaining_reserve: Requests retained as headroom in each observed window.
         telemetry: Internal collection-phase telemetry recorder.
@@ -1996,6 +2560,10 @@ def source(
             f"{APPLICATION_GROUP_ASSIGNMENTS_MIN_PAGE_SIZE} and "
             f"{APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE}"
         )
+    if not 1 <= applications_page_size <= APPLICATIONS_PAGE_SIZE:
+        raise ValueError(
+            f"applications_page_size must be between 1 and {APPLICATIONS_PAGE_SIZE}"
+        )
     if not 1 <= group_push_mappings_page_size <= GROUP_PUSH_MAPPINGS_PAGE_SIZE:
         raise ValueError(
             "group_push_mappings_page_size must be between 1 and "
@@ -2008,6 +2576,8 @@ def source(
         )
     if endpoint_concurrency < 1:
         raise ValueError("endpoint_concurrency must be at least 1")
+    if org_concurrency < 1:
+        raise ValueError("org_concurrency must be at least 1")
     if rate_limit_max_elapsed_seconds <= 0:
         raise ValueError("rate_limit_max_elapsed_seconds must be positive")
     if rate_limit_remaining_reserve < 0:
@@ -2016,6 +2586,7 @@ def source(
     telemetry = telemetry or NullTelemetryRecorder()
     telemetry.set_effective_settings(
         {
+            "applications_page_size": applications_page_size,
             "application_users_page_size": application_users_page_size,
             "groups_page_size": groups_page_size,
             "application_group_assignments_page_size": (
@@ -2024,6 +2595,7 @@ def source(
             "group_push_mappings_page_size": group_push_mappings_page_size,
             "identity_provider_users_page_size": identity_provider_users_page_size,
             "endpoint_concurrency": endpoint_concurrency,
+            "org_concurrency": org_concurrency,
             "rate_limit_max_elapsed_seconds": rate_limit_max_elapsed_seconds,
             "rate_limit_remaining_reserve": rate_limit_remaining_reserve,
         }
@@ -2034,6 +2606,7 @@ def source(
         auth=_request_auth(credentials),
         paginator=HeaderLinkPaginator(),
         endpoint_concurrency=endpoint_concurrency,
+        org_concurrency=org_concurrency,
         rate_limit_max_elapsed_seconds=rate_limit_max_elapsed_seconds,
         rate_limit_remaining_reserve=rate_limit_remaining_reserve,
         telemetry=telemetry,
@@ -2043,6 +2616,7 @@ def source(
         pool=pool,
         tenant_domain=_tenant_domain_from_base_url(credentials.base_url),
         telemetry=telemetry,
+        applications_page_size=applications_page_size,
         application_users_page_size=application_users_page_size,
         groups_page_size=groups_page_size,
         application_group_assignments_page_size=(

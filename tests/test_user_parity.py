@@ -335,7 +335,7 @@ def test_factor_fetch_rate_limit_exhaustion_propagates() -> None:
 
     error = OktaRetryExhaustedError(
         OktaRetryContext(
-            endpoint_family="/api/v1/users/*/factors",
+            endpoint_family="/api/v1/users/*",
             url="https://example.okta.com/api/v1/users/user-1/factors",
             status_code=429,
             attempts=5,
@@ -372,8 +372,8 @@ def test_factor_writers_replace_the_shared_table() -> None:
     assert admin_group_member_factors(None, claims).write_disposition == "replace"
 
 
-def test_factor_requests_use_a_dedicated_throttle_family() -> None:
-    """Factor calls must not share the users listing's throttle budget."""
+def test_per_user_requests_share_one_family_distinct_from_the_listing() -> None:
+    """Factor and role calls share Okta's per-user bucket, not the listing's."""
     from dlt.sources.helpers.rest_client.paginators import HeaderLinkPaginator
 
     pool = ClientPool(
@@ -385,8 +385,8 @@ def test_factor_requests_use_a_dedicated_throttle_family() -> None:
     factors_client = pool.get_client("/api/v1/users/00u1/factors")
 
     assert factors_client is pool.get_client("/api/v1/users/00u2/factors")
+    assert factors_client is pool.get_client("/api/v1/users/00u1/roles")
     assert factors_client is not pool.get_client("/api/v1/users")
-    assert factors_client is not pool.get_client("/api/v1/users/00u1/roles")
 
 
 def make_member(user_id: str) -> dict[str, object]:
