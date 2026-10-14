@@ -78,7 +78,8 @@ devices, OAuth clients, API service integrations, and the `/api/v1` catch-all); 
 buckets differ by org tier. It limits concurrent requests, observes
 `X-Rate-Limit-Remaining` and `X-Rate-Limit-Reset` on successful responses, and paces later requests before a bucket
 is exhausted. HTTP 429 responses retry the same request and pagination cursor until a bounded elapsed-time budget is
-reached. Transport failures and HTTP 5xx responses retain DLT's retry coverage.
+reached. HTTP 5xx responses and transport failures pause every endpoint family org-wide before the request is
+retried.
 
 Fan-out resources use explicit page sizes where Okta documents safe maxima. Expanded group collection requests 200
 rows per page, application-user collection requests 500 rows per page, application-group assignment collection

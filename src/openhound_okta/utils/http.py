@@ -105,6 +105,78 @@ class OktaRetryExhaustedError(RuntimeError):
         super().__init__(detail)
 
 
+class OrgThrottle:
+    """Org-wide state shared by every endpoint family's throttle.
+
+    Holds the in-flight permit gate that keeps the collector under Okta's
+    per-org concurrency limit, and a backoff deadline for server-side trouble
+    (5xx responses and transport errors) that pauses every family at once.
+    """
+
+    def __init__(
+        self,
+        max_concurrency: int,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+        max_cooldown_seconds: float = DEFAULT_MAX_COOLDOWN_SECONDS,
+    ) -> None:
+        if max_concurrency < 1:
+            raise ValueError("max_concurrency must be at least 1")
+        if max_cooldown_seconds <= 0:
+            raise ValueError("max_cooldown_seconds must be positive")
+        self._clock: Callable[[], float] = clock
+        self._sleep: Callable[[float], None] = sleep
+        self._lock: Lock = Lock()
+        self._gate: BoundedSemaphore = BoundedSemaphore(max_concurrency)
+        self._max_cooldown_seconds: float = float(max_cooldown_seconds)
+        self._next_allowed_at: float = 0.0
+
+    def acquire(self) -> None:
+        """Take one in-flight permit, blocking until one is free."""
+        self._gate.acquire()
+
+    def release(self) -> None:
+        """Return an in-flight permit."""
+        self._gate.release()
+
+    def allows(self, now: float) -> bool:
+        """Tell whether the org-wide backoff deadline has passed at `now`."""
+        with self._lock:
+            return now >= self._next_allowed_at
+
+    def defer(self, delay: float) -> float:
+        """Pause every family for `delay` seconds, clamped to the cooldown cap.
+
+        Returns:
+            The effective delay, or 0.0 when nothing was deferred.
+        """
+        if delay <= 0:
+            return 0.0
+        delay = min(delay, self._max_cooldown_seconds)
+        with self._lock:
+            deadline = self._clock() + delay
+            if deadline > self._next_allowed_at:
+                self._next_allowed_at = deadline
+        return delay
+
+    def wait(self) -> float:
+        """Sleep until the org-wide backoff deadline has passed.
+
+        Returns:
+            Seconds spent waiting.
+        """
+        waited = 0.0
+        while True:
+            with self._lock:
+                delay = self._next_allowed_at - self._clock()
+            if delay <= 0:
+                return waited
+            wait_started_at = self._clock()
+            self._sleep(delay)
+            waited += max(self._clock() - wait_started_at, 0.0)
+
+
 class EndpointThrottle:
     def __init__(
         self,
@@ -115,7 +187,7 @@ class EndpointThrottle:
         max_concurrency: int = DEFAULT_ENDPOINT_CONCURRENCY,
         remaining_reserve: int = DEFAULT_RATE_LIMIT_REMAINING_RESERVE,
         max_cooldown_seconds: float = DEFAULT_MAX_COOLDOWN_SECONDS,
-        org_gate: BoundedSemaphore | None = None,
+        org_throttle: OrgThrottle | None = None,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("max_concurrency must be at least 1")
@@ -128,8 +200,9 @@ class EndpointThrottle:
         self._sleep: Callable[[float], None] = sleep
         self._lock: Lock = Lock()
         self._semaphore: BoundedSemaphore = BoundedSemaphore(max_concurrency)
-        # Org-wide in-flight gate shared with the other families, if any.
-        self._org_gate: BoundedSemaphore | None = org_gate
+        # Org-wide permit gate and outage backoff shared with the other
+        # families, if any.
+        self._org_throttle: OrgThrottle | None = org_throttle
         self._remaining_reserve: int = remaining_reserve
         self._max_cooldown_seconds: float = float(max_cooldown_seconds)
         self._next_allowed_at: float = 0.0
@@ -140,9 +213,6 @@ class EndpointThrottle:
         self._observed_reset_at: float | None = None
         self._observed_remaining: int | None = None
         self._next_allowed_reason: WaitReason = "proactive_pacing"
-        # Bumped whenever a cooldown or backoff moves the deadline, so a request
-        # admitted by the org gate after waiting can tell it must wait again.
-        self._deadline_generation: int = 0
         self._queued: int = 0
         self._active_http_requests: int = 0
 
@@ -159,31 +229,33 @@ class EndpointThrottle:
         slot_seconds = max(self._clock() - slot_started_at, 0.0)
         proactive_pacing_seconds = 0.0
         retry_backoff_seconds = 0.0
-        holds_org_gate = False
+        holds_org_permit = False
         try:
             while True:
-                pacing_seconds, backoff_seconds = self._wait_by_reason()
+                pacing_seconds, backoff_seconds = self._wait_until_allowed()
                 proactive_pacing_seconds += pacing_seconds
                 retry_backoff_seconds += backoff_seconds
-                if self._org_gate is None:
+                if self._org_throttle is not None:
+                    retry_backoff_seconds += self._org_throttle.wait()
+                    # Take the org permit only once this request is ready to
+                    # send, so requests parked on a cooldown do not starve
+                    # other families.
+                    gate_started_at = self._clock()
+                    self._org_throttle.acquire()
+                    holds_org_permit = True
+                    slot_seconds += max(self._clock() - gate_started_at, 0.0)
+                # Book the start atomically at admission. A deadline that moved
+                # while waiting for the permit, or a start booked by a request
+                # admitted just before, sends this one back to wait without
+                # holding the permit.
+                if self._try_book():
                     break
-                # Take the org permit only once this request is ready to send,
-                # so requests parked on a cooldown do not starve other families.
-                with self._lock:
-                    generation = self._deadline_generation
-                gate_started_at = self._clock()
-                self._org_gate.acquire()
-                holds_org_gate = True
-                slot_seconds += max(self._clock() - gate_started_at, 0.0)
-                with self._lock:
-                    if generation == self._deadline_generation:
-                        break
-                # A cooldown or backoff landed while waiting for the permit.
-                self._org_gate.release()
-                holds_org_gate = False
+                if holds_org_permit and self._org_throttle is not None:
+                    self._org_throttle.release()
+                    holds_org_permit = False
         except BaseException:
-            if holds_org_gate and self._org_gate is not None:
-                self._org_gate.release()
+            if holds_org_permit and self._org_throttle is not None:
+                self._org_throttle.release()
             self._semaphore.release()
             raise
         return ThrottleWait(
@@ -194,8 +266,8 @@ class EndpointThrottle:
         )
 
     def release(self) -> None:
-        if self._org_gate is not None:
-            self._org_gate.release()
+        if self._org_throttle is not None:
+            self._org_throttle.release()
         self._semaphore.release()
 
     @property
@@ -220,22 +292,26 @@ class EndpointThrottle:
             self._active_http_requests -= 1
 
     def wait(self) -> None:
-        self._wait_by_reason()
+        """Wait for the next allowed start and book it, without taking a slot."""
+        while True:
+            self._wait_until_allowed()
+            if self._try_book():
+                return
 
-    def _wait_by_reason(self) -> tuple[float, float]:
+    def _wait_until_allowed(self) -> tuple[float, float]:
+        """Sleep until the family deadline has passed, without booking a start.
+
+        Returns:
+            Seconds waited on pacing and seconds waited on retry backoff.
+        """
         proactive_pacing_seconds = 0.0
         retry_backoff_seconds = 0.0
         while True:
             with self._lock:
-                now = self._clock()
-                delay = self._next_allowed_at - now
+                delay = self._next_allowed_at - self._clock()
                 reason = self._next_allowed_reason
-                if delay <= 0:
-                    self._next_allowed_at = now + max(
-                        self._request_interval, self._probe_interval
-                    )
-                    self._next_allowed_reason = "proactive_pacing"
-                    return proactive_pacing_seconds, retry_backoff_seconds
+            if delay <= 0:
+                return proactive_pacing_seconds, retry_backoff_seconds
             wait_started_at = self._clock()
             self._sleep(delay)
             waited = max(self._clock() - wait_started_at, 0.0)
@@ -243,6 +319,23 @@ class EndpointThrottle:
                 retry_backoff_seconds += waited
             else:
                 proactive_pacing_seconds += waited
+
+    def _try_book(self) -> bool:
+        """Book the next start now if the family and org deadlines have passed.
+
+        Returns:
+            True if this request may start now; False if it must wait again.
+        """
+        now = self._clock()
+        org_allows = self._org_throttle is None or self._org_throttle.allows(now)
+        with self._lock:
+            if not org_allows or now < self._next_allowed_at:
+                return False
+            self._next_allowed_at = now + max(
+                self._request_interval, self._probe_interval
+            )
+            self._next_allowed_reason = "proactive_pacing"
+            return True
 
     def defer(self, delay: float, *, minimum_interval: float = 0.0) -> float:
         if delay <= 0:
@@ -253,9 +346,22 @@ class EndpointThrottle:
             if retry_deadline > self._next_allowed_at:
                 self._next_allowed_at = retry_deadline
                 self._next_allowed_reason = "retry_backoff"
-                self._deadline_generation += 1
             self._probe_interval = max(self._probe_interval, minimum_interval)
         return delay
+
+    def defer_outage(self, delay: float) -> float:
+        """Pause after a server-side failure (5xx or transport error).
+
+        The pause is org-wide when an org throttle is shared, since such
+        failures are not specific to one rate limit bucket; otherwise it falls
+        back to pausing this family only.
+
+        Returns:
+            The effective delay.
+        """
+        if self._org_throttle is not None:
+            return self._org_throttle.defer(delay)
+        return self.defer(delay)
 
     def observe_response(self, response: requests.Response) -> None:
         remaining_header = response.headers.get("X-Rate-Limit-Remaining")
@@ -309,7 +415,6 @@ class EndpointThrottle:
                 if proactive_deadline > self._next_allowed_at:
                     self._next_allowed_at = proactive_deadline
                     self._next_allowed_reason = "proactive_pacing"
-                    self._deadline_generation += 1
                 self._probe_interval = float(RATE_LIMIT_PROBE_INTERVAL_SECONDS)
                 # The cooldown ends in a new window. Pace it at the default
                 # rate until its first headers arrive, not at the interval
@@ -528,12 +633,12 @@ class OktaRESTClient(RESTClient):
                     ):
                         raise OktaRetryExhaustedError(context) from exc
                 else:
-                    # Publish the family deadline before freeing the slot so a
-                    # queued request cannot start ahead of the backoff.
+                    # Publish the backoff before freeing the slot so a queued
+                    # request cannot start ahead of it.
                     try:
                         if transient_attempt >= self._max_attempts:
                             raise OktaRetryExhaustedError(context) from exc
-                        delay = self._throttle.defer(delay)
+                        delay = self._throttle.defer_outage(delay)
                     finally:
                         self._throttle.release()
                 logger.warning(
@@ -563,8 +668,8 @@ class OktaRESTClient(RESTClient):
                 is_read_timeout = isinstance(exc, requests.exceptions.ReadTimeout)
                 if is_read_timeout:
                     read_timeout_attempt += 1
-                # Publish the family deadline before freeing the slot so a
-                # queued request cannot start ahead of the backoff.
+                # Publish the backoff before freeing the slot so a queued
+                # request cannot start ahead of it.
                 try:
                     context = self._retry_context(
                         None,
@@ -585,7 +690,7 @@ class OktaRESTClient(RESTClient):
                     )
                     if exhausted:
                         raise OktaRetryExhaustedError(context) from exc
-                    delay = self._throttle.defer(
+                    delay = self._throttle.defer_outage(
                         self._retry_delay(None, transient_attempt)
                     )
                 finally:

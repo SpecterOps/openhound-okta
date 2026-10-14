@@ -13,7 +13,7 @@ import math
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from fnmatch import fnmatch
-from threading import BoundedSemaphore, Lock
+from threading import Lock
 from typing import Any
 from urllib.parse import urlparse
 
@@ -37,6 +37,7 @@ from openhound_okta.utils.http import (
     DEFAULT_ORG_CONCURRENCY,
     EndpointThrottle,
     OktaRESTClient,
+    OrgThrottle,
 )
 
 # Base URL of the fake Okta organization.
@@ -243,7 +244,7 @@ def build_collector(
     adapter: RateLimitedOktaAdapter,
     family: str,
     telemetry: Telemetry,
-    org_gate: BoundedSemaphore,
+    org_throttle: OrgThrottle,
 ) -> OktaRESTClient:
     """Build a collector: the real client and throttle bound to the fake Okta.
 
@@ -251,7 +252,7 @@ def build_collector(
         adapter: The fake Okta transport the collector's session sends through.
         family: The ENDPOINTS pattern the client's throttle paces.
         telemetry: Recorder that observes the collector's responses.
-        org_gate: Org-wide in-flight gate shared with the collector's other
+        org_throttle: Org-wide throttle shared with the collector's other
             clients.
 
     Returns:
@@ -262,7 +263,7 @@ def build_collector(
     return OktaRESTClient(
         base_url=BASE_URL,
         endpoint_family=family,
-        throttle=EndpointThrottle(max_concurrency=WORKERS, org_gate=org_gate),
+        throttle=EndpointThrottle(max_concurrency=WORKERS, org_throttle=org_throttle),
         session=session,
         telemetry=telemetry,
     )
@@ -357,7 +358,7 @@ class Job:
         self,
         adapter: RateLimitedOktaAdapter,
         family: str,
-        org_gate: BoundedSemaphore,
+        org_throttle: OrgThrottle,
         task: TaskID,
     ) -> None:
         """Build the client for the family behind the collector's org gate.
@@ -365,13 +366,13 @@ class Job:
         Args:
             adapter: The fake Okta transport the client sends through.
             family: The ENDPOINTS pattern this job walks.
-            org_gate: The collector's org-wide in-flight gate.
+            org_throttle: The collector's org-wide throttle.
             task: The bar belonging to this job.
         """
         self.family = family
         self.task = task
         self.counter = StatusCounter()
-        self.client = build_collector(adapter, family, self.counter, org_gate)
+        self.client = build_collector(adapter, family, self.counter, org_throttle)
 
     def run(self, progress: Progress) -> None:
         """Fetch every user on the family and advance the bar per response.
@@ -413,19 +414,19 @@ class Job:
 
 
 class Collector:
-    """One collector: its org gate, gate gauge, and one job per endpoint."""
+    """One collector: its org throttle, gate gauge, and one job per endpoint."""
 
     def __init__(
         self, adapter: RateLimitedOktaAdapter, name: str, progress: Progress
     ) -> None:
-        """Create the org gate, its header and gauge rows, and the jobs' bars.
+        """Create the org throttle, its header and gauge rows, and the jobs' bars.
 
         Args:
             adapter: The fake Okta transport the jobs send through.
             name: The collector's label.
             progress: The shared progress display the bars are added to.
         """
-        self.org_gate = BoundedSemaphore(DEFAULT_ORG_CONCURRENCY)
+        self.org_throttle = OrgThrottle(DEFAULT_ORG_CONCURRENCY)
         progress.add_task(name, total=0, status="", header=True)
         self.gate_task = progress.add_task(
             "  concurrency", total=DEFAULT_ORG_CONCURRENCY, completed=0, status=""
@@ -434,7 +435,7 @@ class Collector:
             Job(
                 adapter,
                 family,
-                self.org_gate,
+                self.org_throttle,
                 progress.add_task(
                     f"  progress {family.removeprefix('/api/v1/')}",
                     total=USER_COUNT,

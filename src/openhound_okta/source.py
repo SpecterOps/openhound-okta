@@ -6,7 +6,7 @@ import threading
 from base64 import b64decode
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
-from threading import BoundedSemaphore, Lock
+from threading import Lock
 from typing import Any, Callable, Final, Union
 from urllib.parse import urlparse
 from xml.etree.ElementTree import Element
@@ -101,6 +101,7 @@ from .utils.http import (
     InitialReadTimeoutBudget,
     OktaRESTClient,
     OktaRetryExhaustedError,
+    OrgThrottle,
 )
 
 logger = logging.getLogger(__name__)
@@ -480,13 +481,14 @@ class ClientPool:
             telemetry: Collection telemetry recorder, or None to disable.
         """
         self._telemetry = telemetry or NullTelemetryRecorder()
-        # One gate per source, shared by every endpoint family's throttle.
-        org_gate = BoundedSemaphore(org_concurrency)
+        # One org throttle per source, shared by every endpoint family's
+        # throttle: the in-flight permit gate and the org-wide outage backoff.
+        org_throttle = OrgThrottle(org_concurrency)
         throttles = {
             pattern: throttle_factory(
                 max_concurrency=endpoint_concurrency,
                 remaining_reserve=rate_limit_remaining_reserve,
-                org_gate=org_gate,
+                org_throttle=org_throttle,
             )
             for pattern in API_RATE_LIMIT_ENDPOINTS
         }

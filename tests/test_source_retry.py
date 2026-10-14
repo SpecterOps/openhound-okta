@@ -1,7 +1,7 @@
 import inspect
 import logging
 from collections.abc import Iterator
-from threading import BoundedSemaphore, Event, Thread
+from threading import Event, Thread
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -56,6 +56,7 @@ from openhound_okta.utils.http import (
     OktaRESTClient,
     OktaRetryContext,
     OktaRetryExhaustedError,
+    OrgThrottle,
     RATE_LIMIT_PROBE_INTERVAL_SECONDS,
     ThrottleWait,
 )
@@ -890,11 +891,11 @@ def test_endpoint_throttle_bounds_concurrent_requests():
     assert not worker.is_alive()
 
 
-def test_endpoint_throttles_sharing_an_org_gate_bound_in_flight_requests():
+def test_endpoint_throttles_sharing_an_org_throttle_bound_in_flight_requests():
     clock = FakeClock()
-    org_gate = BoundedSemaphore(1)
-    first = EndpointThrottle(clock=clock.time, sleep=clock.sleep, org_gate=org_gate)
-    second = EndpointThrottle(clock=clock.time, sleep=clock.sleep, org_gate=org_gate)
+    org = OrgThrottle(1, clock=clock.time, sleep=clock.sleep)
+    first = EndpointThrottle(clock=clock.time, sleep=clock.sleep, org_throttle=org)
+    second = EndpointThrottle(clock=clock.time, sleep=clock.sleep, org_throttle=org)
     second_acquired = Event()
 
     first.acquire()
@@ -916,7 +917,7 @@ def test_endpoint_throttles_sharing_an_org_gate_bound_in_flight_requests():
     assert clock.sleeps == []
 
 
-def test_source_wires_one_org_gate_across_all_endpoint_families(monkeypatch):
+def test_source_wires_one_org_throttle_across_all_endpoint_families(monkeypatch):
     created: list[EndpointThrottle] = []
 
     class GateRecordingPool(ClientPool):
@@ -937,9 +938,9 @@ def test_source_wires_one_org_gate_across_all_endpoint_families(monkeypatch):
     inspect.unwrap(source)(credentials=credentials, org_concurrency=1)
 
     assert len(created) == len(API_RATE_LIMIT_ENDPOINTS)
-    gates = {id(throttle._org_gate) for throttle in created}
-    assert len(gates) == 1
-    assert isinstance(created[0]._org_gate, BoundedSemaphore)
+    org_throttles = {id(throttle._org_throttle) for throttle in created}
+    assert len(org_throttles) == 1
+    assert isinstance(created[0]._org_throttle, OrgThrottle)
 
 
 @pytest.mark.parametrize("org_concurrency", [0, -1])
@@ -1038,9 +1039,9 @@ def test_resources_paginate_an_absolute_iam_path():
     assert rows == [{"resource_set_id": "rs1", "id": "r1"}]
 
 
-def test_waiting_on_a_cooldown_does_not_hold_the_org_gate():
+def test_waiting_on_a_cooldown_does_not_hold_the_org_permit():
     clock = FakeClock()
-    org_gate = BoundedSemaphore(1)
+    org = OrgThrottle(1, clock=clock.time, sleep=clock.sleep)
     sleeping = Event()
     resume = Event()
 
@@ -1049,8 +1050,8 @@ def test_waiting_on_a_cooldown_does_not_hold_the_org_gate():
         resume.wait(1.0)
         clock.sleep(delay)
 
-    first = EndpointThrottle(clock=clock.time, sleep=blocking_sleep, org_gate=org_gate)
-    second = EndpointThrottle(clock=clock.time, sleep=clock.sleep, org_gate=org_gate)
+    first = EndpointThrottle(clock=clock.time, sleep=blocking_sleep, org_throttle=org)
+    second = EndpointThrottle(clock=clock.time, sleep=clock.sleep, org_throttle=org)
     first.defer(5)
     first_worker = Thread(target=first.acquire)
     first_worker.start()
@@ -1074,25 +1075,93 @@ def test_waiting_on_a_cooldown_does_not_hold_the_org_gate():
     assert not second_worker.is_alive()
 
 
-def test_backoff_set_while_waiting_for_the_org_gate_is_honored():
+def test_backoff_set_while_waiting_for_the_org_permit_is_honored():
     clock = FakeClock()
-    org_gate = BoundedSemaphore(1)
-    throttle = EndpointThrottle(clock=clock.time, sleep=clock.sleep, org_gate=org_gate)
+    org = OrgThrottle(1, clock=clock.time, sleep=clock.sleep)
+    throttle = EndpointThrottle(clock=clock.time, sleep=clock.sleep, org_throttle=org)
     waits: list[ThrottleWait] = []
-    org_gate.acquire()
+    org.acquire()
     worker = Thread(target=lambda: waits.append(throttle.acquire()))
     worker.start()
     worker.join(timeout=0.05)
     assert worker.is_alive()
 
     throttle.defer(5)
-    org_gate.release()
+    org.release()
     worker.join(timeout=1.0)
 
     assert not worker.is_alive()
     assert clock.sleeps == [5.0]
     assert waits[0].retry_backoff_seconds == 5.0
     throttle.release()
+
+
+def test_same_family_waiters_are_spaced_after_org_admission():
+    clock = FakeClock()
+    org = OrgThrottle(1, clock=clock.time, sleep=clock.sleep)
+    throttle = EndpointThrottle(clock=clock.time, sleep=clock.sleep, org_throttle=org)
+    org.acquire()
+
+    def take_and_release():
+        throttle.acquire()
+        throttle.release()
+
+    workers = [Thread(target=take_and_release) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=0.05)
+    assert all(worker.is_alive() for worker in workers)
+
+    org.release()
+    for worker in workers:
+        worker.join(timeout=1.0)
+
+    assert not any(worker.is_alive() for worker in workers)
+    assert clock.sleeps == pytest.approx([PACING_INTERVAL])
+
+
+def test_server_error_backoff_pauses_every_family():
+    clock = FakeClock()
+    org = OrgThrottle(4, clock=clock.time, sleep=clock.sleep)
+    first = EndpointThrottle(clock=clock.time, sleep=clock.sleep, org_throttle=org)
+    second = EndpointThrottle(clock=clock.time, sleep=clock.sleep, org_throttle=org)
+
+    assert first.defer_outage(5) == 5.0
+    wait = second.acquire()
+    second.release()
+
+    assert clock.sleeps == [5.0]
+    assert wait.retry_backoff_seconds == 5.0
+
+
+class RecordingOrgThrottle(OrgThrottle):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.deferrals: list[float] = []
+
+    def defer(self, delay):
+        self.deferrals.append(delay)
+        return super().defer(delay)
+
+
+def test_server_errors_back_off_org_wide_not_per_family():
+    cursor_url = "https://example.okta.test/api/v1/apps/0oa123/users?after=00u456"
+    clock = FakeClock()
+    org = RecordingOrgThrottle(4, clock=clock.time, sleep=clock.sleep)
+    throttle = OrderRecordingThrottle(
+        clock=clock.time, sleep=clock.sleep, org_throttle=org
+    )
+    client, _ = _client(
+        [_response(500, cursor_url), _response(200, cursor_url)],
+        throttle=throttle,
+        clock=clock,
+    )
+
+    client._send_request(Request("GET", cursor_url))
+
+    assert org.deferrals == [1.0]
+    assert "defer" not in throttle.calls
 
 
 class OrderRecordingThrottle(EndpointThrottle):
