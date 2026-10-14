@@ -23,6 +23,7 @@ class FakePool:
             [
                 {
                     "id": "secret-1",
+                    "client_secret": "***************************bHuy",
                     "secret_hash": "hash-1",
                     "status": "ACTIVE",
                 }
@@ -118,9 +119,7 @@ def test_secret_lookup_includes_application_and_api_service_secret_tables():
     con.execute("CREATE SCHEMA okta")
     con.execute("CREATE TABLE okta.application_secrets (id VARCHAR, app_id VARCHAR)")
     con.execute("CREATE TABLE okta.api_service_secrets (id VARCHAR, app_id VARCHAR)")
-    con.execute(
-        "INSERT INTO okta.application_secrets VALUES ('app-secret-1', 'app-1')"
-    )
+    con.execute("INSERT INTO okta.application_secrets VALUES ('app-secret-1', 'app-1')")
     con.execute(
         "INSERT INTO okta.api_service_secrets VALUES "
         "('service-secret-1', 'integration-1')"
@@ -128,6 +127,4 @@ def test_secret_lookup_includes_application_and_api_service_secret_tables():
     lookup = OktaLookup(con)
 
     assert lookup.application_secret_ids("app-1") == (("app-secret-1",),)
-    assert lookup.application_secret_ids("integration-1") == (
-        ("service-secret-1",),
-    )
+    assert lookup.application_secret_ids("integration-1") == (("service-secret-1",),)
