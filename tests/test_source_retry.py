@@ -57,6 +57,7 @@ from openhound_okta.utils.http import (
     OktaRetryContext,
     OktaRetryExhaustedError,
     RATE_LIMIT_PROBE_INTERVAL_SECONDS,
+    ThrottleWait,
 )
 
 
@@ -1035,6 +1036,99 @@ def test_resources_paginate_an_absolute_iam_path():
 
     assert pool.path == "/api/v1/iam/resource-sets/rs1/resources"
     assert rows == [{"resource_set_id": "rs1", "id": "r1"}]
+
+
+def test_waiting_on_a_cooldown_does_not_hold_the_org_gate():
+    clock = FakeClock()
+    org_gate = BoundedSemaphore(1)
+    sleeping = Event()
+    resume = Event()
+
+    def blocking_sleep(delay):
+        sleeping.set()
+        resume.wait(1.0)
+        clock.sleep(delay)
+
+    first = EndpointThrottle(clock=clock.time, sleep=blocking_sleep, org_gate=org_gate)
+    second = EndpointThrottle(clock=clock.time, sleep=clock.sleep, org_gate=org_gate)
+    first.defer(5)
+    first_worker = Thread(target=first.acquire)
+    first_worker.start()
+    assert sleeping.wait(1.0)
+
+    second_acquired = Event()
+
+    def acquire_second():
+        second.acquire()
+        second_acquired.set()
+        second.release()
+
+    second_worker = Thread(target=acquire_second)
+    second_worker.start()
+
+    assert second_acquired.wait(1.0)
+    resume.set()
+    first_worker.join(timeout=1.0)
+    second_worker.join(timeout=1.0)
+    assert not first_worker.is_alive()
+    assert not second_worker.is_alive()
+
+
+def test_backoff_set_while_waiting_for_the_org_gate_is_honored():
+    clock = FakeClock()
+    org_gate = BoundedSemaphore(1)
+    throttle = EndpointThrottle(clock=clock.time, sleep=clock.sleep, org_gate=org_gate)
+    waits: list[ThrottleWait] = []
+    org_gate.acquire()
+    worker = Thread(target=lambda: waits.append(throttle.acquire()))
+    worker.start()
+    worker.join(timeout=0.05)
+    assert worker.is_alive()
+
+    throttle.defer(5)
+    org_gate.release()
+    worker.join(timeout=1.0)
+
+    assert not worker.is_alive()
+    assert clock.sleeps == [5.0]
+    assert waits[0].retry_backoff_seconds == 5.0
+    throttle.release()
+
+
+class OrderRecordingThrottle(EndpointThrottle):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.calls: list[str] = []
+
+    def defer(self, delay, *, minimum_interval=0.0):
+        self.calls.append("defer")
+        return super().defer(delay, minimum_interval=minimum_interval)
+
+    def release(self):
+        self.calls.append("release")
+        super().release()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        lambda url: _response(500, url),
+        lambda url: requests.Timeout("timed out"),
+    ],
+)
+def test_backoff_is_published_before_the_slot_is_released(failure):
+    cursor_url = "https://example.okta.test/api/v1/apps/0oa123/users?after=00u456"
+    clock = FakeClock()
+    throttle = OrderRecordingThrottle(clock=clock.time, sleep=clock.sleep)
+    client, _ = _client(
+        [failure(cursor_url), _response(200, cursor_url)],
+        throttle=throttle,
+        clock=clock,
+    )
+
+    client._send_request(Request("GET", cursor_url))
+
+    assert throttle.calls == ["defer", "release", "release"]
 
 
 def test_occupied_throttle_slots_are_not_reported_as_active_http_requests():

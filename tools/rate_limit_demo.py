@@ -387,7 +387,8 @@ class Job:
             futures = [
                 pool.submit(fetch, user_id) for user_id in range(1, USER_COUNT + 1)
             ]
-            for _ in as_completed(futures):
+            for future in as_completed(futures):
+                future.result()
                 progress.advance(self.task)
 
     def status(self, completed: float, elapsed: float) -> str:

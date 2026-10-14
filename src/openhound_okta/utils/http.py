@@ -140,6 +140,9 @@ class EndpointThrottle:
         self._observed_reset_at: float | None = None
         self._observed_remaining: int | None = None
         self._next_allowed_reason: WaitReason = "proactive_pacing"
+        # Bumped whenever a cooldown or backoff moves the deadline, so a request
+        # admitted by the org gate after waiting can tell it must wait again.
+        self._deadline_generation: int = 0
         self._queued: int = 0
         self._active_http_requests: int = 0
 
@@ -153,13 +156,35 @@ class EndpointThrottle:
             self._semaphore.acquire()
             with self._lock:
                 self._queued -= 1
-        if self._org_gate is not None:
-            self._org_gate.acquire()
         slot_seconds = max(self._clock() - slot_started_at, 0.0)
+        proactive_pacing_seconds = 0.0
+        retry_backoff_seconds = 0.0
+        holds_org_gate = False
         try:
-            proactive_pacing_seconds, retry_backoff_seconds = self._wait_by_reason()
+            while True:
+                pacing_seconds, backoff_seconds = self._wait_by_reason()
+                proactive_pacing_seconds += pacing_seconds
+                retry_backoff_seconds += backoff_seconds
+                if self._org_gate is None:
+                    break
+                # Take the org permit only once this request is ready to send,
+                # so requests parked on a cooldown do not starve other families.
+                with self._lock:
+                    generation = self._deadline_generation
+                gate_started_at = self._clock()
+                self._org_gate.acquire()
+                holds_org_gate = True
+                slot_seconds += max(self._clock() - gate_started_at, 0.0)
+                with self._lock:
+                    if generation == self._deadline_generation:
+                        break
+                # A cooldown or backoff landed while waiting for the permit.
+                self._org_gate.release()
+                holds_org_gate = False
         except BaseException:
-            self.release()
+            if holds_org_gate and self._org_gate is not None:
+                self._org_gate.release()
+            self._semaphore.release()
             raise
         return ThrottleWait(
             slot_seconds=slot_seconds,
@@ -228,6 +253,7 @@ class EndpointThrottle:
             if retry_deadline > self._next_allowed_at:
                 self._next_allowed_at = retry_deadline
                 self._next_allowed_reason = "retry_backoff"
+                self._deadline_generation += 1
             self._probe_interval = max(self._probe_interval, minimum_interval)
         return delay
 
@@ -283,6 +309,7 @@ class EndpointThrottle:
                 if proactive_deadline > self._next_allowed_at:
                     self._next_allowed_at = proactive_deadline
                     self._next_allowed_reason = "proactive_pacing"
+                    self._deadline_generation += 1
                 self._probe_interval = float(RATE_LIMIT_PROBE_INTERVAL_SECONDS)
                 # The cooldown ends in a new window. Pace it at the default
                 # rate until its first headers arrive, not at the interval
@@ -501,10 +528,14 @@ class OktaRESTClient(RESTClient):
                     ):
                         raise OktaRetryExhaustedError(context) from exc
                 else:
-                    self._throttle.release()
-                    if transient_attempt >= self._max_attempts:
-                        raise OktaRetryExhaustedError(context) from exc
-                    delay = self._throttle.defer(delay)
+                    # Publish the family deadline before freeing the slot so a
+                    # queued request cannot start ahead of the backoff.
+                    try:
+                        if transient_attempt >= self._max_attempts:
+                            raise OktaRetryExhaustedError(context) from exc
+                        delay = self._throttle.defer(delay)
+                    finally:
+                        self._throttle.release()
                 logger.warning(
                     "Retrying Okta request after status=%s endpoint_family=%s "
                     "attempt=%s rate_limit_attempt=%s transient_attempt=%s/%s "
@@ -528,29 +559,37 @@ class OktaRESTClient(RESTClient):
                     delay_seconds=delay,
                 )
             except RETRYABLE_REQUEST_EXCEPTIONS as exc:
-                self._throttle.release()
                 transient_attempt += 1
                 is_read_timeout = isinstance(exc, requests.exceptions.ReadTimeout)
                 if is_read_timeout:
                     read_timeout_attempt += 1
-                context = self._retry_context(
-                    None,
-                    None,
-                    attempt,
-                    started_at,
-                    request,
-                )
-                transient_max_attempts = (
-                    read_timeout_max_attempts if is_read_timeout else self._max_attempts
-                )
-                exhausted = (
-                    read_timeout_attempt >= read_timeout_max_attempts
-                    if is_read_timeout
-                    else transient_attempt >= self._max_attempts
-                )
-                if exhausted:
-                    raise OktaRetryExhaustedError(context) from exc
-                delay = self._throttle.defer(self._retry_delay(None, transient_attempt))
+                # Publish the family deadline before freeing the slot so a
+                # queued request cannot start ahead of the backoff.
+                try:
+                    context = self._retry_context(
+                        None,
+                        None,
+                        attempt,
+                        started_at,
+                        request,
+                    )
+                    transient_max_attempts = (
+                        read_timeout_max_attempts
+                        if is_read_timeout
+                        else self._max_attempts
+                    )
+                    exhausted = (
+                        read_timeout_attempt >= read_timeout_max_attempts
+                        if is_read_timeout
+                        else transient_attempt >= self._max_attempts
+                    )
+                    if exhausted:
+                        raise OktaRetryExhaustedError(context) from exc
+                    delay = self._throttle.defer(
+                        self._retry_delay(None, transient_attempt)
+                    )
+                finally:
+                    self._throttle.release()
                 self._telemetry.record_retry(
                     request.url or self.endpoint_family,
                     category="transport_error",
