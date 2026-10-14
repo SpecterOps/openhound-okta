@@ -1135,6 +1135,17 @@ def test_server_error_backoff_pauses_every_family():
     assert wait.retry_backoff_seconds == 5.0
 
 
+def test_wait_honors_an_org_wide_cooldown():
+    clock = FakeClock()
+    org = OrgThrottle(4, clock=clock.time, sleep=clock.sleep)
+    throttle = EndpointThrottle(clock=clock.time, sleep=clock.sleep, org_throttle=org)
+    org.defer(5)
+
+    throttle.wait()
+
+    assert clock.sleeps == [5.0]
+
+
 class RecordingOrgThrottle(OrgThrottle):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

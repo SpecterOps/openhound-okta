@@ -295,6 +295,8 @@ class EndpointThrottle:
         """Wait for the next allowed start and book it, without taking a slot."""
         while True:
             self._wait_until_allowed()
+            if self._org_throttle is not None:
+                self._org_throttle.wait()
             if self._try_book():
                 return
 
