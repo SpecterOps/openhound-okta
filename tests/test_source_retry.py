@@ -1346,6 +1346,29 @@ def test_late_response_from_a_reset_window_does_not_delay_the_next_request():
     assert clock.sleeps == []
 
 
+def test_stale_reset_with_usable_quota_keeps_the_default_spacing():
+    clock = FakeClock()
+    throttle = EndpointThrottle(
+        clock=clock.time,
+        wall_clock=clock.time,
+        sleep=clock.sleep,
+    )
+    response = _response(
+        200,
+        "https://example.okta.test/api/v1/apps/0oa123/users",
+        {
+            "X-Rate-Limit-Remaining": "100",
+            "X-Rate-Limit-Reset": str(clock.now - 1.0),
+        },
+    )
+
+    throttle.observe_response(response)
+    throttle.wait()
+    throttle.wait()
+
+    assert clock.sleeps == pytest.approx([PACING_INTERVAL, PACING_INTERVAL])
+
+
 def test_cooldown_resets_pacing_to_the_default_for_the_next_window():
     clock = FakeClock()
     throttle = EndpointThrottle(
