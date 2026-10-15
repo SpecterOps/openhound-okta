@@ -71,8 +71,9 @@ class GroupMembership(BaseAsset):
         login: Okta login of the member, flattened from profile.login.
         group_id: Okta group ID the user belongs to.
         group_has_admin_privilege: Whether the group carries an admin role, so
-            the chained admin_group_member_factors transformer can select
-            admin-group members without paginating the member list again.
+            the limited-mode factor stream (source.admin_group_members) can
+            select admin-group members without paginating the member list
+            again.
     """
 
     model_config = ConfigDict(populate_by_name=True)
