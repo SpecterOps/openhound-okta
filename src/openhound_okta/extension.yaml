@@ -36,5 +36,13 @@ parameters:
     description: An example parameter specifying batch size for fetching data
     required: false
     default: 10000
+  - name: limit_app_user_collection
+    description: Collect application user assignments only for a limited set of app types and listed application IDs
+    required: false
+    default: false
+  - name: app_user_collection_app_ids
+    description: Additional Okta application IDs whose user assignments are collected when the limit is enabled
+    required: false
+    default: []
 
 tags: [ "okta", "extension", "opengraph", "bloodhound" ]
