@@ -64,8 +64,8 @@ class GroupMembership(BaseAsset):
 
     # Additional
     group_id: str
-    # Lets the chained admin_group_member_factors transformer select admin-group
-    # members without paginating the member list again.
+    # Lets the limited-mode factor stream (source.admin_group_members) select
+    # admin-group members without paginating the member list again.
     group_has_admin_privilege: bool = False
 
     @property

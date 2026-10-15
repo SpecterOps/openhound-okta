@@ -18,6 +18,7 @@ from defusedxml.common import DefusedXmlException
 from dlt.common.configuration import configspec
 from dlt.common.configuration.specs import CredentialsConfiguration
 from dlt.common.typing import TSecretStrValue
+from dlt.extract import DltResource
 from dlt.sources.helpers.rest_client.auth import APIKeyAuth
 from dlt.sources.helpers.rest_client.client import RESTClient
 from dlt.sources.helpers.rest_client.paginators import HeaderLinkPaginator
@@ -466,6 +467,35 @@ class ConsecutiveAccessDeniedBreaker:
             return False
 
 
+class UserFactorClaims:
+    """Grants each user's factor fetch to exactly one of the parallel streams.
+
+    Attributes:
+        _claimed: User IDs whose factor fetch has already been granted.
+        _lock: Guards _claimed against the parallelized transformer threads.
+    """
+
+    def __init__(self) -> None:
+        self._claimed: set[str] = set()
+        self._lock = threading.Lock()
+
+    def claim(self, user_id: str) -> bool:
+        """Atomically claim the factor fetch for a user.
+
+        Args:
+            user_id: Okta user ID to claim.
+
+        Returns:
+            True if this caller should fetch the user's factors,
+            False if another stream already claimed the user.
+        """
+        with self._lock:
+            if user_id in self._claimed:
+                return False
+            self._claimed.add(user_id)
+            return True
+
+
 @dataclass
 class SourceContext:
     """Context for Okta API operations.
@@ -477,6 +507,8 @@ class SourceContext:
         application_grants_breaker: Shared breaker that stops application
             OAuth 2.0 grant collection after consecutive access-denied
             responses.
+        user_factor_claims: Shared registry granting each user's factor fetch
+            to one of the factor streams.
         application_users_page_size: Users requested per application-users
             page.
         groups_page_size: Groups requested per expanded groups page.
@@ -495,6 +527,7 @@ class SourceContext:
             APPLICATION_GRANTS_ACCESS_DENIED_LIMIT
         )
     )
+    user_factor_claims: UserFactorClaims = field(default_factory=UserFactorClaims)
     application_users_page_size: int = APPLICATION_USERS_PAGE_SIZE
     groups_page_size: int = GROUPS_PAGE_SIZE
     application_group_assignments_page_size: int = (
@@ -567,54 +600,26 @@ def users(ctx: SourceContext):
 # Authentication factor collection
 #
 # Enumerating factors costs one GET /api/v1/users/{id}/factors request per
-# user, so factors are only collected for privileged users, discovered by two
-# parallel streams:
+# user. By default every user in the users listing is covered
+# (users | user_factors). With limit_user_mfa_collection enabled only
+# privileged users are, discovered by two parallel streams:
 #   1. users with direct role assignments (privileged_users | user_factors)
 #   2. members of groups whose stats report hasAdminPrivilege, chained off the
 #      membership rows already being collected so no member list is paginated
-#      twice (groups | group_memberships | admin_group_member_factors)
-# Both write to the user_factors table. A user can appear in both streams
-# (e.g. a direct super admin who is also in several admin groups), and dlt
-# transformers cannot consume a merged, deduplicated stream, so both
-# transformers share one UserFactorClaims instance (created per source() call):
-# whichever stream claims a user ID first fetches the factors, later claimants
-# skip. For every claimed user with zero factors a scope-marker row (NULL
-# factor id) is written, so downstream the authentication_factors node
-# property can distinguish:
-#   NULL - user not covered (not privileged, factors never fetched)
+#      twice (groups | group_memberships | admin_group_member_factors, a
+#      renamed clone of user_factors fed through admin_group_members)
+# A user can appear in both streams (e.g. a direct super admin who is also in
+# several admin groups), and dlt transformers cannot consume a merged,
+# deduplicated stream, so both share ctx.user_factor_claims: whichever stream
+# claims a user ID first fetches the factors, later claimants skip. For every
+# claimed user with zero factors a scope-marker row (NULL factor id) is
+# written, so downstream the authentication_factors node property can
+# distinguish:
+#   NULL - user not covered (factors never fetched)
 #   0    - user covered, no factors usable for MFA
 #   N    - user covered, N factors in ACTIVE status
 # (see OktaLookup.user_authentication_factors_count and
 # descriptions/nodes/Okta_User.md).
-class UserFactorClaims:
-    """Grants each user's factor fetch to exactly one of the parallel streams.
-
-    Attributes:
-        _claimed: User IDs whose factor fetch has already been granted.
-        _lock: Guards _claimed against the parallelized transformer threads.
-    """
-
-    def __init__(self) -> None:
-        self._claimed: set[str] = set()
-        self._lock = threading.Lock()
-
-    def claim(self, user_id: str) -> bool:
-        """Atomically claim the factor fetch for a user.
-
-        Args:
-            user_id: Okta user ID to claim.
-
-        Returns:
-            True if this caller should fetch the user's factors,
-            False if another stream already claimed the user.
-        """
-        with self._lock:
-            if user_id in self._claimed:
-                return False
-            self._claimed.add(user_id)
-            return True
-
-
 def user_factor_rows(user_id: str, ctx: SourceContext) -> Iterator[dict[str, object]]:
     """Fetch one user's enrolled factors via GET /api/v1/users/{id}/factors.
 
@@ -652,99 +657,75 @@ def user_factor_rows(user_id: str, ctx: SourceContext) -> Iterator[dict[str, obj
     yield from rows or [{"user_id": user_id}]
 
 
-def privileged_user_factor_rows(
-    user: PrivilegedUser, ctx: SourceContext, claims: UserFactorClaims
-) -> Iterator[dict[str, object]]:
-    """Fetch factors for a directly privileged user, unless already claimed.
+def admin_group_members(membership: Mapping[str, object]) -> Iterator[PrivilegedUser]:
+    """Narrow a group_memberships row to its member when the group holds admin privilege.
+
+    Prepended to the admin-group clone of user_factors as a dlt yield-map step,
+    so the transformer sees the same id-only user records as the direct
+    privileged-user stream.
 
     Args:
-        user: User returned by Okta's privileged assignee inventory endpoint.
-        ctx: SourceContext containing the REST client for API calls.
-        claims: Registry shared with the admin-group stream; skips the fetch
-            when the user was already claimed there.
+        membership: A group_memberships row (carries group_has_admin_privilege).
 
     Yields:
-        user_factors rows for the user (see user_factor_rows), or nothing when
-        another stream already claimed the user.
-    """
-    if claims.claim(user.id):
-        yield from user_factor_rows(user.id, ctx)
-
-
-def admin_group_member_factor_rows(
-    membership: Mapping[str, object], ctx: SourceContext, claims: UserFactorClaims
-) -> Iterator[dict[str, object]]:
-    """Fetch factors for a member of an admin group, unless already claimed.
-
-    Args:
-        membership: A group_memberships row; only rows whose
-            group_has_admin_privilege flag is set trigger a fetch.
-        ctx: SourceContext containing the REST client for API calls.
-        claims: Registry shared with the direct-assignee stream; skips the
-            fetch when the member was already claimed there.
-
-    Yields:
-        user_factors rows for the member (see user_factor_rows), or nothing
-        for non-admin groups or already claimed users.
+        The member as a PrivilegedUser, or nothing for non-admin groups.
     """
     member_id = membership.get("id")
-    if (
-        membership.get("group_has_admin_privilege")
-        and isinstance(member_id, str)
-        and claims.claim(member_id)
-    ):
-        yield from user_factor_rows(member_id, ctx)
+    if membership.get("group_has_admin_privilege") and isinstance(member_id, str):
+        yield PrivilegedUser(id=member_id)
 
 
-# Both factor writers replace the shared user_factors table so each collection
-# is a fresh snapshot: appended leftovers from an earlier run would inflate
-# counts and let a user whose fetch failed inherit stale rows.
+# The transformer and its limited-mode clone replace the shared user_factors
+# table so each collection is a fresh snapshot: appended leftovers from an
+# earlier run would inflate counts and let a user whose fetch failed inherit
+# stale rows. table_name is explicit so the renamed clone keeps loading there.
 @app.transformer(
     name="user_factors",
-    columns=UserFactor,
-    parallelized=True,
-    write_disposition="replace",
-)
-def user_factors(
-    user: PrivilegedUser, ctx: SourceContext, claims: UserFactorClaims
-) -> Iterator[dict[str, object]]:
-    """DLT transformer, fetches factors of directly privileged users.
-
-    Args:
-        user: User returned by Okta's privileged assignee inventory endpoint.
-        ctx: SourceContext containing the REST client for API calls.
-        claims: Fetch-once registry shared with admin_group_member_factors.
-
-    Yields:
-        user_factor (UserFactor): Enrolled factor or scope-marker record.
-    """
-    yield from privileged_user_factor_rows(user, ctx, claims)
-
-
-@app.transformer(
-    name="admin_group_member_factors",
     table_name="user_factors",
     columns=UserFactor,
     parallelized=True,
     write_disposition="replace",
 )
-def admin_group_member_factors(
-    membership: Mapping[str, object], ctx: SourceContext, claims: UserFactorClaims
+def user_factors(
+    user: User | PrivilegedUser, ctx: SourceContext
 ) -> Iterator[dict[str, object]]:
-    """DLT transformer, fetches factors of admin-group members.
+    """DLT transformer, fetches a user's factors unless another stream claimed them.
 
-    Chained off group_memberships so member lists are not paginated twice;
-    writes to the same user_factors table as the user_factors transformer.
+    Chained off users (full collection) or, with limit_user_mfa_collection,
+    off privileged_users and, as a renamed clone, off admin-group memberships.
 
     Args:
-        membership: A group_memberships row (carries group_has_admin_privilege).
-        ctx: SourceContext containing the REST client for API calls.
-        claims: Fetch-once registry shared with user_factors.
+        user: User record carrying the Okta user ID.
+        ctx: SourceContext containing the REST client and the claims registry.
 
     Yields:
         user_factor (UserFactor): Enrolled factor or scope-marker record.
     """
-    yield from admin_group_member_factor_rows(membership, ctx, claims)
+    if ctx.user_factor_claims.claim(user.id):
+        yield from user_factor_rows(user.id, ctx)
+
+
+def admin_group_member_factors(ctx: SourceContext) -> DltResource:
+    """Limited-mode factor transformer for admin-group members.
+
+    A renamed clone of user_factors meant to be piped from group_memberships;
+    the prepended admin_group_members step narrows each membership row to its
+    member, or drops it for non-admin groups.
+
+    Args:
+        ctx: SourceContext shared with the user_factors transformer.
+
+    Returns:
+        The unpiped clone, still loading to the user_factors table.
+    """
+    # Rename before piping: with_name() on a piped transformer would clone the
+    # parent pipe too and paginate every member list a second time.
+    # insert_at=0 prepends the step so it filters the transformer's input.
+    return (
+        user_factors(ctx)
+        .with_name("admin_group_member_factors")
+        .add_yield_map(admin_group_members, insert_at=0)
+    )
 
 
 @app.resource(
@@ -818,17 +799,17 @@ def group_memberships(group: Group, ctx: SourceContext) -> Iterator[dict[str, ob
 
     Yields:
         membership (GroupMembership): Member record enriched with group_id and
-            group_has_admin_privilege, the latter consumed by the chained
-            admin_group_member_factors transformer.
+            group_has_admin_privilege, the latter consumed by the limited-mode
+            factor stream (see admin_group_members).
     """
     if group.embedded.stats.users_count > 0:
         for page in ctx.pool.paginate(f"/api/v1/groups/{group.id}/users"):
             for item in page:
                 yield {
                     "group_id": group.id,
-                    # Carried along so the chained admin_group_member_factors
-                    # transformer can select admin-group members without
-                    # paginating the member list a second time.
+                    # Carried along so the limited-mode factor stream
+                    # (admin_group_members) can select admin-group members
+                    # without paginating the member list a second time.
                     "group_has_admin_privilege": (
                         group.embedded.stats.has_admin_privilege
                     ),
@@ -1957,6 +1938,7 @@ def source(
     ),
     group_push_mappings_page_size: int = GROUP_PUSH_MAPPINGS_PAGE_SIZE,
     identity_provider_users_page_size: int = IDENTITY_PROVIDER_USERS_PAGE_SIZE,
+    limit_user_mfa_collection: bool = False,
     endpoint_concurrency: int = DEFAULT_ENDPOINT_CONCURRENCY,
     rate_limit_max_elapsed_seconds: float = DEFAULT_RATE_LIMIT_MAX_ELAPSED_SECONDS,
     rate_limit_remaining_reserve: int = DEFAULT_RATE_LIMIT_REMAINING_RESERVE,
@@ -1971,6 +1953,8 @@ def source(
         application_group_assignments_page_size: Groups requested per application page.
         group_push_mappings_page_size: Mappings requested per group-push page.
         identity_provider_users_page_size: Users requested per identity-provider page.
+        limit_user_mfa_collection: Collect MFA factors only for privileged users
+            (direct role assignees and admin-group members) instead of every user.
         endpoint_concurrency: Maximum simultaneous requests for each endpoint family.
         rate_limit_max_elapsed_seconds: Maximum retry window for an individual 429 request.
         rate_limit_remaining_reserve: Requests retained as headroom in each observed window.
@@ -2023,6 +2007,7 @@ def source(
             ),
             "group_push_mappings_page_size": group_push_mappings_page_size,
             "identity_provider_users_page_size": identity_provider_users_page_size,
+            "limit_user_mfa_collection": limit_user_mfa_collection,
             "endpoint_concurrency": endpoint_concurrency,
             "rate_limit_max_elapsed_seconds": rate_limit_max_elapsed_seconds,
             "rate_limit_remaining_reserve": rate_limit_remaining_reserve,
@@ -2063,14 +2048,20 @@ def source(
     resource_sets_resource = resource_sets(ctx)
     users_resource = users(ctx)
     privileged_users_resource = privileged_users(ctx)
-    factor_claims = UserFactorClaims()
     group_memberships_resource = groups_resource | group_memberships(ctx)
+    factor_resources: tuple[DltResource, ...]
+    if limit_user_mfa_collection:
+        factor_resources = (
+            privileged_users_resource | user_factors(ctx),
+            group_memberships_resource | admin_group_member_factors(ctx),
+        )
+    else:
+        factor_resources = (users_resource | user_factors(ctx),)
     return (
         organization(ctx),
         users_resource,
         groups_resource,
         group_memberships_resource,
-        group_memberships_resource | admin_group_member_factors(ctx, factor_claims),
         groups_resource | group_role_assignments(ctx),
         client_apps_resource,
         client_apps_resource | client_role_assignments(ctx),
@@ -2111,5 +2102,5 @@ def source(
         built_in_roles_resource | built_in_role_permissions,
         privileged_users_resource,
         privileged_users_resource | user_role_assignments(ctx),
-        privileged_users_resource | user_factors(ctx, factor_claims),
+        *factor_resources,
     )
