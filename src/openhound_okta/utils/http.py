@@ -425,7 +425,14 @@ class EndpointThrottle:
                 return
 
             usable_requests = remaining - reserve
-            self._request_interval = window_seconds / usable_requests
+            if seconds_to_reset <= 0:
+                # The window these headers describe has already reset, so its
+                # remaining budget says nothing about the current one. Pace at
+                # the default rate until the new window's first headers arrive
+                # rather than admitting every waiter at once.
+                self._request_interval = DEFAULT_REQUEST_INTERVAL_SECONDS
+            else:
+                self._request_interval = window_seconds / usable_requests
             self._probe_interval = 0.0
             proactive_deadline = now + self._request_interval
             if proactive_deadline > self._next_allowed_at:
