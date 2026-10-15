@@ -7,9 +7,10 @@ from openhound_okta.models.user import UserProperties
 from openhound_okta.source import (
     ClientPool,
     SourceContext,
-    UserFactorClaims,
-    admin_group_member_factor_rows,
-    privileged_user_factor_rows,
+    admin_group_member_factors,
+    admin_group_members,
+    user_factor_rows,
+    user_factors,
 )
 
 
@@ -217,27 +218,38 @@ class FactorStubPool:
         return [self._members_by_group.get(group_id, [])]
 
 
-class FactorStubContext:
-    """Minimal SourceContext stand-in exposing only the client pool.
-
-    Attributes:
-        pool: The FactorStubPool serving canned API responses.
-    """
-
-    def __init__(self, pool: FactorStubPool) -> None:
-        self.pool = pool
-
-
 def make_stub_context(pool: FactorStubPool) -> SourceContext:
-    """Build a FactorStubContext typed as the SourceContext it stands in for.
+    """Build a SourceContext over a stub pool with a fresh claims registry.
 
     Args:
         pool: The stub pool the context should expose.
 
     Returns:
-        The stub context, cast to SourceContext for the factor-row helpers.
+        The context the factor transformer and helpers read.
     """
-    return cast(SourceContext, FactorStubContext(pool))
+    return SourceContext(pool=cast(ClientPool, pool), tenant_domain="example.okta.com")
+
+
+def admin_member_factor_rows(
+    membership: dict[str, object], ctx: SourceContext
+) -> list[dict[str, object]]:
+    """Run one membership row through the limited-mode admin stream in-process.
+
+    Mirrors admin_group_member_factors: the admin_group_members yield-map
+    first, then the user_factors transformer function.
+
+    Args:
+        membership: A group_memberships row.
+        ctx: Context shared with the direct privileged-user stream.
+
+    Returns:
+        The user_factors rows the stream would emit for the row.
+    """
+    return [
+        row
+        for member in admin_group_members(membership)
+        for row in user_factors.__wrapped__(member, ctx)
+    ]
 
 
 def make_membership(
@@ -266,41 +278,32 @@ def test_user_factors_fetched_once_for_multi_path_privileged_user() -> None:
         factors_by_user={"user-1": [{"id": "factor-1", "factorType": "token"}]},
     )
     ctx = make_stub_context(pool)
-    claims = UserFactorClaims()
 
-    rows = list(privileged_user_factor_rows(PrivilegedUser(id="user-1"), ctx, claims))
+    rows = list(user_factors.__wrapped__(PrivilegedUser(id="user-1"), ctx))
     for group_id in ("group-1", "group-2", "group-3"):
-        rows.extend(
-            admin_group_member_factor_rows(
-                make_membership(group_id, "user-1"), ctx, claims
-            )
-        )
+        rows.extend(admin_member_factor_rows(make_membership(group_id, "user-1"), ctx))
 
     assert rows == [{"user_id": "user-1", "id": "factor-1", "factorType": "token"}]
     assert pool.paths.count("/api/v1/users/user-1/factors") == 1
 
 
-def test_admin_group_member_factors_skips_non_admin_group_members() -> None:
+def test_admin_group_members_skips_non_admin_group_members() -> None:
     """Members of non-admin groups trigger no factor requests at all."""
     pool = FactorStubPool()
     ctx = make_stub_context(pool)
-    claims = UserFactorClaims()
 
-    assert not list(
-        admin_group_member_factor_rows(
-            make_membership("group-1", "user-1", admin=False), ctx, claims
-        )
+    assert not admin_member_factor_rows(
+        make_membership("group-1", "user-1", admin=False), ctx
     )
     assert pool.paths == []
 
 
-def test_factorless_privileged_user_emits_scope_marker_row() -> None:
-    """A privileged user without factors yields the user_id-only marker row."""
+def test_factorless_user_emits_scope_marker_row() -> None:
+    """A covered user without factors yields the user_id-only marker row."""
     pool = FactorStubPool(factors_by_user={})
     ctx = make_stub_context(pool)
-    claims = UserFactorClaims()
 
-    rows = list(privileged_user_factor_rows(PrivilegedUser(id="user-1"), ctx, claims))
+    rows = list(user_factor_rows("user-1", ctx))
 
     assert rows == [{"user_id": "user-1"}]
 
@@ -318,13 +321,7 @@ def test_failed_factor_fetch_yields_nothing_so_user_reads_as_uncollected() -> No
     class FailingContext:
         pool = FailingPool()
 
-    rows = list(
-        privileged_user_factor_rows(
-            PrivilegedUser(id="user-1"),
-            cast(SourceContext, FailingContext()),
-            UserFactorClaims(),
-        )
-    )
+    rows = list(user_factor_rows("user-1", cast(SourceContext, FailingContext())))
 
     assert rows == []
 
@@ -353,23 +350,39 @@ def test_factor_fetch_rate_limit_exhaustion_propagates() -> None:
         pool = ExhaustedPool()
 
     with pytest.raises(OktaRetryExhaustedError):
-        list(
-            privileged_user_factor_rows(
-                PrivilegedUser(id="user-1"),
-                cast(SourceContext, ExhaustedContext()),
-                UserFactorClaims(),
-            )
-        )
+        list(user_factor_rows("user-1", cast(SourceContext, ExhaustedContext())))
 
 
 def test_factor_writers_replace_the_shared_table() -> None:
-    """Both factor transformers snapshot user_factors per collection run."""
-    from openhound_okta.source import admin_group_member_factors, user_factors
+    """The transformer and its admin-group clone snapshot one user_factors table."""
+    direct = user_factors(None)
+    clone = admin_group_member_factors(None)
 
-    claims = UserFactorClaims()
+    assert direct.write_disposition == clone.write_disposition == "replace"
+    assert direct.table_name == clone.table_name == "user_factors"
+    assert clone.name == "admin_group_member_factors"
 
-    assert user_factors(None, claims).write_disposition == "replace"
-    assert admin_group_member_factors(None, claims).write_disposition == "replace"
+
+def test_source_wires_factor_collection_by_mode() -> None:
+    """Default covers the users listing; limited mode uses the two admin streams."""
+    from openhound_okta.source import OktaTokenCredentials, source
+
+    def credentials() -> OktaTokenCredentials:
+        return OktaTokenCredentials(
+            base_url="https://example.okta.test", token="test-token"
+        )
+
+    full = source(credentials=credentials())
+
+    assert full.resources["user_factors"]._pipe.parent.name == "users"
+    assert "admin_group_member_factors" not in full.resources
+
+    limited = source(credentials=credentials(), limit_user_mfa_collection=True)
+    clone = limited.resources["admin_group_member_factors"]
+
+    assert limited.resources["user_factors"]._pipe.parent.name == "privileged_users"
+    assert clone._pipe.parent.name == "group_memberships"
+    assert clone.table_name == "user_factors"
 
 
 def test_per_user_requests_share_one_family_distinct_from_the_listing() -> None:
@@ -440,11 +453,7 @@ def test_chained_factor_extraction_paginates_each_member_list_once() -> None:
     from dlt.common.schema import Schema
     from dlt.extract import DltSource
 
-    from openhound_okta.source import (
-        admin_group_member_factors,
-        group_memberships,
-        groups,
-    )
+    from openhound_okta.source import group_memberships, groups
 
     pool = FactorStubPool(
         groups=[
@@ -460,9 +469,7 @@ def test_chained_factor_extraction_paginates_each_member_list_once() -> None:
     ctx = SourceContext(pool=cast(ClientPool, pool), tenant_domain="example.okta.com")
     groups_resource = groups(ctx)
     memberships_resource = groups_resource | group_memberships(ctx)
-    factors_resource = memberships_resource | admin_group_member_factors(
-        ctx, UserFactorClaims()
-    )
+    factors_resource = memberships_resource | admin_group_member_factors(ctx)
     source = DltSource(
         Schema("okta_test"),
         "okta_test",
@@ -570,11 +577,9 @@ def test_factor_pipeline_loads_one_deduplicated_replaced_snapshot(tmp_path) -> N
 
     from openhound_okta.lookup import OktaLookup
     from openhound_okta.source import (
-        admin_group_member_factors,
         group_memberships,
         groups,
         privileged_users,
-        user_factors,
         users,
     )
 
@@ -609,7 +614,6 @@ def test_factor_pipeline_loads_one_deduplicated_replaced_snapshot(tmp_path) -> N
         ctx = SourceContext(
             pool=cast(ClientPool, pool), tenant_domain="example.okta.com"
         )
-        claims = UserFactorClaims()
         memberships_resource = groups(ctx) | group_memberships(ctx)
         pipeline = dlt.pipeline(
             pipeline_name="factor_snapshot_test",
@@ -620,8 +624,8 @@ def test_factor_pipeline_loads_one_deduplicated_replaced_snapshot(tmp_path) -> N
         pipeline.run(
             [
                 users(ctx),
-                privileged_users(ctx) | user_factors(ctx, claims),
-                memberships_resource | admin_group_member_factors(ctx, claims),
+                privileged_users(ctx) | user_factors(ctx),
+                memberships_resource | admin_group_member_factors(ctx),
             ]
         )
         return pool
@@ -690,3 +694,47 @@ def test_factor_pipeline_loads_one_deduplicated_replaced_snapshot(tmp_path) -> N
     )
 
     assert factor_table() == {"user-1": ["factor-9"], "user-3": [None]}
+
+
+def test_full_factor_collection_covers_every_listed_user(tmp_path) -> None:
+    """Default mode fetches factors once per listed user, so no user reads as NULL.
+
+    Args:
+        tmp_path: Pytest fixture providing an isolated working directory.
+    """
+    import dlt
+    import duckdb
+
+    from openhound_okta.lookup import OktaLookup
+    from openhound_okta.source import users
+
+    db_path = str(tmp_path / "collected.duckdb")
+    pool = PipelineStubPool(
+        users=[make_okta_user("user-1"), make_okta_user("user-2")],
+        assignees=[],
+        groups=[],
+        members_by_group={},
+        factors_by_user={"user-1": [{"id": "factor-1", "status": "ACTIVE"}]},
+    )
+    ctx = SourceContext(pool=cast(ClientPool, pool), tenant_domain="example.okta.com")
+    pipeline = dlt.pipeline(
+        pipeline_name="full_factor_test",
+        pipelines_dir=str(tmp_path / "dlt"),
+        destination=dlt.destinations.duckdb(db_path),
+        dataset_name="okta",
+    )
+
+    pipeline.run([users(ctx) | user_factors(ctx)])
+
+    assert sorted(path for path in pool.paths if path.endswith("/factors")) == [
+        "/api/v1/users/user-1/factors",
+        "/api/v1/users/user-2/factors",
+    ]
+    con = duckdb.connect(db_path)
+    lookup = OktaLookup(con)
+    counts = {
+        user_id: lookup.user_authentication_factors_count(user_id)
+        for user_id in ("user-1", "user-2")
+    }
+    con.close()
+    assert counts == {"user-1": 1, "user-2": 0}

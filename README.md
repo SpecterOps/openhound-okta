@@ -84,7 +84,9 @@ retried.
 Fan-out resources use explicit page sizes where Okta documents safe maxima. Expanded group collection requests 200
 rows per page, application-user collection requests 500 rows per page, application-group assignment collection
 requests 200 rows per page, group-push mapping collection requests 1,000 rows per page, and identity-provider user
-collection requests 200 rows per page. Application-group assignments are collected from each application's public
+collection requests 200 rows per page. MFA factor collection costs one request per covered user; in large
+organizations it can be restricted to privileged users with `limit_user_mfa_collection`. Application-group
+assignments are collected from each application's public
 assignment endpoint and retain Okta's assignment timestamp, priority, and profile field names without publishing
 assignment profile values to the graph. Rows stream to DLT; an exhausted required request fails the collection so DLT
 does not publish an incomplete replacement. If the initial expanded group page repeatedly times out, the collector
@@ -103,6 +105,7 @@ non-secret settings:
 | `SOURCES__SOURCE__OKTA__APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE` | `200` | Application-group assignments per page, from 20 through 200 |
 | `SOURCES__SOURCE__OKTA__GROUP_PUSH_MAPPINGS_PAGE_SIZE` | `1000` | Group push mappings per page, from 1 through 1,000 |
 | `SOURCES__SOURCE__OKTA__IDENTITY_PROVIDER_USERS_PAGE_SIZE` | `200` | Identity-provider users per page, from 1 through 200 |
+| `SOURCES__SOURCE__OKTA__LIMIT_USER_MFA_COLLECTION` | `false` | Collect MFA factors only for privileged users (direct role assignees and admin-group members) instead of every user; factor collection costs one request per covered user |
 | `SOURCES__SOURCE__OKTA__ENDPOINT_CONCURRENCY` | `32` | Maximum simultaneous requests per endpoint family |
 | `SOURCES__SOURCE__OKTA__ORG_CONCURRENCY` | `32` | Maximum simultaneous requests across all endpoint families, kept under Okta's per-org concurrency limit (35 on Integrator Free, 75 on production orgs) |
 | `SOURCES__SOURCE__OKTA__RATE_LIMIT_MAX_ELAPSED_SECONDS` | `900` | Maximum elapsed retry window for an individual 429 request |
