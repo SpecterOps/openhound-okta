@@ -17,11 +17,7 @@ from dlt.sources.helpers.requests.session import Session
 from dlt.sources.helpers.rest_client.client import RESTClient
 
 from ..telemetry import NullTelemetryRecorder, Telemetry
-from .auth import (
-    OktaBearerAuth,
-    UnauthorizedClassification,
-    UnauthorizedDecision,
-)
+from .auth import OktaBearerAuth, UnauthorizedDecision
 
 logger = logging.getLogger(__name__)
 
@@ -733,21 +729,31 @@ class OktaRESTClient(RESTClient):
         request: requests.Request,
         response: requests.Response | None,
     ) -> UnauthorizedDecision | None:
-        auth = self._refreshable_auth(request)
+        """Let the bearer auth handler decide whether a 401 warrants one retry.
+
+        Args:
+            request: The request that was answered with HTTP 401.
+            response: The 401 response, or None if the request never completed.
+
+        Returns:
+            The handler's decision, or None when the request was not sent with
+            a refreshable bearer token, in which case the 401 is final.
+        """
+        # Only OktaBearerAuth can rotate a token; static SSWS auth cannot recover.
+        auth: OktaBearerAuth | None = self._refreshable_auth(request)
         if auth is None or response is None:
             return None
 
-        failed_access_token = self._response_bearer_token(response)
-        if failed_access_token is None:
+        # The handler classifies the 401 itself and clears the shared token
+        # cache when the token, rather than the caller's permissions, is at fault.
+        decision: UnauthorizedDecision | None = auth.handle_unauthorized(response)
+        if decision is None:
             return None
-
-        classification = self._classify_unauthorized(response)
-        decision = auth.handle_unauthorized(failed_access_token, classification)
         logger.warning(
             "Handled Okta bearer 401 endpoint_family=%s classification=%s "
             "reason=%s invalidated=%s retry=%s url=%s",
             self.endpoint_family,
-            classification.value,
+            decision.classification.value,
             decision.reason,
             decision.invalidated,
             decision.retry,
@@ -759,45 +765,6 @@ class OktaRESTClient(RESTClient):
         request_auth = getattr(request, "auth", None)
         auth = request_auth if request_auth is not None else self.auth
         return auth if isinstance(auth, OktaBearerAuth) else None
-
-    @staticmethod
-    def _response_bearer_token(response: requests.Response) -> str | None:
-        prepared_request = getattr(response, "request", None)
-        headers = getattr(prepared_request, "headers", None)
-        if headers is None:
-            return None
-
-        authorization = headers.get("Authorization")
-        if not isinstance(authorization, str) or not authorization.startswith(
-            "Bearer "
-        ):
-            return None
-
-        access_token = authorization.removeprefix("Bearer ")
-        return access_token or None
-
-    @staticmethod
-    def _classify_unauthorized(
-        response: requests.Response,
-    ) -> UnauthorizedClassification:
-        challenge = response.headers.get("WWW-Authenticate", "")
-        if re.search(r'\berror\s*=\s*"?invalid_token"?', challenge, re.IGNORECASE):
-            return UnauthorizedClassification.INVALID_TOKEN
-        if re.search(r'\berror\s*=\s*"?insufficient_scope"?', challenge, re.IGNORECASE):
-            return UnauthorizedClassification.NON_TOKEN
-
-        try:
-            payload = response.json()
-        except ValueError:
-            payload = None
-        if isinstance(payload, dict):
-            error_code = payload.get("errorCode")
-            if error_code == "E0000011":
-                return UnauthorizedClassification.INVALID_TOKEN
-            if error_code == "E0000015":
-                return UnauthorizedClassification.NON_TOKEN
-
-        return UnauthorizedClassification.UNKNOWN
 
     def _retry_context(
         self,
