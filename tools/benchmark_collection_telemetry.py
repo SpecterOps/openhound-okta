@@ -82,6 +82,11 @@ class AssignmentReplayAdapter(BaseAdapter):
         response.request = request
         response.connection = self
         response.headers["Content-Type"] = "application/json"
+        # Generous quota headers keep the throttle's pacing at effectively
+        # zero; without them it would assume its 50/min pre-header default.
+        response.headers["X-Rate-Limit-Limit"] = "1000000"
+        response.headers["X-Rate-Limit-Remaining"] = "1000000"
+        response.headers["X-Rate-Limit-Reset"] = str(int(time.time()) + 60)
         if end < self.assignments_per_application:
             response.headers["Link"] = (
                 f"<https://replay.okta.test{parsed.path}?"

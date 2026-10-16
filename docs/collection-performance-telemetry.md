@@ -76,7 +76,10 @@ workers = 10
 max_parallel_items = 40
 
 [sources.source.okta]
-endpoint_concurrency = 4
+endpoint_concurrency = 32
+# Org-wide in-flight cap shared by every endpoint family; keep it under
+# Okta's per-org concurrency limit (35 on Integrator Free, 75 on production).
+org_concurrency = 32
 ```
 
 DLT resolves the source-scoped extraction table over the shared extraction
@@ -87,7 +90,7 @@ separate set of hardcoded defaults.
 The latency groups have deliberately distinct meanings:
 
 - `slot_wait` is time waiting for the collector endpoint-family concurrency
-  semaphore.
+  semaphore plus time waiting for the org-wide `org_concurrency` gate.
 - `proactive_pacing_wait` is time the limiter waits based on previously
   observed quota headers.
 - `retry_backoff_wait` is actual wait before a retry. The separate
@@ -104,8 +107,9 @@ them; they do not prove that DLT committed a replacement load.
 
 Quota observations report each allowlisted header as `valid`, `missing`, or
 `invalid`; reset timing is also marked `current`, `stale`, or `unavailable`.
-The recorded limiter group is a collector implementation grouping. The
-collector does not claim it is the identity of an Okta provider bucket. Zero
+The recorded limiter group is a collector endpoint family. Families mirror
+Okta's bucket layout as observed in one org; they are not verified against the
+provider at runtime. Zero
 HTTP 429 responses does not imply unused quota: proactive pacing, another
 client, or an unobserved provider limit may still consume or constrain it.
 
@@ -167,4 +171,3 @@ streams those responses through `application_user_rows`, extracts the validated
 OpenHound converter. Each off/on pair must have the same order-independent
 graph digest and cardinality. The default workload performs five repetitions
 per mode over 200 applications and one million assignments.
-

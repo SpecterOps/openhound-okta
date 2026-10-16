@@ -109,14 +109,17 @@ _COLLECTION_PATHS = {
     "/oauth2/v1/clients",
     "/integrations/api/v1/api-services",
 }
+# Must equal set(source.API_RATE_LIMIT_ENDPOINTS); importing it here would be
+# circular. Enforced by tests/test_telemetry.py.
 _LIMITER_GROUPS = {
+    "/api/v1/users/*",
     "/api/v1/users*",
     "/api/v1/groups*",
     "/api/v1/apps*",
-    "/api/v1/idps*",
     "/api/v1/iam*",
     "/api/v1/devices*",
     "/oauth2/v1/clients*",
+    "/integrations/*",
     "*",
 }
 

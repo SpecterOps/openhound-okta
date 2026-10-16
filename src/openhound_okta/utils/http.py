@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from threading import BoundedSemaphore, Lock
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 from urllib.parse import parse_qs, urlparse
 
 import requests
@@ -25,13 +25,40 @@ from .auth import (
 
 logger = logging.getLogger(__name__)
 
-RETRYABLE_STATUS_CODES = set(DEFAULT_RETRY_STATUS)
-RETRYABLE_REQUEST_EXCEPTIONS = DEFAULT_RETRY_EXCEPTIONS
-DEFAULT_ENDPOINT_CONCURRENCY = 2
-DEFAULT_RATE_LIMIT_MAX_ELAPSED_SECONDS = 900.0
-DEFAULT_RATE_LIMIT_REMAINING_RESERVE = 1
-DEFAULT_MAX_COOLDOWN_SECONDS = 300.0
-RATE_LIMIT_PROBE_INTERVAL_SECONDS = 1.0
+# HTTP status codes that trigger a retry: 429 and every 5xx.
+RETRYABLE_STATUS_CODES: set[int] = set(DEFAULT_RETRY_STATUS)
+# Transport exceptions that trigger a retry: connection errors, timeouts and
+# truncated chunked responses.
+RETRYABLE_REQUEST_EXCEPTIONS: tuple[type[Exception], ...] = DEFAULT_RETRY_EXCEPTIONS
+# Maximum number of in-flight requests per endpoint family. Header pacing
+# governs the start rate, so this only needs to exceed rate x latency for the
+# slowest family (500/min at 3 s is 25) to avoid being the bottleneck.
+DEFAULT_ENDPOINT_CONCURRENCY: int = 32
+# Maximum number of in-flight requests across all endpoint families. Okta caps
+# simultaneous transactions per org, shared with every other API client, at 35
+# on the Integrator Free plan and 75 on Workforce Identity and Customer
+# Identity (production) orgs; 32 matches the per-family cap and stays under
+# both.
+DEFAULT_ORG_CONCURRENCY: int = 32
+# Wall-clock budget for retrying a single request that keeps receiving 429.
+DEFAULT_RATE_LIMIT_MAX_ELAPSED_SECONDS: int = 900
+# Requests left unused in each rate limit window as headroom, on top of the
+# requests still in flight.
+DEFAULT_RATE_LIMIT_REMAINING_RESERVE: int = 1
+# Upper bound for any single pause derived from Retry-After or rate limit headers.
+DEFAULT_MAX_COOLDOWN_SECONDS: int = 300
+# Minimum spacing between requests after a 429 or while the window is down to
+# its reserve, so the family probes gently until fresh headers arrive.
+RATE_LIMIT_PROBE_INTERVAL_SECONDS: int = 1
+# Pacing assumed until the first response carries rate limit headers. This is
+# a conservative default corresponding to 50% of the app-assigned rate limit
+# in free organizations.
+DEFAULT_REQUESTS_PER_MINUTE: int = 50
+# The same default expressed as spacing between request starts.
+DEFAULT_REQUEST_INTERVAL_SECONDS: float = 60.0 / DEFAULT_REQUESTS_PER_MINUTE
+
+# Why the next request must wait: header-derived pacing or a retry cooldown.
+WaitReason = Literal["proactive_pacing", "retry_backoff"]
 
 
 @dataclass
@@ -64,8 +91,8 @@ class ThrottleWait:
 
 
 class OktaRetryExhaustedError(RuntimeError):
-    def __init__(self, context: OktaRetryContext):
-        self.context = context
+    def __init__(self, context: OktaRetryContext) -> None:
+        self.context: OktaRetryContext = context
         detail = (
             f"Okta request retries exhausted for endpoint_family={context.endpoint_family} "
             f"status={context.status_code} attempts={context.attempts} "
@@ -78,6 +105,78 @@ class OktaRetryExhaustedError(RuntimeError):
         super().__init__(detail)
 
 
+class OrgThrottle:
+    """Org-wide state shared by every endpoint family's throttle.
+
+    Holds the in-flight permit gate that keeps the collector under Okta's
+    per-org concurrency limit, and a backoff deadline for server-side trouble
+    (5xx responses and transport errors) that pauses every family at once.
+    """
+
+    def __init__(
+        self,
+        max_concurrency: int,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+        max_cooldown_seconds: float = DEFAULT_MAX_COOLDOWN_SECONDS,
+    ) -> None:
+        if max_concurrency < 1:
+            raise ValueError("max_concurrency must be at least 1")
+        if max_cooldown_seconds <= 0:
+            raise ValueError("max_cooldown_seconds must be positive")
+        self._clock: Callable[[], float] = clock
+        self._sleep: Callable[[float], None] = sleep
+        self._lock: Lock = Lock()
+        self._gate: BoundedSemaphore = BoundedSemaphore(max_concurrency)
+        self._max_cooldown_seconds: float = float(max_cooldown_seconds)
+        self._next_allowed_at: float = 0.0
+
+    def acquire(self) -> None:
+        """Take one in-flight permit, blocking until one is free."""
+        self._gate.acquire()
+
+    def release(self) -> None:
+        """Return an in-flight permit."""
+        self._gate.release()
+
+    def allows(self, now: float) -> bool:
+        """Tell whether the org-wide backoff deadline has passed at `now`."""
+        with self._lock:
+            return now >= self._next_allowed_at
+
+    def defer(self, delay: float) -> float:
+        """Pause every family for `delay` seconds, clamped to the cooldown cap.
+
+        Returns:
+            The effective delay, or 0.0 when nothing was deferred.
+        """
+        if delay <= 0:
+            return 0.0
+        delay = min(delay, self._max_cooldown_seconds)
+        with self._lock:
+            deadline = self._clock() + delay
+            if deadline > self._next_allowed_at:
+                self._next_allowed_at = deadline
+        return delay
+
+    def wait(self) -> float:
+        """Sleep until the org-wide backoff deadline has passed.
+
+        Returns:
+            Seconds spent waiting.
+        """
+        waited = 0.0
+        while True:
+            with self._lock:
+                delay = self._next_allowed_at - self._clock()
+            if delay <= 0:
+                return waited
+            wait_started_at = self._clock()
+            self._sleep(delay)
+            waited += max(self._clock() - wait_started_at, 0.0)
+
+
 class EndpointThrottle:
     def __init__(
         self,
@@ -88,27 +187,34 @@ class EndpointThrottle:
         max_concurrency: int = DEFAULT_ENDPOINT_CONCURRENCY,
         remaining_reserve: int = DEFAULT_RATE_LIMIT_REMAINING_RESERVE,
         max_cooldown_seconds: float = DEFAULT_MAX_COOLDOWN_SECONDS,
-    ):
+        org_throttle: OrgThrottle | None = None,
+    ) -> None:
         if max_concurrency < 1:
             raise ValueError("max_concurrency must be at least 1")
         if remaining_reserve < 0:
             raise ValueError("remaining_reserve cannot be negative")
         if max_cooldown_seconds <= 0:
             raise ValueError("max_cooldown_seconds must be positive")
-        self._clock = clock
-        self._wall_clock = wall_clock
-        self._sleep = sleep
-        self._lock = Lock()
-        self._semaphore = BoundedSemaphore(max_concurrency)
-        self._remaining_reserve = remaining_reserve
-        self._max_cooldown_seconds = max_cooldown_seconds
-        self._next_allowed_at = 0.0
-        self._request_interval = 0.0
+        self._clock: Callable[[], float] = clock
+        self._wall_clock: Callable[[], float] = wall_clock
+        self._sleep: Callable[[float], None] = sleep
+        self._lock: Lock = Lock()
+        self._semaphore: BoundedSemaphore = BoundedSemaphore(max_concurrency)
+        # Org-wide permit gate and outage backoff shared with the other
+        # families, if any.
+        self._org_throttle: OrgThrottle | None = org_throttle
+        self._remaining_reserve: int = remaining_reserve
+        self._max_cooldown_seconds: float = float(max_cooldown_seconds)
+        self._next_allowed_at: float = 0.0
+        self._request_interval: float = DEFAULT_REQUEST_INTERVAL_SECONDS
+        # Temporary floor under the request interval, set after a 429 or at the
+        # reserve and lifted by the next successful response.
+        self._probe_interval: float = 0.0
         self._observed_reset_at: float | None = None
         self._observed_remaining: int | None = None
-        self._next_allowed_reason = "proactive_pacing"
-        self._queued = 0
-        self._active_http_requests = 0
+        self._next_allowed_reason: WaitReason = "proactive_pacing"
+        self._queued: int = 0
+        self._active_http_requests: int = 0
 
     def acquire(self) -> ThrottleWait:
         slot_started_at = self._clock()
@@ -121,10 +227,36 @@ class EndpointThrottle:
             with self._lock:
                 self._queued -= 1
         slot_seconds = max(self._clock() - slot_started_at, 0.0)
+        proactive_pacing_seconds = 0.0
+        retry_backoff_seconds = 0.0
+        holds_org_permit = False
         try:
-            proactive_pacing_seconds, retry_backoff_seconds = self._wait_by_reason()
+            while True:
+                pacing_seconds, backoff_seconds = self._wait_until_allowed()
+                proactive_pacing_seconds += pacing_seconds
+                retry_backoff_seconds += backoff_seconds
+                if self._org_throttle is not None:
+                    retry_backoff_seconds += self._org_throttle.wait()
+                    # Take the org permit only once this request is ready to
+                    # send, so requests parked on a cooldown do not starve
+                    # other families.
+                    gate_started_at = self._clock()
+                    self._org_throttle.acquire()
+                    holds_org_permit = True
+                    slot_seconds += max(self._clock() - gate_started_at, 0.0)
+                # Book the start atomically at admission. A deadline that moved
+                # while waiting for the permit, or a start booked by a request
+                # admitted just before, sends this one back to wait without
+                # holding the permit.
+                if self._try_book():
+                    break
+                if holds_org_permit and self._org_throttle is not None:
+                    self._org_throttle.release()
+                    holds_org_permit = False
         except BaseException:
-            self.release()
+            if holds_org_permit and self._org_throttle is not None:
+                self._org_throttle.release()
+            self._semaphore.release()
             raise
         return ThrottleWait(
             slot_seconds=slot_seconds,
@@ -134,7 +266,21 @@ class EndpointThrottle:
         )
 
     def release(self) -> None:
+        if self._org_throttle is not None:
+            self._org_throttle.release()
         self._semaphore.release()
+
+    @property
+    def in_flight(self) -> int:
+        """Requests currently executing against the endpoint family."""
+        with self._lock:
+            return self._active_http_requests
+
+    @property
+    def queued(self) -> int:
+        """Requests waiting for a concurrency slot."""
+        with self._lock:
+            return self._queued
 
     def begin_http_request(self) -> int:
         with self._lock:
@@ -146,20 +292,28 @@ class EndpointThrottle:
             self._active_http_requests -= 1
 
     def wait(self) -> None:
-        self._wait_by_reason()
+        """Wait for the next allowed start and book it, without taking a slot."""
+        while True:
+            self._wait_until_allowed()
+            if self._org_throttle is not None:
+                self._org_throttle.wait()
+            if self._try_book():
+                return
 
-    def _wait_by_reason(self) -> tuple[float, float]:
+    def _wait_until_allowed(self) -> tuple[float, float]:
+        """Sleep until the family deadline has passed, without booking a start.
+
+        Returns:
+            Seconds waited on pacing and seconds waited on retry backoff.
+        """
         proactive_pacing_seconds = 0.0
         retry_backoff_seconds = 0.0
         while True:
             with self._lock:
-                now = self._clock()
-                delay = self._next_allowed_at - now
+                delay = self._next_allowed_at - self._clock()
                 reason = self._next_allowed_reason
-                if delay <= 0:
-                    self._next_allowed_at = now + self._request_interval
-                    self._next_allowed_reason = "proactive_pacing"
-                    return proactive_pacing_seconds, retry_backoff_seconds
+            if delay <= 0:
+                return proactive_pacing_seconds, retry_backoff_seconds
             wait_started_at = self._clock()
             self._sleep(delay)
             waited = max(self._clock() - wait_started_at, 0.0)
@@ -167,6 +321,23 @@ class EndpointThrottle:
                 retry_backoff_seconds += waited
             else:
                 proactive_pacing_seconds += waited
+
+    def _try_book(self) -> bool:
+        """Book the next start now if the family and org deadlines have passed.
+
+        Returns:
+            True if this request may start now; False if it must wait again.
+        """
+        now = self._clock()
+        org_allows = self._org_throttle is None or self._org_throttle.allows(now)
+        with self._lock:
+            if not org_allows or now < self._next_allowed_at:
+                return False
+            self._next_allowed_at = now + max(
+                self._request_interval, self._probe_interval
+            )
+            self._next_allowed_reason = "proactive_pacing"
+            return True
 
     def defer(self, delay: float, *, minimum_interval: float = 0.0) -> float:
         if delay <= 0:
@@ -177,16 +348,29 @@ class EndpointThrottle:
             if retry_deadline > self._next_allowed_at:
                 self._next_allowed_at = retry_deadline
                 self._next_allowed_reason = "retry_backoff"
-            self._request_interval = max(
-                self._request_interval,
-                minimum_interval,
-            )
+            self._probe_interval = max(self._probe_interval, minimum_interval)
         return delay
+
+    def defer_outage(self, delay: float) -> float:
+        """Pause after a server-side failure (5xx or transport error).
+
+        The pause is org-wide when an org throttle is shared, since such
+        failures are not specific to one rate limit bucket; otherwise it falls
+        back to pausing this family only.
+
+        Returns:
+            The effective delay.
+        """
+        if self._org_throttle is not None:
+            return self._org_throttle.defer(delay)
+        return self.defer(delay)
 
     def observe_response(self, response: requests.Response) -> None:
         remaining_header = response.headers.get("X-Rate-Limit-Remaining")
         reset_header = response.headers.get("X-Rate-Limit-Reset")
         if remaining_header is None or reset_header is None:
+            with self._lock:
+                self._probe_interval = 0.0
             return
 
         try:
@@ -215,28 +399,41 @@ class EndpointThrottle:
                 return
 
             remaining = self._observed_remaining
+            seconds_to_reset = self._observed_reset_at - self._wall_clock()
             window_seconds = min(
-                max(self._observed_reset_at - self._wall_clock(), 0.0),
+                max(seconds_to_reset, 0.0),
                 self._max_cooldown_seconds,
             )
             now = self._clock()
-            if remaining <= self._remaining_reserve:
-                cooldown = min(
-                    max(window_seconds + 1.0, 1.0),
-                    self._max_cooldown_seconds,
-                )
+            # Requests still in flight will consume budget this response does
+            # not reflect yet, so hold them back as additional reserve.
+            reserve = self._remaining_reserve + self._active_http_requests
+            if remaining <= reserve:
+                # Hold until just past the reset. The signed distance keeps a
+                # late response from a window that already reset from pushing
+                # the deadline out again.
+                cooldown = min(seconds_to_reset + 1.0, self._max_cooldown_seconds)
                 proactive_deadline = now + cooldown
                 if proactive_deadline > self._next_allowed_at:
                     self._next_allowed_at = proactive_deadline
                     self._next_allowed_reason = "proactive_pacing"
-                self._request_interval = max(
-                    self._request_interval,
-                    RATE_LIMIT_PROBE_INTERVAL_SECONDS,
-                )
+                self._probe_interval = float(RATE_LIMIT_PROBE_INTERVAL_SECONDS)
+                # The cooldown ends in a new window. Pace it at the default
+                # rate until its first headers arrive, not at the interval
+                # computed for the tail of this window.
+                self._request_interval = DEFAULT_REQUEST_INTERVAL_SECONDS
                 return
 
-            usable_requests = remaining - self._remaining_reserve
-            self._request_interval = window_seconds / usable_requests
+            usable_requests = remaining - reserve
+            if seconds_to_reset <= 0:
+                # The window these headers describe has already reset, so its
+                # remaining budget says nothing about the current one. Pace at
+                # the default rate until the new window's first headers arrive
+                # rather than admitting every waiter at once.
+                self._request_interval = DEFAULT_REQUEST_INTERVAL_SECONDS
+            else:
+                self._request_interval = window_seconds / usable_requests
+            self._probe_interval = 0.0
             proactive_deadline = now + self._request_interval
             if proactive_deadline > self._next_allowed_at:
                 self._next_allowed_at = proactive_deadline
@@ -254,24 +451,25 @@ class OktaRESTClient(RESTClient):
         max_retry_delay_seconds: float | None = None,
         clock: Callable[[], float] = time.time,
         elapsed_clock: Callable[[], float] = time.monotonic,
-        sleep: Callable[[float], None] = time.sleep,
         jitter: Callable[[], float] = random.random,
         telemetry: Telemetry | None = None,
         **kwargs: Any,
-    ):
+    ) -> None:
         kwargs.setdefault("session", Session(raise_for_status=False))
         super().__init__(*args, **kwargs)
         if rate_limit_max_elapsed_seconds <= 0:
             raise ValueError("rate_limit_max_elapsed_seconds must be positive")
-        self.endpoint_family = endpoint_family
-        self._throttle = throttle
-        self._max_attempts = (
+        self.endpoint_family: str = endpoint_family
+        self._throttle: EndpointThrottle = throttle
+        self._max_attempts: int = (
             max_attempts
             if max_attempts is not None
             else self._config.request_max_attempts
         )
-        self._rate_limit_max_elapsed_seconds = rate_limit_max_elapsed_seconds
-        self._max_retry_delay_seconds = (
+        self._rate_limit_max_elapsed_seconds: float = float(
+            rate_limit_max_elapsed_seconds
+        )
+        self._max_retry_delay_seconds: float = (
             max_retry_delay_seconds
             if max_retry_delay_seconds is not None
             else self._config.request_max_retry_delay
@@ -280,12 +478,16 @@ class OktaRESTClient(RESTClient):
             raise ValueError("max_attempts must be at least 1")
         if self._max_retry_delay_seconds <= 0:
             raise ValueError("max_retry_delay_seconds must be positive")
-        self._backoff_factor = self._config.request_backoff_factor
-        self._clock = clock
-        self._elapsed_clock = elapsed_clock
-        self._sleep = sleep
-        self._jitter = jitter
-        self._telemetry = telemetry or NullTelemetryRecorder()
+        self._backoff_factor: float = self._config.request_backoff_factor
+        self._clock: Callable[[], float] = clock
+        self._elapsed_clock: Callable[[], float] = elapsed_clock
+        self._jitter: Callable[[], float] = jitter
+        self._telemetry: Telemetry = telemetry or NullTelemetryRecorder()
+
+    @property
+    def throttle(self) -> EndpointThrottle:
+        """The endpoint family throttle this client sends through."""
+        return self._throttle
 
     def _send_once(self, request: requests.Request, **kwargs: Any) -> requests.Response:
         return super()._send_request(request, **kwargs)
@@ -297,7 +499,7 @@ class OktaRESTClient(RESTClient):
         **kwargs: Any,
     ) -> requests.Response:
         observed_concurrency = self._throttle.begin_http_request()
-        throttle_measurements = {
+        throttle_measurements: dict[str, int | float] = {
             "slot_wait_seconds": throttle_wait.slot_seconds,
             "pacing_wait_seconds": throttle_wait.proactive_pacing_seconds,
             "retry_backoff_wait_seconds": throttle_wait.retry_backoff_seconds,
@@ -358,7 +560,7 @@ class OktaRESTClient(RESTClient):
     def _send_request(
         self, request: requests.Request, **kwargs: Any
     ) -> requests.Response:
-        initial_read_timeout_budget = kwargs.pop(
+        initial_read_timeout_budget: InitialReadTimeoutBudget | None = kwargs.pop(
             "initial_read_timeout_budget",
             None,
         )
@@ -398,10 +600,7 @@ class OktaRESTClient(RESTClient):
                         request,
                         response,
                     )
-                if (
-                    unauthorized_decision is not None
-                    and unauthorized_decision.retry
-                ):
+                if unauthorized_decision is not None and unauthorized_decision.retry:
                     self._telemetry.record_retry(
                         request.url or self.endpoint_family,
                         category="authentication_refresh",
@@ -434,7 +633,7 @@ class OktaRESTClient(RESTClient):
                 if status_code == 429:
                     delay = self._throttle.defer(
                         delay,
-                        minimum_interval=RATE_LIMIT_PROBE_INTERVAL_SECONDS,
+                        minimum_interval=float(RATE_LIMIT_PROBE_INTERVAL_SECONDS),
                     )
                     self._throttle.release()
                     if (
@@ -443,9 +642,14 @@ class OktaRESTClient(RESTClient):
                     ):
                         raise OktaRetryExhaustedError(context) from exc
                 else:
-                    self._throttle.release()
-                    if transient_attempt >= self._max_attempts:
-                        raise OktaRetryExhaustedError(context) from exc
+                    # Publish the backoff before freeing the slot so a queued
+                    # request cannot start ahead of it.
+                    try:
+                        if transient_attempt >= self._max_attempts:
+                            raise OktaRetryExhaustedError(context) from exc
+                        delay = self._throttle.defer_outage(delay)
+                    finally:
+                        self._throttle.release()
                 logger.warning(
                     "Retrying Okta request after status=%s endpoint_family=%s "
                     "attempt=%s rate_limit_attempt=%s transient_attempt=%s/%s "
@@ -468,41 +672,38 @@ class OktaRESTClient(RESTClient):
                     category="rate_limit" if status_code == 429 else "server_error",
                     delay_seconds=delay,
                 )
-                if status_code != 429:
-                    retry_wait_started_at = self._elapsed_clock()
-                    self._sleep(delay)
-                    self._telemetry.record_retry_wait(
-                        request.url or self.endpoint_family,
-                        duration_seconds=max(
-                            self._elapsed_clock() - retry_wait_started_at, 0.0
-                        ),
-                    )
             except RETRYABLE_REQUEST_EXCEPTIONS as exc:
-                self._throttle.release()
                 transient_attempt += 1
                 is_read_timeout = isinstance(exc, requests.exceptions.ReadTimeout)
                 if is_read_timeout:
                     read_timeout_attempt += 1
-                context = self._retry_context(
-                    None,
-                    None,
-                    attempt,
-                    started_at,
-                    request,
-                )
-                transient_max_attempts = (
-                    read_timeout_max_attempts
-                    if is_read_timeout
-                    else self._max_attempts
-                )
-                exhausted = (
-                    read_timeout_attempt >= read_timeout_max_attempts
-                    if is_read_timeout
-                    else transient_attempt >= self._max_attempts
-                )
-                if exhausted:
-                    raise OktaRetryExhaustedError(context) from exc
-                delay = self._retry_delay(None, transient_attempt)
+                # Publish the backoff before freeing the slot so a queued
+                # request cannot start ahead of it.
+                try:
+                    context = self._retry_context(
+                        None,
+                        None,
+                        attempt,
+                        started_at,
+                        request,
+                    )
+                    transient_max_attempts = (
+                        read_timeout_max_attempts
+                        if is_read_timeout
+                        else self._max_attempts
+                    )
+                    exhausted = (
+                        read_timeout_attempt >= read_timeout_max_attempts
+                        if is_read_timeout
+                        else transient_attempt >= self._max_attempts
+                    )
+                    if exhausted:
+                        raise OktaRetryExhaustedError(context) from exc
+                    delay = self._throttle.defer_outage(
+                        self._retry_delay(None, transient_attempt)
+                    )
+                finally:
+                    self._throttle.release()
                 self._telemetry.record_retry(
                     request.url or self.endpoint_family,
                     category="transport_error",
@@ -522,14 +723,6 @@ class OktaRESTClient(RESTClient):
                     context.url,
                     context.app_id,
                     context.cursor,
-                )
-                retry_wait_started_at = self._elapsed_clock()
-                self._sleep(delay)
-                self._telemetry.record_retry_wait(
-                    request.url or self.endpoint_family,
-                    duration_seconds=max(
-                        self._elapsed_clock() - retry_wait_started_at, 0.0
-                    ),
                 )
             except BaseException:
                 self._throttle.release()
@@ -575,7 +768,9 @@ class OktaRESTClient(RESTClient):
             return None
 
         authorization = headers.get("Authorization")
-        if not isinstance(authorization, str) or not authorization.startswith("Bearer "):
+        if not isinstance(authorization, str) or not authorization.startswith(
+            "Bearer "
+        ):
             return None
 
         access_token = authorization.removeprefix("Bearer ")
