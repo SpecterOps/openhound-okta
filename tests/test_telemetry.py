@@ -157,7 +157,8 @@ max_parallel_items = 22
     cookie = run_context.push_context()
     try:
         run_context.reload(str(tmp_path))
-        from openhound_okta.source import OktaTokenCredentials, source
+        from openhound_okta.source import source
+        from openhound_okta.utils.auth import OktaTokenCredentials
 
         source_object = source(
             credentials=OktaTokenCredentials(
@@ -193,7 +194,8 @@ max_parallel_items = 22
     cookie = run_context.push_context()
     try:
         run_context.reload(str(tmp_path))
-        from openhound_okta.source import OktaTokenCredentials, source
+        from openhound_okta.source import source
+        from openhound_okta.utils.auth import OktaTokenCredentials
 
         source_object = source(
             credentials=OktaTokenCredentials(
@@ -235,7 +237,8 @@ org_concurrency = 12
     cookie = run_context.push_context()
     try:
         run_context.reload(str(tmp_path))
-        from openhound_okta.source import OktaTokenCredentials, source
+        from openhound_okta.source import source
+        from openhound_okta.utils.auth import OktaTokenCredentials
 
         source(
             credentials=OktaTokenCredentials(

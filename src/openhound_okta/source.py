@@ -3,11 +3,10 @@ import hashlib
 import json
 import logging
 import threading
-from base64 import b64decode
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Any, Callable, Final, Union
+from typing import Any, Callable, Final
 from urllib.parse import urlparse
 from xml.etree.ElementTree import Element
 
@@ -15,10 +14,6 @@ import dlt
 import requests
 from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
-from dlt.common.configuration import configspec
-from dlt.common.configuration.specs import CredentialsConfiguration
-from dlt.common.typing import TSecretStrValue
-from dlt.sources.helpers.rest_client.auth import APIKeyAuth
 from dlt.sources.helpers.rest_client.client import RESTClient
 from dlt.sources.helpers.rest_client.paginators import HeaderLinkPaginator
 
@@ -89,9 +84,8 @@ from .models.saml import (
     saml_sp_acs_rows,
     saml_trusted_issuer_row,
 )
-from .models.token import Token
 from .telemetry import NullTelemetryRecorder, Telemetry
-from .utils.auth import OktaAuth, OktaBearerAuth, client_secret_token_response
+from .utils.auth import AnyOktaCredentials
 from .utils.http import (
     DEFAULT_ENDPOINT_CONCURRENCY,
     DEFAULT_ORG_CONCURRENCY,
@@ -105,28 +99,6 @@ from .utils.http import (
 )
 
 logger = logging.getLogger(__name__)
-
-OKTA_DEFAULT_SCOPE = [
-    "okta.users.read",
-    "okta.apps.read",
-    "okta.groups.read",
-    "okta.roles.read",
-    "okta.agentPools.read",
-    "okta.apiTokens.read",
-    "okta.authorizationServers.read",
-    "okta.devices.read",
-    "okta.policies.read",
-    "okta.orgs.read",
-    "okta.idps.read",
-    "okta.features.read",
-    "okta.clients.read",
-    "okta.appGrants.read",
-    "okta.oauthIntegrations.read",
-    "okta.authenticators.read",
-    # Optional scopes which require a dedicated license
-    "okta.realms.read",
-    "okta.realmAssignments.read",
-]
 
 # One entry per Okta rate limit bucket the collector touches. Each family's
 # EndpointThrottle paces itself from the X-Rate-Limit-* headers of its own
@@ -316,176 +288,6 @@ APPLICATION_GROUP_ASSIGNMENTS_MIN_PAGE_SIZE = 20
 APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE = 200
 GROUP_PUSH_MAPPINGS_PAGE_SIZE = 1000
 IDENTITY_PROVIDER_USERS_PAGE_SIZE = 200
-
-
-@configspec
-class OktaCredentials(CredentialsConfiguration):
-    """Base Okta credentials: the org base URL plus a credential kind label."""
-
-    base_url: str = dlt.config.value
-
-    def auth(self):
-        """Credential kind label; overridden by concrete credentials."""
-        pass
-
-
-def _app_token(okta_auth: OktaAuth, base_url: str, client_id: str) -> Token:
-    """Exchange a signed JWT assertion for an OAuth 2.0 access token.
-
-    Args:
-        okta_auth: Holder of the app's private key.
-        base_url: Okta org base URL.
-        client_id: OAuth 2.0 client id of the collector app.
-
-    Returns:
-        The token response for the collector's default scopes.
-    """
-    private_key = okta_auth.private_key
-    jwt = okta_auth.jwt(
-        private_key=private_key,
-        client_id=client_id,
-        audience=f"{base_url}/oauth2/v1/token",
-        exp_delta=60,
-    )
-    return okta_auth.token_response(base_url, jwt, " ".join(OKTA_DEFAULT_SCOPE))
-
-
-@configspec
-class OktaAppCredentials(OktaCredentials):
-    """OAuth 2.0 app credentials with the private key read from a file."""
-
-    private_key_path: TSecretStrValue = dlt.secrets.value
-    client_id: str = dlt.config.value
-
-    def auth(self) -> str:
-        """Credential kind label: "app"."""
-        return "app"
-
-    def fetch_token(self) -> Token:
-        """Fetch a fresh access token with the app's private key.
-
-        Returns:
-            The token response.
-        """
-        return _app_token(
-            OktaAuth(private_key_path=self.private_key_path),
-            self.base_url,
-            self.client_id,
-        )
-
-    @property
-    def header(self) -> str:
-        """Authorization header value with a freshly fetched bearer token."""
-        return f"Bearer {self.fetch_token().access_token}"
-
-
-@configspec
-class OktaEncodedAppCredentials(OktaCredentials):
-    """OAuth 2.0 app credentials with the private key supplied base64-encoded."""
-
-    private_key_b64: TSecretStrValue = dlt.secrets.value
-    client_id: str = dlt.config.value
-
-    def auth(self) -> str:
-        """Credential kind label: "app"."""
-        return "app"
-
-    def fetch_token(self) -> Token:
-        """Fetch a fresh access token with the decoded private key.
-
-        Returns:
-            The token response.
-        """
-        decoded_credentials = b64decode(self.private_key_b64).decode("utf-8")
-        return _app_token(
-            OktaAuth(private_key_string=decoded_credentials),
-            self.base_url,
-            self.client_id,
-        )
-
-    @property
-    def header(self) -> str:
-        """Authorization header value with a freshly fetched bearer token."""
-        return f"Bearer {self.fetch_token().access_token}"
-
-
-@configspec
-class OktaClientSecretCredentials(OktaCredentials):
-    """Credentials issued for an installed Okta API Service Integration.
-
-    The client secret is used only to authenticate with Okta's organization
-    authorization server. It must not be sent in a request body or included in
-    logs, telemetry, or error messages.
-
-    Attributes:
-        base_url: Inherited base URL of the customer Okta organization.
-        client_id: Client ID generated when the integration is installed.
-        client_secret: Client secret generated when the integration is installed.
-    """
-
-    client_id: str = None
-    client_secret: str = None
-
-    def auth(self) -> str:
-        """Return the bearer-token authentication method identifier."""
-        return "app"
-
-    def fetch_token(self) -> Token:
-        """Exchange the installed integration credentials for an access token."""
-        return client_secret_token_response(
-            self.base_url,
-            self.client_id,
-            self.client_secret,
-            " ".join(OKTA_DEFAULT_SCOPE),
-        )
-
-    @property
-    def header(self) -> str:
-        """Return an authorization header generated from a fresh token."""
-        return f"Bearer {self.fetch_token().access_token}"
-
-
-@configspec
-class OktaTokenCredentials(OktaCredentials):
-    """Static SSWS API token credentials."""
-
-    token: TSecretStrValue = dlt.secrets.value
-
-    def auth(self) -> str:
-        """Credential kind label: "token"."""
-        return "token"
-
-    @property
-    def header(self) -> str:
-        """Authorization header value carrying the SSWS token."""
-        return f"SSWS {self.token}"
-
-
-def _request_auth(
-    credentials: Union[
-        OktaAppCredentials,
-        OktaEncodedAppCredentials,
-        OktaClientSecretCredentials,
-        OktaTokenCredentials,
-    ],
-):
-    """Build the requests auth for the configured credentials.
-
-    Args:
-        credentials: App, client-secret, or token credentials.
-
-    Returns:
-        A refreshing bearer auth for app and client-secret credentials, or a
-        static header auth for an SSWS token.
-    """
-    if isinstance(
-        credentials,
-        (OktaAppCredentials, OktaEncodedAppCredentials, OktaClientSecretCredentials),
-    ):
-        return OktaBearerAuth(credentials.fetch_token)
-    return APIKeyAuth(
-        name="Authorization", api_key=credentials.header, location="header"
-    )
 
 
 class ClientPool:
@@ -733,33 +535,6 @@ class SourceContext:
     )
     group_push_mappings_page_size: int = GROUP_PUSH_MAPPINGS_PAGE_SIZE
     identity_provider_users_page_size: int = IDENTITY_PROVIDER_USERS_PAGE_SIZE
-
-
-def _tenant_domain_from_base_url(base_url: str) -> str:
-    """Derive the case-folded tenant hostname from the Okta base URL.
-
-    Args:
-        base_url: Okta org base URL.
-
-    Returns:
-        The hostname, case-folded.
-
-    Raises:
-        ValueError: If the URL is missing or lacks a scheme or hostname.
-    """
-    if not isinstance(base_url, str) or not base_url.strip():
-        raise ValueError("Okta base URL is unavailable during collection")
-    try:
-        parsed = urlparse(base_url.strip())
-        _ = parsed.port
-        tenant_domain = parsed.hostname
-    except ValueError as error:
-        raise ValueError(
-            "Okta base URL must include a URL scheme and hostname"
-        ) from error
-    if not parsed.scheme or not tenant_domain:
-        raise ValueError("Okta base URL must include a URL scheme and hostname")
-    return tenant_domain.casefold()
 
 
 def _group_page_sizes(initial_page_size: int) -> tuple[int, ...]:
@@ -2551,12 +2326,7 @@ def api_services(ctx: SourceContext) -> Iterator[dict[str, Any]]:
 
 @app.source(name="okta", max_table_nesting=0)
 def source(
-    credentials: Union[
-        OktaAppCredentials,
-        OktaEncodedAppCredentials,
-        OktaClientSecretCredentials,
-        OktaTokenCredentials,
-    ] = dlt.secrets.value,
+    credentials: AnyOktaCredentials = dlt.secrets.value,
     applications_page_size: int = APPLICATIONS_PAGE_SIZE,
     application_users_page_size: int = APPLICATION_USERS_PAGE_SIZE,
     groups_page_size: int = GROUPS_PAGE_SIZE,
@@ -2574,8 +2344,9 @@ def source(
     """DLT source, defines Okta collection resources and transformers.
 
     Args:
-        credentials: Okta API credentials based on a key path, encoded key,
-            API Service Integration client secret, or SSWS token.
+        credentials: Okta API credentials: a service app private key (file
+            path or base64), a service app or API Service Integration client
+            secret, or an SSWS API token.
         applications_page_size: Applications requested per applications page.
         application_users_page_size: Users requested per application-users page.
         groups_page_size: Groups requested per expanded groups page.
@@ -2651,7 +2422,7 @@ def source(
 
     pool = ClientPool(
         base_url=credentials.base_url,
-        auth=_request_auth(credentials),
+        auth=credentials.request_auth(),
         paginator=HeaderLinkPaginator(),
         endpoint_concurrency=endpoint_concurrency,
         org_concurrency=org_concurrency,
@@ -2662,7 +2433,7 @@ def source(
 
     ctx = SourceContext(
         pool=pool,
-        tenant_domain=_tenant_domain_from_base_url(credentials.base_url),
+        tenant_domain=credentials.tenant_domain,
         telemetry=telemetry,
         applications_page_size=applications_page_size,
         application_users_page_size=application_users_page_size,
