@@ -1,10 +1,12 @@
 from datetime import datetime
+from typing import Final
 
 from openhound.core.asset import BaseAsset, EdgeDef
 from openhound.core.models.entries_dataclass import Edge, EdgeProperties
 from openhound.core.models.entries_dataclass import EdgePath
 from pydantic import BaseModel, ConfigDict, Field
 
+from openhound_okta.app_names import AppName
 from openhound_okta.graph import OktaOwnedEdgePath
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
@@ -37,9 +39,11 @@ IGNORED_OUTBOUND_SYNC_APPS = {
     "okta_atspoke_sso",  # Okta Access Requests
 }
 
-ACTIVE_DIRECTORY_APP = "active_directory"
-LDAP_INTERFACE_APP = "ldap_interface"
-OKTA_ORG2ORG_APP = "okta_org2org"
+# Apps whose assigned users are always collected, even when
+# `limit_app_user_collection` is enabled: every app type the collector recognizes, i.e.
+# hybrid-auth / sync apps, the OIN SAML apps whose assertions are fully normalized, and
+# apps commonly assigned in customer tenants.
+ALWAYS_COLLECTED_APP_USERS: Final[frozenset[str]] = frozenset(AppName)
 
 
 class Provider(BaseModel):
@@ -314,16 +318,16 @@ class ApplicationUser(BaseAsset):
 
     @property
     def _is_inbound_sync(self) -> bool:
-        if self.app_name == ACTIVE_DIRECTORY_APP:
+        if self.app_name == AppName.ACTIVE_DIRECTORY:
             return self.scope == "USER"
 
-        if self.app_name == LDAP_INTERFACE_APP:
+        if self.app_name == AppName.LDAP_INTERFACE:
             return True
 
         if self.scope == "GROUP":
             return False
 
-        if self.app_name == OKTA_ORG2ORG_APP:
+        if self.app_name == AppName.OKTA_ORG2ORG:
             return (
                 "initial_status" not in self.profile.model_fields_set
                 and self._inbound_user_sync_enabled
@@ -355,7 +359,7 @@ class ApplicationUser(BaseAsset):
     def _password_sync_edge(self):
         if (
             self.sync_state == "SYNCHRONIZED"
-            and self.app_name == ACTIVE_DIRECTORY_APP
+            and self.app_name == AppName.ACTIVE_DIRECTORY
             and self.profile.object_sid
         ):
             if self._is_inbound_sync:
@@ -390,7 +394,7 @@ class ApplicationUser(BaseAsset):
 
     @property
     def _okta_org2org_edges(self):
-        if self.app_name != OKTA_ORG2ORG_APP or not self.external_id:
+        if self.app_name != AppName.OKTA_ORG2ORG or not self.external_id:
             return
 
         if self._is_inbound_sync:
