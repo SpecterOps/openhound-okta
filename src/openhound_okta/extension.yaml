@@ -43,6 +43,5 @@ parameters:
   - name: app_user_collection_app_ids
     description: Additional Okta application IDs whose user assignments are collected when the limit is enabled
     required: false
-    default: []
 
 tags: [ "okta", "extension", "opengraph", "bloodhound" ]
