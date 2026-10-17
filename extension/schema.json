@@ -12,7 +12,37 @@
       "description": "An Okta organization",
       "is_display_kind": true,
       "icon": "globe",
-      "color": "#16a5a5"
+      "color": "#16a5a5",
+      "info": {
+        "description": {
+          "title": "Description",
+          "position": 1,
+          "markdown": {
+            "content": "The Organization entity represents the Okta tenant itself. It contains general information about the organization, such as its name, domain, and settings.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/nodes/okta_organization)"
+          }
+        },
+        "inbound_object_control": {
+          "title": "Inbound Object Control",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $objectID := .Properties.objectid | default \"UnknownId\" }}\n{{ $superAdminQuery := printf \"MATCH p = (:Okta)-[:Okta_ApiTokenFor|Okta_DeviceOf|Okta_MemberOf|Okta_SuperAdmin*1..3]->(selected:Okta_Organization {objectid: '%s'})\\nRETURN p\\nLIMIT 500\" $objectID }}\n{{ $orgAdminQuery := printf \"MATCH p = (:Okta)-[:Okta_ApiTokenFor|Okta_DeviceOf|Okta_MemberOf|Okta_HasRole*1..3]->(role:Okta_Role)<-[:Okta_Contains]-(selected:Okta_Organization {objectid: '%s'})\\nWHERE role.objectid STARTS WITH 'ORG_ADMIN@'\\nRETURN p\\nLIMIT 500\" $objectID }}\n- [Super Admins](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $superAdminQuery | b64enc | urlquery }})\n- [Org Admins](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $orgAdminQuery | b64enc | urlquery }})"
+          }
+        },
+        "management": {
+          "title": "Management",
+          "position": 3,
+          "markdown": {
+            "content": "{{ $objectID := .Properties.objectid | default \"UnknownId\" }}\n{{ $adminConsoleQuery := printf \"MATCH p = (selected:Okta_Organization {objectid: '%s'})-[:Okta_Contains]->(:Okta)-[:Okta_AppAssignment]->(console:Okta_Application)\\nWHERE console.app_type = 'saasure'\\nRETURN p\\nLIMIT 500\" $objectID }}\n{{ $orgScopedQuery := printf \"MATCH p = (:Okta)-[:Okta_HasRoleAssignment|Okta_MemberOf*1..2]->(:Okta_RoleAssignment)-[:Okta_ScopedTo]->(selected:Okta_Organization {objectid: '%s'})\\nRETURN p\\nLIMIT 500\" $objectID }}\n- [Admin Console Access](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $adminConsoleQuery | b64enc | urlquery }})\n- [Organization-Scoped Role Assignments](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $orgScopedQuery | b64enc | urlquery }})"
+          }
+        },
+        "cross_tenant_trust": {
+          "title": "Cross-Tenant Trust Relationships",
+          "position": 4,
+          "markdown": {
+            "content": "{{ $objectID := .Properties.objectid | default \"UnknownId\" }}\n{{ $inboundTrustQuery := printf \"MATCH p = (selected:Okta_Organization {objectid: '%s'})-[:Okta_Contains]->(local:Okta)<-[:Okta_InboundOrgSSO|Okta_OutboundOrgSSO|Okta_KerberosSSO]-(external)\\nWHERE local:Okta_IdentityProvider OR local:Okta_Application\\nRETURN p\\nLIMIT 500\" $objectID }}\n{{ $outboundTrustQuery := printf \"MATCH p = (selected:Okta_Organization {objectid: '%s'})-[:Okta_Contains]->(app:Okta_Application)-[:Okta_OutboundOrgSSO|Okta_OrgSWA]->(external)\\nRETURN p\\nLIMIT 500\" $objectID }}\n- [Inbound Trusts](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $inboundTrustQuery | b64enc | urlquery }})\n- [Outbound Trusts](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $outboundTrustQuery | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_Realm",
@@ -233,97 +263,380 @@
     {
       "name": "Okta_ReadClientSecret",
       "description": "Ability to read client secrets for scoped Okta applications",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_ReadClientSecret edges represent permissions that allow a principal (user, group, or application) to read OAuth client secrets for scoped Okta applications. These edges are created for the **Application Administrator**, **API Access Management Administrator**, and **Read-only Administrator** built-in roles and for custom roles with the `okta.apps.clientCredentials.read` permission.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_readclientsecret)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $sourceKind := \"Okta\" }}{{ range .Source.Kinds }}{{ if ne .Name \"Okta\" }}{{ $sourceKind = .Name }}{{ end }}{{ end }}\n{{ $match1 := printf \"MATCH p1 = (source:%s {objectid: '%s'})-[:Okta_ReadClientSecret]->(target:Okta_ClientSecret {objectid: '%s'})\" $sourceKind $sourceID $targetID }}\n{{ $match2 := \"MATCH p2 = (target)-[:Okta_SecretOf]->(client:Okta)\" }}\n{{ $match3 := \"MATCH p3 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment)-[:Okta_ScopedTo]->(scope:Okta)\\nWHERE (assignment.type = 'APP_ADMIN' AND (scope:Okta_Organization OR scope.objectid = client.objectid)) OR ((assignment.type = 'API_ACCESS_MANAGEMENT_ADMIN' OR assignment.type = 'READ_ONLY_ADMIN') AND scope:Okta_Organization) OR (assignment.type = 'CUSTOM' AND scope:Okta_ResourceSet)\" }}\n{{ $match4 := \"OPTIONAL MATCH p4 = (scope:Okta_ResourceSet)-[:Okta_ResourceSetContains]->(client)\" }}\n{{ $match5 := \"OPTIONAL MATCH p5 = (scope:Okta_Organization)-[:Okta_Contains]->(client)\" }}\n{{ $match6 := \"OPTIONAL MATCH p6 = (source)-[:Okta_HasRole]->(role)\\nWHERE (role:Okta_Role AND (role.objectid STARTS WITH 'APP_ADMIN@' OR role.objectid STARTS WITH 'API_ACCESS_MANAGEMENT_ADMIN@' OR role.objectid STARTS WITH 'READ_ONLY_ADMIN@')) OR (role:Okta_CustomRole AND 'okta.apps.clientCredentials.read' IN role.permissions)\" }}\n{{ $result := \"RETURN p1, p2, p3, p4, p5, p6\\nLIMIT 500\" }}\n{{ $query := join \"\\n\" (list $match1 $match2 $match3 $match4 $match5 $match6 $result) }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_ResourceSetContains",
       "description": "Direct membership of resources within an Okta resource set",
-      "is_traversable": false
+      "is_traversable": false,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The non-traversable Okta_ResourceSetContains edges represent the direct membership relationships between resource sets and their member entities in Okta.\n\nResource sets can contain users, groups, applications, API service integrations, devices, authorization servers, identity providers, and policies. When a resource set contains a group, only the group object itself is in scope; its members are not.\n\nOkta also allows a resource set to contain the members of a group instead of the group itself. Such memberships are represented by the Okta_ResourceSetContainsMembersOf edge to the group and by Okta_ResourceSetContainsIndirect edges to the users who are members of that group. The union of Okta_ResourceSetContains and Okta_ResourceSetContainsIndirect edges therefore covers all objects that a role assignment scoped to the resource set applies to.\n\nThese edges are informational. The effective permissions granted by custom roles scoped to a resource set are represented by dedicated traversable edges, such as Okta_ResetPassword, Okta_AddMember, and Okta_ManageApp.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_resourcesetcontains)"
+          }
+        },
+        "membership": {
+          "title": "Membership",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $membersQuery := printf \"MATCH p = (resourceSet:Okta_ResourceSet {objectid: '%s'})-[:Okta_ResourceSetContains|Okta_ResourceSetContainsMembersOf|Okta_ResourceSetContainsIndirect]->(member:Okta)\\nRETURN p\\nLIMIT 500\" $sourceID }}\n{{ $setsQuery := printf \"MATCH p = (resourceSet:Okta_ResourceSet)-[:Okta_ResourceSetContains|Okta_ResourceSetContainsMembersOf|Okta_ResourceSetContainsIndirect]->(member:Okta {objectid: '%s'})\\nRETURN p\\nLIMIT 500\" $targetID }}\n- [Resource Set Members](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $membersQuery | b64enc | urlquery }})\n- [Containing Resource Sets](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $setsQuery | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_ResourceSetContainsMembersOf",
       "description": "An Okta resource set contains the members of a group",
-      "is_traversable": false
+      "is_traversable": false,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The non-traversable Okta_ResourceSetContainsMembersOf edges represent resource sets that contain the members of a group in Okta, as opposed to the group object itself.\n\nIn the Okta Admin Console, this corresponds to adding a group to a resource set with the *Users in group* option instead of *Group*.\n\nA custom role scoped to the resource set applies to the users who are members of the group, not to the group itself. For example, a Help Desk role scoped to this resource set can reset passwords of the group's members but cannot manage the group's membership. The individual users in scope are represented by the Okta_ResourceSetContainsIndirect edges, while directly contained objects are represented by the Okta_ResourceSetContains edges.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_resourcesetcontainsmembersof)"
+          }
+        },
+        "membership": {
+          "title": "Membership",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $scopedMembersQuery := printf \"MATCH p = (resourceSet:Okta_ResourceSet {objectid: '%s'})-[:Okta_ResourceSetContainsMembersOf]->(group:Okta_Group {objectid: '%s'})<-[:Okta_MemberOf]-(member:Okta_User)\\nRETURN p\\nLIMIT 500\" $sourceID $targetID }}\n- [Scoped Group Members](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $scopedMembersQuery | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_ResourceSetContainsIndirect",
       "description": "Indirect membership of users within an Okta resource set through a group",
-      "is_traversable": false
+      "is_traversable": false,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The non-traversable Okta_ResourceSetContainsIndirect edges represent users that are members of a resource set indirectly through a group membership in Okta.\n\nThese edges are created when a resource set contains the members of a group, which is represented by the Okta_ResourceSetContainsMembersOf edge. The collector resolves the current group membership and creates one Okta_ResourceSetContainsIndirect edge per member user. As a result, users who join or leave the group gain or lose the corresponding resource set membership, and thereby become or stop being targets of any custom role assignment scoped to the resource set.\n\nUsers that are added to a resource set directly are represented by the Okta_ResourceSetContains edges. The union of Okta_ResourceSetContains and Okta_ResourceSetContainsIndirect edges covers all objects that a role assignment scoped to the resource set applies to.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_resourcesetcontainsindirect)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $match1 := printf \"MATCH p1 = (resourceSet:Okta_ResourceSet {objectid: '%s'})-[:Okta_ResourceSetContainsIndirect]->(user:Okta_User {objectid: '%s'})\" $sourceID $targetID }}\n{{ $match2 := \"MATCH p2 = (resourceSet)-[:Okta_ResourceSetContainsMembersOf]->(group:Okta_Group)<-[:Okta_MemberOf]-(user)\" }}\n{{ $result := \"RETURN p1, p2\\nLIMIT 500\" }}\n{{ $query := join \"\\n\" (list $match1 $match2 $result) }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_MemberOf",
       "description": "Membership of a user in an Okta group",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_MemberOf edges represent the membership relationships between users and groups in Okta.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_memberof)"
+          }
+        },
+        "membership": {
+          "title": "Membership",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $membersQuery := printf \"MATCH p = (member:Okta_User)-[:Okta_MemberOf]->(group:Okta_Group {objectid: '%s'})\\nRETURN p\\nLIMIT 500\" $targetID }}\n{{ $membershipsQuery := printf \"MATCH p = (user:Okta_User {objectid: '%s'})-[:Okta_MemberOf]->(group:Okta_Group)\\nRETURN p\\nLIMIT 500\" $sourceID }}\n- [Group Members](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $membersQuery | b64enc | urlquery }})\n- [Group Memberships](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $membershipsQuery | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_HasRole",
       "description": "Assignment of a built-in or custom role to a principal",
-      "is_traversable": false
+      "is_traversable": false,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The non-traversable Okta_HasRole edges represent the role assignments for users, groups, and applications in Okta.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_hasrole)"
+          }
+        }
+      }
     },
     {
       "name": "Okta_ResetPassword",
       "description": "Ability to reset passwords or temporary credentials for scoped Okta users",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_ResetPassword edges represent custom role permissions that allow a principal (user, group, or application) to reset passwords or temporary credentials for scoped Okta users. These edges are created when a custom role includes password management permissions such as `okta.users.credentials.resetPassword`, `okta.users.credentials.manage`, `okta.users.credentials.manageTemporaryAccessCode`, or `okta.users.manage`.\n\nThe edge is calculated based on custom role scoping.\n\nAlice is a direct member of the resource set, while Bob is a member indirectly through the Retail Staff group. Both are therefore in scope of the role assignment.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_resetpassword)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $sourceKind := \"Okta\" }}{{ range .Source.Kinds }}{{ if ne .Name \"Okta\" }}{{ $sourceKind = .Name }}{{ end }}{{ end }}\n{{ $match1 := printf \"MATCH p1 = (source:%s {objectid: '%s'})-[:Okta_ResetPassword]->(target:Okta_User {objectid: '%s'})\" $sourceKind $sourceID $targetID }}\n{{ $match2 := \"MATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment {type: 'CUSTOM'})-[:Okta_ScopedTo]->(resourceSet:Okta_ResourceSet)-[:Okta_ResourceSetContains|Okta_ResourceSetContainsIndirect]->(target)\" }}\n{{ $match3 := \"OPTIONAL MATCH p3 = (source)-[:Okta_HasRole]->(role:Okta_CustomRole)\\nWHERE 'okta.users.credentials.resetPassword' IN role.permissions OR 'okta.users.credentials.manage' IN role.permissions OR 'okta.users.credentials.manageTemporaryAccessCode' IN role.permissions OR 'okta.users.credentials.expirePassword' IN role.permissions OR 'okta.users.manage' IN role.permissions\" }}\n{{ $match4 := \"OPTIONAL MATCH p4 = (resourceSet)-[:Okta_ResourceSetContainsMembersOf]->(group:Okta_Group)<-[:Okta_MemberOf]-(target)\" }}\n{{ $result := \"RETURN p1, p2, p3, p4\\nLIMIT 500\" }}\n{{ $query := join \"\\n\" (list $match1 $match2 $match3 $match4 $result) }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_ResetFactors",
       "description": "Ability to reset MFA factors for scoped Okta users",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_ResetFactors edges represent custom role permissions that allow a principal to reset MFA authenticators for scoped Okta users. These edges are created when a custom role includes the `okta.users.credentials.resetFactors` or `okta.users.credentials.manage` permissions.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_resetfactors)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $sourceKind := \"Okta\" }}{{ range .Source.Kinds }}{{ if ne .Name \"Okta\" }}{{ $sourceKind = .Name }}{{ end }}{{ end }}\n{{ $match1 := printf \"MATCH p1 = (source:%s {objectid: '%s'})-[:Okta_ResetFactors]->(target:Okta_User {objectid: '%s'})\" $sourceKind $sourceID $targetID }}\n{{ $match2 := \"MATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment {type: 'CUSTOM'})-[:Okta_ScopedTo]->(resourceSet:Okta_ResourceSet)-[:Okta_ResourceSetContains|Okta_ResourceSetContainsIndirect]->(target)\" }}\n{{ $match3 := \"OPTIONAL MATCH p3 = (source)-[:Okta_HasRole]->(role:Okta_CustomRole)\\nWHERE 'okta.users.credentials.resetFactors' IN role.permissions OR 'okta.users.credentials.manage' IN role.permissions OR 'okta.users.manage' IN role.permissions\" }}\n{{ $match4 := \"OPTIONAL MATCH p4 = (resourceSet)-[:Okta_ResourceSetContainsMembersOf]->(group:Okta_Group)<-[:Okta_MemberOf]-(target)\" }}\n{{ $result := \"RETURN p1, p2, p3, p4\\nLIMIT 500\" }}\n{{ $query := join \"\\n\" (list $match1 $match2 $match3 $match4 $result) }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_AddMember",
       "description": "Ability to add or remove members in scoped Okta groups",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_AddMember edges represent custom role permissions that allow a principal (user, group, or application) to add or remove members in scoped Okta groups. These edges are created when a custom role includes the `okta.groups.members.manage` or `okta.groups.manage` permissions.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_addmember)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $sourceKind := \"Okta\" }}{{ range .Source.Kinds }}{{ if ne .Name \"Okta\" }}{{ $sourceKind = .Name }}{{ end }}{{ end }}\n{{ $match1 := printf \"MATCH p1 = (source:%s {objectid: '%s'})-[:Okta_AddMember]->(target:Okta_Group {objectid: '%s'})\" $sourceKind $sourceID $targetID }}\n{{ $match2 := \"MATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment {type: 'CUSTOM'})-[:Okta_ScopedTo]->(resourceSet:Okta_ResourceSet)-[:Okta_ResourceSetContains]->(target)\" }}\n{{ $match3 := \"OPTIONAL MATCH p3 = (source)-[:Okta_HasRole]->(role:Okta_CustomRole)\\nWHERE 'okta.groups.manage' IN role.permissions OR 'okta.groups.members.manage' IN role.permissions\" }}\n{{ $result := \"RETURN p1, p2, p3\\nLIMIT 500\" }}\n{{ $query := join \"\\n\" (list $match1 $match2 $match3 $result) }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_ManageApp",
       "description": "Ability to manage scoped Okta applications",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_ManageApp edges correspond to the `okta.apps.manage` custom role permissions that allow a principal (user, group, or application) to fully manage Okta applications and their members.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_manageapp)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $sourceKind := \"Okta\" }}{{ range .Source.Kinds }}{{ if ne .Name \"Okta\" }}{{ $sourceKind = .Name }}{{ end }}{{ end }}\n{{ $match1 := printf \"MATCH p1 = (source:%s {objectid: '%s'})-[:Okta_ManageApp]->(target:Okta_Application {objectid: '%s'})\" $sourceKind $sourceID $targetID }}\n{{ $match2 := \"MATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment {type: 'CUSTOM'})-[:Okta_ScopedTo]->(resourceSet:Okta_ResourceSet)-[:Okta_ResourceSetContains]->(target)\" }}\n{{ $match3 := \"OPTIONAL MATCH p3 = (source)-[:Okta_HasRole]->(role:Okta_CustomRole)\\nWHERE 'okta.apps.manage' IN role.permissions\" }}\n{{ $result := \"RETURN p1, p2, p3\\nLIMIT 500\" }}\n{{ $query := join \"\\n\" (list $match1 $match2 $match3 $result) }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_HasRoleAssignment",
       "description": "Relationship between a principal and a role assignment",
-      "is_traversable": false
+      "is_traversable": false,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The Okta_HasRoleAssignment edges connect users, groups, and applications to their respective Okta_RoleAssignment nodes.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_hasroleassignment)"
+          }
+        }
+      }
     },
     {
       "name": "Okta_ScopedTo",
       "description": "Scope relationship between a role assignment and its target",
-      "is_traversable": false
+      "is_traversable": false,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The Okta_ScopedTo edges connect the Okta_RoleAssignment nodes to the resources they are scoped to, such as the organization or specific groups or applications.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_scopedto)"
+          }
+        }
+      }
     },
     {
       "name": "Okta_AppAdmin",
       "description": "Application administrator role assignment",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_AppAdmin edges represent Application Administrator role assignments. Application Administrators can manage application configurations, user assignments, and provisioning settings for their assigned applications.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_appadmin)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $sourceKind := \"Okta\" }}{{ range .Source.Kinds }}{{ if ne .Name \"Okta\" }}{{ $sourceKind = .Name }}{{ end }}{{ end }}\n{{ $targetKind := \"Okta\" }}{{ range .Target.Kinds }}{{ if ne .Name \"Okta\" }}{{ $targetKind = .Name }}{{ end }}{{ end }}\n{{ $match1 := printf \"MATCH p1 = (source:%s {objectid: '%s'})-[:Okta_AppAdmin]->(target:%s {objectid: '%s'})\" $sourceKind $sourceID $targetKind $targetID }}\n{{ $match2 := printf \"MATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment {type: 'APP_ADMIN'})-[:Okta_ScopedTo]->(scope:Okta)\\nWHERE scope:Okta_Organization OR scope.objectid = '%s'\" $targetID }}\n{{ $match3 := \"OPTIONAL MATCH p3 = (source)-[:Okta_HasRole]->(role:Okta_Role)\\nWHERE role.objectid STARTS WITH 'APP_ADMIN@'\" }}\n{{ $match4 := \"OPTIONAL MATCH p4 = (scope:Okta_Organization)-[:Okta_Contains]->(target)\" }}\n{{ $result := \"RETURN p1, p2, p3, p4\\nLIMIT 500\" }}\n{{ $query := join \"\\n\" (list $match1 $match2 $match3 $match4 $result) }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_GroupAdmin",
       "description": "Group administrator role assignment",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_GroupAdmin edges represent Group Administrator (also known as User Administrator) role assignments. Group Administrators can manage users and groups within their assigned scope.\n\nTarget group memberships are flattened when the assignment is evaluated.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_groupadmin)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $sourceKind := \"Okta\" }}{{ range .Source.Kinds }}{{ if ne .Name \"Okta\" }}{{ $sourceKind = .Name }}{{ end }}{{ end }}\n{{ $targetKind := \"Okta\" }}{{ range .Target.Kinds }}{{ if ne .Name \"Okta\" }}{{ $targetKind = .Name }}{{ end }}{{ end }}\n{{ $match1 := printf \"MATCH p1 = (source:%s {objectid: '%s'})-[:Okta_GroupAdmin]->(target:%s {objectid: '%s'})\" $sourceKind $sourceID $targetKind $targetID }}\n{{ $match3 := \"OPTIONAL MATCH p3 = (source)-[:Okta_HasRole]->(role:Okta_Role)\\nWHERE role.objectid STARTS WITH 'USER_ADMIN@'\" }}\n{{ $match2 := \"\" }}{{ $match4 := \"\" }}{{ $result := \"\" }}\n{{ if eq $targetKind \"Okta_Group\" }}\n{{ $match2 = printf \"MATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment {type: 'USER_ADMIN'})-[:Okta_ScopedTo]->(scope:Okta)\\nWHERE scope:Okta_Organization OR (scope:Okta_Group AND scope.objectid = '%s')\" $targetID }}\n{{ $match4 = \"OPTIONAL MATCH p4 = (scope:Okta_Organization)-[:Okta_Contains]->(target)\" }}\n{{ $result = \"RETURN p1, p2, p3, p4\\nLIMIT 500\" }}\n{{ else }}\n{{ $match2 = \"MATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment {type: 'USER_ADMIN'})-[:Okta_ScopedTo]->(scope:Okta)\\nWHERE scope:Okta_Organization OR scope:Okta_Group\" }}\n{{ $match4 = \"MATCH p4 = (scope)-[:Okta_Contains|Okta_MemberOf]-(target)\" }}\n{{ $result = \"RETURN p1, p2, p3, p4\\nLIMIT 500\" }}\n{{ end }}\n{{ $query := join \"\\n\" (list $match1 $match2 $match3 $match4 $result) }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_GroupMembershipAdmin",
       "description": "Group membership administrator role assignment",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_GroupMembershipAdmin edges represent Group Membership Administrator role assignments. Group Membership Administrators can add and remove members from groups within their assigned scope but cannot modify the groups themselves.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_groupmembershipadmin)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $sourceKind := \"Okta\" }}{{ range .Source.Kinds }}{{ if ne .Name \"Okta\" }}{{ $sourceKind = .Name }}{{ end }}{{ end }}\n{{ $match1 := printf \"MATCH p1 = (source:%s {objectid: '%s'})-[:Okta_GroupMembershipAdmin]->(target:Okta_Group {objectid: '%s'})\" $sourceKind $sourceID $targetID }}\n{{ $match2 := printf \"MATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment {type: 'GROUP_MEMBERSHIP_ADMIN'})-[:Okta_ScopedTo]->(scope:Okta)\\nWHERE scope:Okta_Organization OR (scope:Okta_Group AND scope.objectid = '%s')\" $targetID }}\n{{ $match3 := \"OPTIONAL MATCH p3 = (source)-[:Okta_HasRole]->(role:Okta_Role)\\nWHERE role.objectid STARTS WITH 'GROUP_MEMBERSHIP_ADMIN@'\" }}\n{{ $match4 := \"OPTIONAL MATCH p4 = (scope:Okta_Organization)-[:Okta_Contains]->(target)\" }}\n{{ $result := \"RETURN p1, p2, p3, p4\\nLIMIT 500\" }}\n{{ $query := join \"\\n\" (list $match1 $match2 $match3 $match4 $result) }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_HelpDeskAdmin",
       "description": "Help desk administrator role assignment",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_HelpDeskAdmin edges represent Help Desk Administrator role assignments. Help Desk Administrators can perform password resets, unlock accounts, and reset MFA factors for users within their assigned scope.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_helpdeskadmin)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $sourceKind := \"Okta\" }}{{ range .Source.Kinds }}{{ if ne .Name \"Okta\" }}{{ $sourceKind = .Name }}{{ end }}{{ end }}\n{{ $match1 := printf \"MATCH p1 = (source:%s {objectid: '%s'})-[:Okta_HelpDeskAdmin]->(target:Okta_User {objectid: '%s'})\" $sourceKind $sourceID $targetID }}\n{{ $match2 := \"MATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment {type: 'HELP_DESK_ADMIN'})-[:Okta_ScopedTo]->(scope:Okta)\\nWHERE scope:Okta_Organization OR scope:Okta_Group\" }}\n{{ $match3 := \"OPTIONAL MATCH p3 = (source)-[:Okta_HasRole]->(role:Okta_Role)\\nWHERE role.objectid STARTS WITH 'HELP_DESK_ADMIN@'\" }}\n{{ $match4 := \"OPTIONAL MATCH p4 = (scope:Okta_Organization)-[:Okta_Contains]->(target)\" }}\n{{ $match5 := \"OPTIONAL MATCH p5 = (target)-[:Okta_MemberOf]->(scope:Okta_Group)\" }}\n{{ $result := \"RETURN p1, p2, p3, p4, p5\\nLIMIT 500\" }}\n{{ $query := join \"\\n\" (list $match1 $match2 $match3 $match4 $match5 $result) }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_SuperAdmin",
       "description": "Super administrator role assignment",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_SuperAdmin edges represent Super Administrator role assignments, which are scoped to the entire Okta organization. Super Administrators have full access to all features and settings in the Okta organization.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_superadmin)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $sourceKind := \"Okta\" }}{{ range .Source.Kinds }}{{ if ne .Name \"Okta\" }}{{ $sourceKind = .Name }}{{ end }}{{ end }}\n{{ $match1 := printf \"MATCH p1 = (source:%s {objectid: '%s'})-[:Okta_SuperAdmin]->(target:Okta_Organization {objectid: '%s'})\" $sourceKind $sourceID $targetID }}\n{{ $match2 := \"MATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment {type: 'SUPER_ADMIN'})-[:Okta_ScopedTo]->(org:Okta_Organization)\" }}\n{{ $match3 := \"OPTIONAL MATCH p3 = (source)-[:Okta_HasRole]->(role:Okta_Role)\\nWHERE role.objectid STARTS WITH 'SUPER_ADMIN@'\" }}\n{{ $match4 := \"OPTIONAL MATCH p4 = (org)-[:Okta_Contains]->(role)\" }}\n{{ $result := \"RETURN p1, p2, p3, p4\\nLIMIT 500\" }}\n{{ $query := join \"\\n\" (list $match1 $match2 $match3 $match4 $result) }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_OrgAdmin",
       "description": "Organization administrator role assignment",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_OrgAdmin edges represent Organization Administrator role assignments. Organization Administrators can manage most organizational settings except for administrative role assignments and some security settings.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_orgadmin)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $sourceKind := \"Okta\" }}{{ range .Source.Kinds }}{{ if ne .Name \"Okta\" }}{{ $sourceKind = .Name }}{{ end }}{{ end }}\n{{ $targetKind := \"Okta\" }}{{ range .Target.Kinds }}{{ if ne .Name \"Okta\" }}{{ $targetKind = .Name }}{{ end }}{{ end }}\n{{ $match1 := printf \"MATCH p1 = (source:%s {objectid: '%s'})-[:Okta_OrgAdmin]->(target:%s {objectid: '%s'})\" $sourceKind $sourceID $targetKind $targetID }}\n{{ $match2 := \"MATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment {type: 'ORG_ADMIN'})-[:Okta_ScopedTo]->(org:Okta_Organization)\" }}\n{{ $match3 := \"OPTIONAL MATCH p3 = (source)-[:Okta_HasRole]->(role:Okta_Role)\\nWHERE role.objectid STARTS WITH 'ORG_ADMIN@'\" }}\n{{ $match4 := \"OPTIONAL MATCH p4 = (org)-[:Okta_Contains]->(target)\" }}\n{{ $result := \"RETURN p1, p2, p3, p4\\nLIMIT 500\" }}\n{{ $query := join \"\\n\" (list $match1 $match2 $match3 $match4 $result) }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_MobileAdmin",
       "description": "Mobile administrator role assignment",
-      "is_traversable": true
+      "is_traversable": true,
+      "info": {
+        "general": {
+          "title": "General",
+          "position": 1,
+          "markdown": {
+            "content": "The traversable Okta_MobileAdmin edges represent Mobile Administrator role assignments. Mobile Administrators can manage mobile device settings and configurations within their assigned scope.\n\n[Online documentation](https://bloodhound.specterops.io/opengraph/extensions/okta/edges/okta_mobileadmin)"
+          }
+        },
+        "edge_composition": {
+          "title": "Edge Composition",
+          "position": 2,
+          "markdown": {
+            "content": "{{ $sourceID := .Source.Properties.objectid | default \"UnknownId\" }}\n{{ $targetID := .Target.Properties.objectid | default \"UnknownId\" }}\n{{ $sourceKind := \"Okta\" }}{{ range .Source.Kinds }}{{ if ne .Name \"Okta\" }}{{ $sourceKind = .Name }}{{ end }}{{ end }}\n{{ $match1 := printf \"MATCH p1 = (source:%s {objectid: '%s'})-[:Okta_MobileAdmin]->(target:Okta_Device {objectid: '%s'})\" $sourceKind $sourceID $targetID }}\n{{ $match2 := \"MATCH p2 = (source)-[:Okta_HasRoleAssignment]->(assignment:Okta_RoleAssignment {type: 'MOBILE_ADMIN'})-[:Okta_ScopedTo]->(org:Okta_Organization)\" }}\n{{ $match3 := \"OPTIONAL MATCH p3 = (source)-[:Okta_HasRole]->(role:Okta_Role)\\nWHERE role.objectid STARTS WITH 'MOBILE_ADMIN@'\" }}\n{{ $match4 := \"MATCH p4 = (org)-[:Okta_Contains]->(target)\" }}\n{{ $result := \"RETURN p1, p2, p3, p4\\nLIMIT 500\" }}\n{{ $query := join \"\\n\" (list $match1 $match2 $match3 $match4 $result) }}\n[View edge composition](/ui/explore?exploreSearchTab=cypher&searchType=cypher&cypherSearch={{ $query | b64enc | urlquery }})"
+          }
+        }
+      }
     },
     {
       "name": "Okta_IdentityProviderFor",
