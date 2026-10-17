@@ -34,7 +34,7 @@ def test_tenant_domain_supports_canonical_and_legacy_config(
 def test_tenant_domain_rejects_missing_config(monkeypatch):
     monkeypatch.setattr(main.dlt.secrets, "get", lambda _key: None)
 
-    with pytest.raises(ValueError, match="base URL is unavailable"):
+    with pytest.raises(ValueError, match="must be configured"):
         main._tenant_domain_from_config()
 
 
@@ -56,4 +56,11 @@ def test_tenant_domain_rejects_urls_without_scheme_or_hostname(monkeypatch, base
     )
 
     with pytest.raises(ValueError, match="URL scheme and hostname"):
+        main._tenant_domain_from_config()
+
+
+def test_tenant_domain_rejects_plain_http(monkeypatch):
+    monkeypatch.setattr(main.dlt.secrets, "get", lambda _key: "http://preview.example")
+
+    with pytest.raises(ValueError, match="https"):
         main._tenant_domain_from_config()
