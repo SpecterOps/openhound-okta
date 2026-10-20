@@ -2,6 +2,7 @@ import fnmatch
 import hashlib
 import json
 import logging
+import re
 import threading
 from base64 import b64decode
 from collections.abc import Iterator, Mapping
@@ -305,6 +306,11 @@ def _role_assignment_scope(
 APPLICATION_GRANTS_ACCESS_DENIED_LIMIT: Final[int] = 10
 """Consecutive access-denied (403) responses after which application OAuth 2.0
 grant collection is abandoned for all remaining applications."""
+
+MICROSOFT_TENANT_ID_PATTERN: Final = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE
+)
+"""Microsoft tenant id GUID, accepted as is by the OpenID configuration endpoint."""
 
 # Okta returns 20 applications per page unless asked; 200 is its maximum.
 APPLICATIONS_PAGE_SIZE = 200
@@ -1231,19 +1237,29 @@ def _microsoft_tenant_id_from_onmicrosoft_domain(
     *,
     get: Callable[..., requests.Response] = requests.get,
 ) -> str | None:
-    """Resolve a Microsoft tenant id from an onmicrosoft.com domain prefix.
+    """Resolve a Microsoft tenant id from an onmicrosoft.com domain or prefix.
 
     Reads the tenant's OpenID configuration and takes the tenant id from the
     token endpoint path. Failures are logged and yield None.
 
     Args:
-        onmicrosoft_domain: Domain prefix, without ".onmicrosoft.com".
+        onmicrosoft_domain: Domain prefix such as "contoso", or a value the
+            OpenID configuration endpoint accepts as is: a full domain name
+            such as "contoso.onmicrosoft.com" or a tenant id GUID.
         get: HTTP GET function, replaceable in tests.
 
     Returns:
         The tenant id, or None if it could not be resolved.
     """
-    domain_name = f"{onmicrosoft_domain}.onmicrosoft.com"
+    # Okta documents msftTenant as the tenant name without ".onmicrosoft.com",
+    # yet a customer tenant had an app configured with the full domain. That
+    # may be a misconfiguration on their side and possibly not even supported
+    # by Okta, but we still want to resolve it instead of doubling the suffix.
+    tenant = onmicrosoft_domain.strip()
+    if "." in tenant or MICROSOFT_TENANT_ID_PATTERN.fullmatch(tenant):
+        domain_name = tenant
+    else:
+        domain_name = f"{tenant}.onmicrosoft.com"
     config_url = (
         f"https://login.microsoftonline.com/{domain_name}/"
         ".well-known/openid-configuration"

@@ -1740,6 +1740,45 @@ def test_microsoft_tenant_id_is_derived_from_openid_configuration():
     ]
 
 
+@pytest.mark.parametrize(
+    ("msft_tenant", "expected_domain"),
+    [
+        ("contoso", "contoso.onmicrosoft.com"),
+        ("contoso.onmicrosoft.com", "contoso.onmicrosoft.com"),
+        ("Contoso.OnMicrosoft.com", "Contoso.OnMicrosoft.com"),
+        ("  contoso.onmicrosoft.com ", "contoso.onmicrosoft.com"),
+        ("  Contoso ", "Contoso.onmicrosoft.com"),
+        ("contoso.com", "contoso.com"),
+        (
+            "31537AF4-6D77-4BB9-A681-D2394888EA26",
+            "31537AF4-6D77-4BB9-A681-D2394888EA26",
+        ),
+    ],
+)
+def test_microsoft_tenant_lookup_does_not_double_the_onmicrosoft_suffix(
+    msft_tenant, expected_domain
+):
+    requested = []
+
+    def get(url, **kwargs):
+        requested.append(url)
+        response = requests.Response()
+        response.status_code = 200
+        response._content = (
+            b'{"token_endpoint":"https://login.microsoftonline.com/'
+            b'31537af4-6d77-4bb9-a681-d2394888ea26/oauth2/v2.0/token"}'
+        )
+        return response
+
+    tenant_id = _microsoft_tenant_id_from_onmicrosoft_domain(msft_tenant, get=get)
+
+    assert tenant_id == "31537af4-6d77-4bb9-a681-d2394888ea26"
+    assert requested == [
+        f"https://login.microsoftonline.com/{expected_domain}/"
+        ".well-known/openid-configuration"
+    ]
+
+
 def test_office365_saml_app_is_enriched_with_microsoft_tenant_id():
     def get(url, **kwargs):
         response = requests.Response()
