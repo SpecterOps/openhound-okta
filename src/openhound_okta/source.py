@@ -1031,14 +1031,20 @@ def group_memberships(group: Group, ctx: SourceContext) -> Iterator[dict[str, ob
         ctx: SourceContext containing the REST client for API calls.
 
     Yields:
-        membership (GroupMembership): Member record enriched with group_id and
+        membership (GroupMembership): Member ID and login with group_id and
             group_has_admin_privilege, the latter consumed by the chained
-            admin_group_member_factors transformer.
+            admin_group_member_factors transformer. The rest of the member's
+            user record is dropped: nothing reads it here and it is already
+            collected by the users resource, so keeping it would multiply the
+            largest table by the size of a user object.
     """
     if group.embedded.stats.users_count > 0:
         for page in ctx.pool.paginate(f"/api/v1/groups/{group.id}/users"):
             for item in page:
+                profile = item.get("profile") or {}
                 yield {
+                    "id": item.get("id"),
+                    "login": profile.get("login"),
                     "group_id": group.id,
                     # Carried along so the chained admin_group_member_factors
                     # transformer can select admin-group members without
@@ -1046,7 +1052,6 @@ def group_memberships(group: Group, ctx: SourceContext) -> Iterator[dict[str, ob
                     "group_has_admin_privilege": (
                         group.embedded.stats.has_admin_privilege
                     ),
-                    **item,
                 }
 
 
