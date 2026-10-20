@@ -78,7 +78,7 @@ class GroupMembership(BaseAsset):
     model_config = ConfigDict(populate_by_name=True)
 
     id: str
-    login: str
+    login: str | None = None
     group_id: str
     group_has_admin_privilege: bool = False
 
