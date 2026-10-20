@@ -71,6 +71,10 @@ from .models import (
     UserFactor,
     UserRoleAssignment,
 )
+from .models.application_users import (
+    APPLICATION_USER_ITEM_SKIPPED_KEYS,
+    APPLICATION_USER_PROFILE_SKIPPED_KEYS,
+)
 from .models.built_in_role import (
     BUILT_IN_ROLES,
     SUPPORTED_ROLE_ASSIGNMENT_TYPES,
@@ -1810,6 +1814,22 @@ def application_user_rows(application: Application, ctx: SourceContext):
     user_name_template = (
         application.credentials.user_name_template if application.credentials else None
     )
+    # Application details are the same on every row, so build them once.
+    app_fields = {
+        "app_id": application.id,
+        "app_features": application.features,
+        "app_name": application.name,
+        "app_status": getattr(application, "status", None),
+        "app_settings": application.settings.app if application.settings else None,
+        "app_sign_on_mode": application.sign_on_mode,
+        "app_subject_name_id_template": (
+            sign_on.subject_name_id_template if sign_on else None
+        ),
+        "app_subject_name_id_format": (
+            sign_on.subject_name_id_format if sign_on else None
+        ),
+        "app_user_name_template": _user_name_template_value(user_name_template),
+    }
     try:
         for page in ctx.pool.paginate(
             f"/api/v1/apps/{application.id}/users",
@@ -1818,25 +1838,22 @@ def application_user_rows(application: Application, ctx: SourceContext):
             for item in page:
                 row_count += 1
                 yield {
-                    "app_id": application.id,
-                    "app_features": application.features,
-                    "app_name": application.name,
-                    "app_label": application.label,
-                    "app_status": getattr(application, "status", None),
-                    "app_settings": application.settings.app
-                    if application.settings
-                    else None,
-                    "app_sign_on_mode": application.sign_on_mode,
-                    "app_subject_name_id_template": (
-                        sign_on.subject_name_id_template if sign_on else None
-                    ),
-                    "app_subject_name_id_format": (
-                        sign_on.subject_name_id_format if sign_on else None
-                    ),
-                    "app_user_name_template": _user_name_template_value(
-                        user_name_template
-                    ),
-                    **item,
+                    **app_fields,
+                    # Profile attributes nobody reads are dropped to save
+                    # space: this is the largest collected table.
+                    "profile": {
+                        key: value
+                        for key, value in (item.get("profile") or {}).items()
+                        if key not in APPLICATION_USER_PROFILE_SKIPPED_KEYS
+                    },
+                    # Likewise the assignment timestamps, _links and _embedded
+                    # copies are dropped; the trimmed profile above stays.
+                    **{
+                        key: value
+                        for key, value in item.items()
+                        if key not in APPLICATION_USER_ITEM_SKIPPED_KEYS
+                        and key != "profile"
+                    },
                 }
     except Exception:
         telemetry.record_application_stream("failed")
