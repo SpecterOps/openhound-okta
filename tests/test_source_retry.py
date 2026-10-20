@@ -27,8 +27,6 @@ from openhound_okta.source import (
     ClientPool,
     ConsecutiveAccessDeniedBreaker,
     OktaTokenCredentials,
-    _microsoft_tenant_id_from_onmicrosoft_domain,
-    _office365_tenant_id_fields,
     _saml_idp_metadata_fields,
     _saml_metadata_fields,
     _tenant_domain_from_base_url,
@@ -49,6 +47,7 @@ from openhound_okta.source import (
     user_role_assignment_rows,
 )
 from openhound_okta.utils.auth import OktaBearerAuth, UnauthorizedClassification
+from openhound_okta.utils.entra_tenant import EntraTenantIdResolver
 from openhound_okta.utils.http import (
     DEFAULT_REQUESTS_PER_MINUTE,
     EndpointThrottle,
@@ -1712,95 +1711,26 @@ def test_group_push_mapping_rows_fetch_target_group_name():
     assert pool.get_paths == ["/api/v1/groups/00g-target"]
 
 
-def test_microsoft_tenant_id_is_derived_from_openid_configuration():
-    requested = []
-
-    def get(url, **kwargs):
-        requested.append((url, kwargs))
-        response = requests.Response()
-        response.status_code = 200
-        response._content = (
-            b'{"token_endpoint":"https://login.microsoftonline.com/'
-            b'31537af4-6d77-4bb9-a681-d2394888ea26/oauth2/v2.0/token"}'
-        )
-        return response
-
-    tenant_id = _microsoft_tenant_id_from_onmicrosoft_domain(
-        "contoso",
-        get=get,
+def test_source_applications_resource_resolves_entra_tenant_ids():
+    credentials = OktaTokenCredentials(
+        base_url="https://example.okta.test",
+        token="token",
     )
 
-    assert tenant_id == "31537af4-6d77-4bb9-a681-d2394888ea26"
-    assert requested == [
-        (
-            "https://login.microsoftonline.com/contoso.onmicrosoft.com/"
-            ".well-known/openid-configuration",
-            {"timeout": 30},
-        )
+    applications_resource = next(
+        resource
+        for resource in inspect.unwrap(source)(credentials=credentials)
+        if resource.name == "applications"
+    )
+
+    map_functions = [
+        getattr(step, "_f", None) for step in applications_resource._pipe._steps
     ]
-
-
-@pytest.mark.parametrize(
-    ("msft_tenant", "expected_domain"),
-    [
-        ("contoso", "contoso.onmicrosoft.com"),
-        ("contoso.onmicrosoft.com", "contoso.onmicrosoft.com"),
-        ("Contoso.OnMicrosoft.com", "Contoso.OnMicrosoft.com"),
-        ("  contoso.onmicrosoft.com ", "contoso.onmicrosoft.com"),
-        ("  Contoso ", "Contoso.onmicrosoft.com"),
-        ("contoso.com", "contoso.com"),
-        (
-            "31537AF4-6D77-4BB9-A681-D2394888EA26",
-            "31537AF4-6D77-4BB9-A681-D2394888EA26",
-        ),
-    ],
-)
-def test_microsoft_tenant_lookup_does_not_double_the_onmicrosoft_suffix(
-    msft_tenant, expected_domain
-):
-    requested = []
-
-    def get(url, **kwargs):
-        requested.append(url)
-        response = requests.Response()
-        response.status_code = 200
-        response._content = (
-            b'{"token_endpoint":"https://login.microsoftonline.com/'
-            b'31537af4-6d77-4bb9-a681-d2394888ea26/oauth2/v2.0/token"}'
-        )
-        return response
-
-    tenant_id = _microsoft_tenant_id_from_onmicrosoft_domain(msft_tenant, get=get)
-
-    assert tenant_id == "31537af4-6d77-4bb9-a681-d2394888ea26"
-    assert requested == [
-        f"https://login.microsoftonline.com/{expected_domain}/"
-        ".well-known/openid-configuration"
-    ]
-
-
-def test_office365_saml_app_is_enriched_with_microsoft_tenant_id():
-    def get(url, **kwargs):
-        response = requests.Response()
-        response.status_code = 200
-        response._content = (
-            b'{"token_endpoint":"https://login.microsoftonline.com/'
-            b'tenant-id/oauth2/v2.0/token"}'
-        )
-        return response
-
-    application = {
-        "name": "office365",
-        "signOnMode": "SAML_1_1",
-        "settings": {"app": {"msftTenant": "contoso"}},
-    }
-
-    enriched = _office365_tenant_id_fields(application, get=get)
-
-    assert enriched["settings"]["app"] == {
-        "msftTenant": "contoso",
-        "microsoftTenantId": "tenant-id",
-    }
+    assert any(
+        isinstance(getattr(function, "__self__", None), EntraTenantIdResolver)
+        and function.__name__ == "enrich"
+        for function in map_functions
+    )
 
 
 def test_identity_provider_users_request_the_maximum_page_size():

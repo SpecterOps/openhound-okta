@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import ClassVar
-from urllib.parse import urlsplit
 
 from dlt.common.libs.pydantic import DltConfig
 from openhound.core.asset import BaseAsset, EdgeDef, NodeDef
@@ -11,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 from openhound_okta.graph import OktaOwnedEdgePath, OktaNode, OktaNodeProperties
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
+from openhound_okta.utils.entra_tenant import EntraTenantIdResolver
 
 
 @dataclass
@@ -198,13 +198,9 @@ class IdentityProvider(BaseAsset):
     @property
     def entra_tenant_id(self) -> str | None:
         uri = self.idp_url
-        if self.protocol.type != "SAML2" or not uri or "microsoftonline.com" not in uri:
+        if self.protocol.type != "SAML2" or not uri:
             return None
-
-        path_parts = [part for part in urlsplit(uri).path.split("/") if part]
-        if len(path_parts) < 2:
-            return None
-        return path_parts[-2]
+        return EntraTenantIdResolver.tenant_id_from_url(uri)
 
     @property
     def as_node(self):
