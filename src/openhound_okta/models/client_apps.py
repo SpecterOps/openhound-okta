@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class JWK(BaseModel):
-    kid: str
+    kid: str | None = None
     status: str | None = None
     last_updated: datetime | None = Field(default=None, alias="lastUpdated")
     created: datetime | None = None
