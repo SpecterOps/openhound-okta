@@ -200,6 +200,7 @@ APP_SETTING_PROPERTY_NAMES = {
     "ws_fed_configure_type",
 } | SAML_ROUTE_APP_SETTING_PROPERTIES
 
+
 def _is_primitive_app_setting(value) -> bool:
     return isinstance(value, (str, bool, int))
 
@@ -220,7 +221,7 @@ def _is_homogeneous_primitive_list(value) -> bool:
 class JWK(BaseModel):
     id: str
     kid: str | None = None
-    alf: str | None = None
+    alg: str | None = None
     kty: str | None = None
     use: str | None = None
     n: str | None = None
@@ -243,8 +244,8 @@ class OauthClientSettings(BaseModel):
     issuer_mode: str | None = None
     consent_method: str | None = None
     jwks: OauthKeys | None = None
-    redirect_uris: list[str] = Field(default_factory=list, alias="redirectUris")
-    initiate_login_uri: str | None = Field(default=None, alias="initiateLoginUri")
+    redirect_uris: list[str] = Field(default_factory=list)
+    initiate_login_uri: str | None = None
 
 
 class SamlAcsEndpoint(BaseModel):

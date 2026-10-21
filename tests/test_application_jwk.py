@@ -21,12 +21,18 @@ def test_application_accepts_jwk_without_kid():
                 "keys": [
                     {
                         "kid": None,
-                        "status": "ACTIVE",
-                        "created": "2026-01-01T00:00:00Z",
-                        "lastUpdated": "2026-01-02T00:00:00Z",
+                        "kty": "RSA",
+                        "use": "sig",
+                        "alg": "RS256",
+                        "n": "iKqiD4cr7FZKm6f05K4r",
+                        "e": "AQAB",
                     },
                     {
-                        "status": "ACTIVE",
+                        "kty": "RSA",
+                        "id": "pksw0pu008JFcIkT5697",
+                        "use": "sig",
+                        "n": "iKqiD4cr7FZKm6f05K4r",
+                        "e": "AQAB",
                     },
                 ]
             },
@@ -35,3 +41,7 @@ def test_application_accepts_jwk_without_kid():
 
     assert client.client_id == "0oa1client"
     assert [key.kid for key in client.jwks.keys] == [None, None]
+    assert client.jwks.keys[0].alg == "RS256"
+    assert client.jwks.keys[0].e == "AQAB"
+    assert client.jwks.keys[0].id is None
+    assert client.jwks.keys[1].id == "pksw0pu008JFcIkT5697"

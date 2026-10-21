@@ -50,10 +50,14 @@ class HREF(BaseModel):
 
 
 class Links(BaseModel):
-    source: HREF | None = None
-    users: HREF | None = None
-    apps: HREF | None = None
-    groups: HREF | None = None
+    model_config = ConfigDict(populate_by_name=True)
+
+    assignee: HREF | None = None
+    # Present only on custom role bindings.
+    role: HREF | None = None
+    resource_set: HREF | None = Field(default=None, alias="resource-set")
+    permissions: HREF | None = None
+    member: HREF | None = None
 
 
 class Embedded(BaseModel):

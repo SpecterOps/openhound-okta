@@ -823,3 +823,66 @@ def test_scoped_to_edge_definitions_start_from_role_assignment_nodes():
 
     assert scoped_to_edges
     assert {edge.start for edge in scoped_to_edges} == {nk.ROLE_ASSIGNMENT}
+
+
+def test_user_role_assignment_parses_live_links_payload():
+    # Shape of GET /api/v1/users/{userId}/roles items as returned by Okta: every
+    # entry links its assignee, and custom-role bindings add role/resource-set/
+    # permissions/member links. There are no source/users/apps/groups links.
+    standard = make_assignment(
+        UserRoleAssignment,
+        from_resource="user",
+        source_id="00uvjg43pp3PhER3Z1d7",
+        assignment_type="USER",
+        assignment_id="ra1vjg49y2v3aVCZ31d7",
+        created="2026-02-26T16:15:55.000Z",
+        lastUpdated="2026-02-26T16:15:55.000Z",
+        _links={
+            "assignee": {
+                "href": "https://example.okta.com/api/v1/users/00uvjg43pp3PhER3Z1d7"
+            }
+        },
+    )
+    custom = make_assignment(
+        UserRoleAssignment,
+        from_resource="user",
+        source_id="00uvjg43pp3PhER3Z1d7",
+        assignment_type="USER",
+        assignment_id="irbx7s1brzBZPti1E1d7",
+        role_type="CUSTOM",
+        created="2026-04-07T18:19:41.000Z",
+        lastUpdated="2026-04-07T18:19:41.000Z",
+        **{"resource-set": "iamx7s1y8nOdwyPuh1d7", "role": "cr0x6s5k9mk7ahz8N1d7"},
+        _links={
+            "role": {
+                "href": "https://example-admin.okta.com/api/v1/iam/roles/cr0x6s5k9mk7ahz8N1d7"
+            },
+            "resource-set": {
+                "href": "https://example.okta.com/api/v1/iam/resource-sets/iamx7s1y8nOdwyPuh1d7"
+            },
+            "permissions": {
+                "href": "https://example-admin.okta.com/api/v1/iam/roles/cr0x6s5k9mk7ahz8N1d7/permissions"
+            },
+            "member": {
+                "href": "https://example.okta.com/api/v1/iam/resource-sets/iamx7s1y8nOdwyPuh1d7/bindings/cr0x6s5k9mk7ahz8N1d7/members/irbx7s1brzBZPti1E1d7"
+            },
+            "assignee": {
+                "href": "https://example.okta.com/api/v1/groups/00gvjaj4n8zaabeNh1d7"
+            },
+        },
+    )
+
+    assert standard.links.assignee.href.endswith("/users/00uvjg43pp3PhER3Z1d7")
+    assert standard.is_direct_active_assignment
+    assert standard.links.role is None
+    assert custom.links.assignee.href.endswith("/groups/00gvjaj4n8zaabeNh1d7")
+    assert custom.links.role.href.endswith("/iam/roles/cr0x6s5k9mk7ahz8N1d7")
+    assert custom.links.resource_set.href.endswith(
+        "/iam/resource-sets/iamx7s1y8nOdwyPuh1d7"
+    )
+    assert custom.links.permissions.href.endswith("/permissions")
+    assert custom.links.member.href.endswith("/members/irbx7s1brzBZPti1E1d7")
+    assert custom.resource_set == "iamx7s1y8nOdwyPuh1d7"
+    assert custom.role == "cr0x6s5k9mk7ahz8N1d7"
+    assert not hasattr(custom.links, "source")
+    assert not hasattr(custom, "features")

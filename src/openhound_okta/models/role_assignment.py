@@ -63,10 +63,8 @@ class RoleAssignment(BaseAsset):
     resource_set: str | None = Field(alias="resource-set", default=None)
     status: str
     created: datetime | None
-    name: str | None = None
     label: str
     last_updated: datetime | None = Field(alias="lastUpdated", default=None)
-    features: list[str] = Field(default_factory=list)
     type: str
     role: str | None = None
     scope_apps: list[RoleAssignmentAppTarget] | None = None

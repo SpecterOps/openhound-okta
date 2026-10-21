@@ -7,7 +7,7 @@ class CustomRolePermission(BaseModel):
 
     label: str
     created: datetime | None = None
-    last_updated: str | None = Field(default=None, alias="lastUpdated")
+    last_updated: datetime | None = Field(default=None, alias="lastUpdated")
     conditions: dict | None = None
     links: dict | None = Field(default=None, alias="_links")
 

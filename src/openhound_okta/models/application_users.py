@@ -42,14 +42,8 @@ LDAP_INTERFACE_APP = "ldap_interface"
 OKTA_ORG2ORG_APP = "okta_org2org"
 
 
-class Provider(BaseModel):
-    name: str
-    type: str
-
-
 class Credentials(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
-    provider: Provider | None = None
     username: str | None = Field(default=None, alias="userName")
 
 
@@ -227,13 +221,10 @@ class ApplicationUser(BaseAsset):
 
     id: str
     created: datetime
-    activated: datetime | None = None
-    last_login: datetime | None = Field(default=None, alias="lastLogin")
     last_updated: datetime | None = Field(default=None, alias="lastUpdated")
     password_changed: datetime | None = Field(default=None, alias="passwordChanged")
     profile: Profile
     status: str
-    realm_id: str | None = Field(default=None, alias="realmId")
     credentials: Credentials | None = None
     external_id: str | None = Field(default=None, alias="externalId")
 

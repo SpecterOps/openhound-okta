@@ -4,27 +4,11 @@ from typing import Any
 
 from openhound.core.asset import BaseAsset, EdgeDef
 from openhound.core.models.entries_dataclass import Edge, EdgeProperties
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from openhound_okta.graph import OktaOwnedEdgePath
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.main import app
-
-
-class Settings(BaseModel):
-    app: dict | None = None
-    notifications: dict | None = None
-    manual_provisioning: bool | None = Field(default=None, alias="manualProvisioning")
-    implicit_assignment: bool | None = Field(default=None, alias="implicitAssignment")
-    em_opt_in_status: str | None = Field(default=None, alias="emOptInStatus")
-    notes: dict | None = None
-    oauth_client: dict | None = Field(default=None, alias="oauthClient")
-
-
-class Credentials(BaseModel):
-    user_name_template: dict | None = Field(default=None, alias="userNameTemplate")
-    signing: dict | None = None
-    oauth_client: dict | None = Field(default=None, alias="oauthClient")
 
 
 @dataclass
