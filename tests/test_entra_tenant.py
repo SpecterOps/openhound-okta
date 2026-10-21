@@ -5,8 +5,10 @@ import requests
 
 from openhound_okta.utils.entra_tenant import EntraTenantIdResolver
 
+TENANT_ID = "31537af4-6d77-4bb9-a681-d2394888ea26"
 
-def _openid_configuration_get(requested, tenant_id="tenant-id"):
+
+def _openid_configuration_get(requested, tenant_id=TENANT_ID):
     def get(url, **kwargs):
         requested.append((url, kwargs))
         response = requests.Response()
@@ -31,15 +33,11 @@ def _office365_application(msft_tenant):
 
 def test_entra_tenant_id_is_derived_from_openid_configuration():
     requested = []
-    resolver = EntraTenantIdResolver(
-        get=_openid_configuration_get(
-            requested, tenant_id="31537af4-6d77-4bb9-a681-d2394888ea26"
-        )
-    )
+    resolver = EntraTenantIdResolver(get=_openid_configuration_get(requested))
 
     tenant_id = resolver.resolve("contoso.onmicrosoft.com")
 
-    assert tenant_id == "31537af4-6d77-4bb9-a681-d2394888ea26"
+    assert tenant_id == TENANT_ID
     assert requested == [
         (
             "https://login.microsoftonline.com/contoso.onmicrosoft.com/"
@@ -84,7 +82,7 @@ def test_office365_saml_app_is_enriched_with_entra_tenant_id():
 
     assert enriched["settings"]["app"] == {
         "msftTenant": "contoso",
-        "microsoftTenantId": "tenant-id",
+        "microsoftTenantId": TENANT_ID,
     }
 
 
@@ -98,7 +96,7 @@ def test_entra_tenant_id_is_resolved_once_per_tenant():
     ]
 
     assert [app["settings"]["app"]["microsoftTenantId"] for app in enriched] == [
-        "tenant-id"
+        TENANT_ID
     ] * 3
     assert [url for url, _ in requested] == [
         "https://login.microsoftonline.com/contoso.onmicrosoft.com/"
@@ -132,15 +130,23 @@ def test_unresolvable_entra_tenant_is_looked_up_once(caplog):
 @pytest.mark.parametrize(
     ("url", "expected_tenant_id"),
     [
-        (
-            "https://login.microsoftonline.com/31537af4-6d77-4bb9-a681-d2394888ea26"
-            "/oauth2/v2.0/token",
-            "31537af4-6d77-4bb9-a681-d2394888ea26",
-        ),
-        ("https://login.microsoftonline.com/tenant-1/saml2", "tenant-1"),
+        (f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token", TENANT_ID),
+        (f"https://login.microsoftonline.com/{TENANT_ID}/openid/userinfo", TENANT_ID),
+        (f"https://login.microsoftonline.com/{TENANT_ID}/saml2", TENANT_ID),
+        (f"https://login.microsoft.com/{TENANT_ID}/oauth2/devicecode", TENANT_ID),
+        (f"https://login.microsoft.com/{TENANT_ID}/kerberos", TENANT_ID),
+        (f"https://login.windows.net/{TENANT_ID}/wsfed", TENANT_ID),
+        (f"https://sts.windows.net/{TENANT_ID}/", TENANT_ID),
+        (f"https://login.microsoftonline.us/{TENANT_ID}/saml2", TENANT_ID),
+        (f"https://LOGIN.MICROSOFTONLINE.COM/{TENANT_ID.upper()}/saml2", TENANT_ID),
+        ("https://login.microsoftonline.com/common/oauth2/v2.0/token", None),
+        ("https://login.microsoftonline.com/contoso.onmicrosoft.com/saml2", None),
         ("https://login.microsoftonline.com/saml2", None),
         ("https://login.microsoftonline.com/", None),
-        ("https://example.okta.test/tenant-1/saml2", None),
+        (f"https://example.okta.test/{TENANT_ID}/saml2", None),
+        (f"https://evilmicrosoftonline.com/{TENANT_ID}/saml2", None),
+        (f"https://login.notmicrosoftonline.com/{TENANT_ID}/saml2", None),
+        (f"https://portal.microsoftonline.com/{TENANT_ID}/saml2", None),
     ],
 )
 def test_tenant_id_is_taken_from_tenant_scoped_microsoft_urls(url, expected_tenant_id):

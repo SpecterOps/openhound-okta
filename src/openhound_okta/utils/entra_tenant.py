@@ -20,8 +20,17 @@ MICROSOFT_TENANT_ID_SETTING: Final[str] = "microsoftTenantId"
 MSFT_TENANT_SETTING: Final[str] = "msftTenant"
 """settings.app key holding the "Microsoft Tenant" name typed by the admin."""
 
-MICROSOFT_LOGIN_HOST_SUFFIX: Final[str] = "microsoftonline.com"
-"""Host suffix of Microsoft's tenant-scoped sign-in endpoints."""
+MICROSOFT_LOGIN_HOSTS: Final[frozenset[str]] = frozenset(
+    {
+        "login.microsoftonline.com",
+        "login.microsoft.com",
+        "login.windows.net",
+        "sts.windows.net",
+        # Azure Government (GCC High and DoD).
+        "login.microsoftonline.us",
+    }
+)
+"""Hosts of Microsoft's tenant-scoped endpoints, https://<host>/<tenant id>/..."""
 
 ONMICROSOFT_DOMAIN_SUFFIX: Final[str] = ".onmicrosoft.com"
 """Suffix of the initial domain every Entra tenant is created with."""
@@ -144,33 +153,42 @@ class EntraTenantIdResolver:
 
     @classmethod
     def tenant_id_from_url(cls, url: str) -> str | None:
-        """Extract the tenant id from a tenant-scoped Microsoft sign-in URL.
+        """Extract the tenant id from a tenant-scoped Microsoft endpoint URL.
 
         Microsoft's tenant-scoped endpoints have the form
-        https://login.microsoftonline.com/<tenant id>/<endpoint>, as used by
-        both the Office 365 OpenID configuration (token endpoint) and inbound
-        Entra SAML identity providers (.../saml2).
+        https://<host>/<tenant id>/<endpoint>, for example the token endpoint
+        in an Office 365 OpenID configuration, an inbound Entra SAML identity
+        provider's .../saml2 login URL, or an https://sts.windows.net/<id>/
+        issuer.
 
         Args:
             url: Endpoint URL.
 
         Returns:
-            The tenant path segment, or None when the host is not Microsoft's
-            or the URL has no endpoint path after the tenant (so a bare
-            https://login.microsoftonline.com/saml2 yields None, not "saml2").
+            The lowercase tenant id GUID, or None when the host is not one of
+            MICROSOFT_LOGIN_HOSTS or the first path segment is not a GUID
+            (such as "common", a domain name, or a bare .../saml2).
         """
+        # Exact host match: an admin-configured IdP URL may point anywhere, and
+        # a suffix check would also accept a lookalike such as
+        # evilmicrosoftonline.com.
         parts: SplitResult = urlsplit(url)
-        if not parts.hostname or not parts.hostname.endswith(
-            MICROSOFT_LOGIN_HOST_SUFFIX
-        ):
+        hostname: str | None = parts.hostname
+        if not hostname or hostname.lower() not in MICROSOFT_LOGIN_HOSTS:
             return None
 
+        # The tenant is the first path segment; it must be a GUID so that
+        # cloud-wide endpoints (/common/...) and endpoint names (/saml2) are
+        # not mistaken for one.
         path_segments: list[str] = [
             segment for segment in parts.path.split("/") if segment
         ]
-        if len(path_segments) < 2:
+        if not path_segments:
             return None
-        return path_segments[0]
+        tenant_id: str = path_segments[0].lower()
+        if not cls.TENANT_ID_PATTERN.fullmatch(tenant_id):
+            return None
+        return tenant_id
 
     @classmethod
     def _domain_name(cls, msft_tenant: str) -> str:

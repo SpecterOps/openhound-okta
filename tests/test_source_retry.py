@@ -14,6 +14,8 @@ from dlt.sources.helpers.rest_client.paginators import HeaderLinkPaginator
 from dlt.sources.helpers.rest_client.auth import APIKeyAuth
 from dlt.sources.helpers.requests.session import Session
 
+import openhound_okta.source as okta_source
+from openhound_okta.models.application import Application
 from openhound_okta.models.token import Token
 from openhound_okta.source import (
     API_RATE_LIMIT_ENDPOINTS,
@@ -1731,6 +1733,68 @@ def test_source_applications_resource_resolves_entra_tenant_ids():
         and function.__name__ == "enrich"
         for function in map_functions
     )
+
+
+def test_source_applications_are_enriched_before_model_validation(monkeypatch):
+    """The map must see raw API records; dlt keeps the model validator last."""
+
+    class StubPool:
+        def __init__(self, **kwargs):
+            pass
+
+        def paginate(self, path, **kwargs):
+            yield [
+                {
+                    "id": "app-1",
+                    "orn": "orn:okta:idp:example:apps:app-1",
+                    "name": "office365",
+                    "label": "Office 365",
+                    "status": "ACTIVE",
+                    "created": "2026-01-01T00:00:00Z",
+                    "signOnMode": "SAML_1_1",
+                    "settings": {"app": {"msftTenant": "contoso"}},
+                }
+            ]
+
+    requested = []
+
+    def get(url, **kwargs):
+        requested.append(url)
+        response = requests.Response()
+        response.status_code = 200
+        response._content = (
+            b'{"token_endpoint":"https://login.microsoftonline.com/'
+            b'31537af4-6d77-4bb9-a681-d2394888ea26/oauth2/v2.0/token"}'
+        )
+        return response
+
+    monkeypatch.setattr(okta_source, "ClientPool", StubPool)
+    monkeypatch.setattr(
+        okta_source,
+        "EntraTenantIdResolver",
+        lambda: EntraTenantIdResolver(get=get),
+    )
+    credentials = OktaTokenCredentials(
+        base_url="https://example.okta.test",
+        token="token",
+    )
+
+    applications_resource = next(
+        resource
+        for resource in inspect.unwrap(source)(credentials=credentials)
+        if resource.name == "applications"
+    )
+    rows = list(applications_resource)
+
+    assert [type(row) for row in rows] == [Application]
+    assert rows[0].settings.app == {
+        "msftTenant": "contoso",
+        "microsoftTenantId": "31537af4-6d77-4bb9-a681-d2394888ea26",
+    }
+    assert requested == [
+        "https://login.microsoftonline.com/contoso.onmicrosoft.com/"
+        ".well-known/openid-configuration"
+    ]
 
 
 def test_identity_provider_users_request_the_maximum_page_size():
