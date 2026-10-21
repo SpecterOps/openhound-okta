@@ -2226,6 +2226,10 @@ def policy_types():
         "PROFILE_ENROLLMENT",
         "POST_AUTH_SESSION",
         "ENTITY_RISK",
+        "SESSION_VIOLATION_DETECTION",
+        "CLIENT_UPDATE",
+        # Early Access; orgs without the feature answer 400 for this type.
+        "IDENTITY_CLAIM_SOURCING",
     ]
     for policy_type in okta_policies:
         yield {"policy_type": policy_type}
