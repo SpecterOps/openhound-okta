@@ -2,7 +2,7 @@
   "schema": {
     "name": "SOOkta",
     "display_name": "Okta Extension (by SpecterOps)",
-    "version": "v2.9.0",
+    "version": "v2.10.0",
     "namespace": "Okta"
   },
   "node_kinds": [
