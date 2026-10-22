@@ -23,7 +23,7 @@ sync:
 
 skills:
     @echo "Installing shared agent skills"
-    npx skills add https://github.com/SpecterOps/og-docs-automation --skill '*' --agent codex claude-code --project --yes
+    npx skills add https://github.com/SpecterOps/og-automation --skill '*' --agent codex claude-code --project --yes
     npx skills add https://github.com/SpecterOps/openhound-template --skill '*' --agent codex claude-code --project --yes
 
 db:

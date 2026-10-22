@@ -1,5 +1,7 @@
 {
-  "name": "Okta: Application Assignments",
+  "query_key": "Okta_app_assignments",
+  "name": "Application Assignments",
   "description": "List all application assignments.",
-  "query": "MATCH path = (:Okta_Organization)-[:Okta_Contains]->(:Okta)-[:Okta_AppAssignment]->(:Okta_Application)\nRETURN path\nLIMIT 1000"
+  "query": "MATCH path = (:Okta_Organization)-[:Okta_Contains]->(:Okta)-[:Okta_AppAssignment]->(:Okta_Application)\nRETURN path\nLIMIT 1000",
+  "category": "Tenant Information"
 }
