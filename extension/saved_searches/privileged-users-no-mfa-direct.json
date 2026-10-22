@@ -1,5 +1,7 @@
 {
-  "name": "Okta: Privileged Users without MFA (Direct)",
+  "query_key": "Okta_privileged_users_no_mfa_direct",
+  "name": "Privileged Users without MFA (Direct)",
   "description": "Finds users who do not have multi-factor authentication enabled and directly hold privileged role assignments.",
-  "query": "MATCH path = (user:Okta_User)-[:Okta_HasRoleAssignment]->(:Okta_RoleAssignment)-[:Okta_ScopedTo]->(:Okta)\nWHERE user.authentication_factors = 0\nRETURN path\nLIMIT 1000"
+  "query": "MATCH path = (user:Okta_User)-[:Okta_HasRoleAssignment]->(:Okta_RoleAssignment)-[:Okta_ScopedTo]->(:Okta)\nWHERE user.authentication_factors = 0\nRETURN path\nLIMIT 1000",
+  "category": "Okta Hygiene"
 }
