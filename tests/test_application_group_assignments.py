@@ -10,12 +10,12 @@ from openhound_okta.main import preprocessing_resources
 from openhound_okta.models.group_assigned_apps import GroupAssignedApp
 from openhound_okta.source import (
     APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE,
-    OktaTokenCredentials,
     application_group_assignment_rows,
     applications,
     group_assigned_apps,
     source,
 )
+from openhound_okta.utils.auth import OktaTokenCredentials
 
 
 class RecordingPool:

@@ -60,15 +60,81 @@ Follow the OpenHound docs to get started:
 
 - [OpenHound Documentation](https://bloodhound.specterops.io/openhound/overview)
 
-## OAuth app authentication behavior
+## Authentication
 
-When the collector uses Okta OAuth app credentials, it shares one bearer token across endpoint clients and refreshes
-that token before it expires. Long-running collections can therefore continue across the Okta access-token lifetime
-without failing active resource pagination. If a transient proactive refresh fails while the current token is still
-valid, the collector temporarily keeps using that token and suppresses repeated refresh attempts for a short cooldown.
-If Okta rejects a bearer token with HTTP 401, the collector retries once for stale, invalid, or unknown token responses
-while preserving the current token for known non-token authorization failures. Classic SSWS API token authentication
-remains static.
+The collector supports three Okta authentication methods. Configure exactly one of them in `.dlt/secrets.toml` or
+through the equivalent environment variables.
+
+### Private key (JWT) authentication
+
+An OAuth 2.0 service app whose client authentication is set to public key / private key.
+The private key is a JWK in JSON form, supplied either as a file path or base64-encoded:
+
+```toml
+[sources.source.okta.credentials]
+base_url = "https://<tenant>.okta.com"
+client_id = "<client-id>"
+private_key_path = "<path-to-jwk.json>"
+# Or, instead of private_key_path:
+# private_key_b64 = "<base64-encoded-jwk-json>"
+```
+
+For environment-only deployments, use the equivalent variables:
+
+```text
+SOURCES__SOURCE__OKTA__CREDENTIALS__BASE_URL=https://<tenant>.okta.com
+SOURCES__SOURCE__OKTA__CREDENTIALS__CLIENT_ID=<client-id>
+SOURCES__SOURCE__OKTA__CREDENTIALS__PRIVATE_KEY_PATH=<path-to-jwk.json>
+# Or, instead of PRIVATE_KEY_PATH:
+# SOURCES__SOURCE__OKTA__CREDENTIALS__PRIVATE_KEY_B64=<base64-encoded-jwk-json>
+```
+
+### Client secret authentication
+
+A service app whose client authentication is set to client secret, or an Okta Integration Network (OIN) API Service
+Integration:
+
+```toml
+[sources.source.okta.credentials]
+base_url = "https://<tenant>.okta.com"
+client_id = "<client-id>"
+client_secret = "<client-secret>"
+```
+
+For environment-only deployments, use the equivalent variables:
+
+```text
+SOURCES__SOURCE__OKTA__CREDENTIALS__BASE_URL=https://<tenant>.okta.com
+SOURCES__SOURCE__OKTA__CREDENTIALS__CLIENT_ID=<client-id>
+SOURCES__SOURCE__OKTA__CREDENTIALS__CLIENT_SECRET=<client-secret>
+```
+
+### API token (SSWS) authentication
+
+A classic API token, also called an SSWS token. Such tokens are user-specific and act with the permissions of the
+administrator they were issued to:
+
+```toml
+[sources.source.okta.credentials]
+base_url = "https://<tenant>.okta.com"
+token = "<api-token>"
+```
+
+For environment-only deployments, use the equivalent variables:
+
+```text
+SOURCES__SOURCE__OKTA__CREDENTIALS__BASE_URL=https://<tenant>.okta.com
+SOURCES__SOURCE__OKTA__CREDENTIALS__TOKEN=<api-token>
+```
+
+### Bearer token lifecycle
+
+With private key or client secret authentication, the collector uses the respective secret to fetch an OAuth 2.0
+bearer token and refreshes that token before it expires, so long-running collections continue across the Okta access
+token lifetime. If a refresh fails while the current token is
+still valid, the collector keeps using that token and retries the refresh after a short cooldown. If Okta rejects a
+bearer token, the collector retries the request with a fresh token, unless the response shows the
+failure is unrelated to the token.
 
 ## Rate-limit behavior
 

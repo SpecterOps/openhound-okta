@@ -14,7 +14,12 @@ from dlt.sources.helpers.rest_client.paginators import HeaderLinkPaginator
 from dlt.sources.helpers.rest_client.auth import APIKeyAuth
 from dlt.sources.helpers.requests.session import Session
 
-from openhound_okta.models.token import Token
+from openhound_okta.utils.auth import (
+    OktaCredentials,
+    OktaTokenCredentials,
+    Token,
+    classify_unauthorized,
+)
 from openhound_okta.source import (
     API_RATE_LIMIT_ENDPOINTS,
     APPLICATIONS_PAGE_SIZE,
@@ -26,12 +31,10 @@ from openhound_okta.source import (
     IDENTITY_PROVIDER_USERS_PAGE_SIZE,
     ClientPool,
     ConsecutiveAccessDeniedBreaker,
-    OktaTokenCredentials,
     _microsoft_tenant_id_from_onmicrosoft_domain,
     _office365_tenant_id_fields,
     _saml_idp_metadata_fields,
     _saml_metadata_fields,
-    _tenant_domain_from_base_url,
     api_services,
     application_grants,
     application_group_assignment_rows,
@@ -80,10 +83,11 @@ class FakeClock:
 
 
 def test_tenant_domain_uses_hostname_without_port_or_user_info():
-    assert (
-        _tenant_domain_from_base_url("https://user:secret@MIXED.Example:443/api/v1")
-        == "mixed.example"
+    credentials = OktaCredentials(
+        base_url="https://user:secret@MIXED.Example:443/api/v1"
     )
+
+    assert credentials.tenant_domain == "mixed.example"
 
 
 @pytest.mark.parametrize(
@@ -98,7 +102,12 @@ def test_tenant_domain_uses_hostname_without_port_or_user_info():
 )
 def test_tenant_domain_rejects_urls_without_scheme_or_hostname(base_url):
     with pytest.raises(ValueError, match="URL scheme and hostname"):
-        _tenant_domain_from_base_url(base_url)
+        OktaCredentials(base_url=base_url).tenant_domain
+
+
+def test_tenant_domain_rejects_plain_http():
+    with pytest.raises(ValueError, match="https"):
+        OktaCredentials(base_url="http://preview.example").tenant_domain
 
 
 def _response(
@@ -641,7 +650,7 @@ def test_401_classification_uses_oauth_challenges_and_okta_error_codes(
         content=content,
     )
 
-    assert OktaRESTClient._classify_unauthorized(response) is expected
+    assert classify_unauthorized(response) is expected
 
 
 def test_401_bearer_refresh_retry_is_bounded_to_once():

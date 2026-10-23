@@ -1,6 +1,5 @@
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import urlparse
 
 import dlt
 from dlt.common.configuration import inject_section, resolve_configuration
@@ -14,6 +13,7 @@ from openhound.core.preproc import PreProcContext
 from openhound_okta.lookup import OktaLookup
 from openhound_okta.telemetry import TelemetrySettings, build_telemetry
 from openhound_okta.transforms import transforms
+from openhound_okta.utils.auth import OktaCredentials
 
 app = OpenHound("okta", help="OpenGraph collector for Okta")
 
@@ -59,26 +59,25 @@ def _extract_performance_settings_from_source(
 
 
 def _tenant_domain_from_config() -> str:
-    # DLT resolves source environment variables under sources.okta, while existing
-    # secrets.toml bundles use sources.source.okta. Check both so a missing value
-    # cannot become b"" and leak DLT's U+F02B bytes marker into tenant_domain.
-    tenant_url: str | None = dlt.secrets.get(
+    """Derive the tenant domain from the configured Okta base URL.
+
+    DLT resolves source environment variables under sources.okta, while existing
+    secrets.toml bundles use sources.source.okta, so both keys are checked. The
+    URL itself is validated by the credentials spec, which keeps a single rule
+    for what a usable Okta base URL is.
+
+    Returns:
+        The case-folded hostname of the Okta org.
+
+    Raises:
+        ValueError: No base URL is configured, or it is not a valid HTTPS URL.
+    """
+    base_url: str | None = dlt.secrets.get(
         "sources.okta.credentials.base_url"
     ) or dlt.secrets.get("sources.source.okta.credentials.base_url")
-    if not isinstance(tenant_url, str) or not tenant_url.strip():
-        raise ValueError("Okta base URL is unavailable during conversion")
-
-    try:
-        parsed = urlparse(tenant_url.strip())
-        _ = parsed.port
-        tenant_domain = parsed.hostname
-    except ValueError as error:
-        raise ValueError(
-            "Okta base URL must include a URL scheme and hostname"
-        ) from error
-    if not parsed.scheme or not tenant_domain:
-        raise ValueError("Okta base URL must include a URL scheme and hostname")
-    return tenant_domain.casefold()
+    if not isinstance(base_url, str) or not base_url.strip():
+        raise ValueError("Okta base URL must be configured and use HTTPS")
+    return OktaCredentials(base_url=base_url).tenant_domain
 
 
 @app.collect()
