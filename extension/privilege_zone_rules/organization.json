@@ -1,4 +1,5 @@
 {
+  "key": "Okta_organization",
   "name": "Okta: Organization",
   "description": "Organization nodes in Okta.",
   "cypher": "MATCH (n:Okta_Organization)\nRETURN n",

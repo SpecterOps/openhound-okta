@@ -1,23 +1,59 @@
 {
   "version": 1,
   "skills": {
+    "enterprise-opengraph-extension": {
+      "source": "SpecterOps/og-automation",
+      "sourceType": "github",
+      "skillPath": "skills/enterprise-opengraph-extension/SKILL.md",
+      "computedHash": "27b32f248fa663087eaa3ee6cf45de65f03cb069e6eb5124b94415f328a6cda2"
+    },
+    "opengraph-abuse-tooling": {
+      "source": "SpecterOps/og-automation",
+      "sourceType": "github",
+      "skillPath": "skills/opengraph-abuse-tooling/SKILL.md",
+      "computedHash": "0ac26f23fb147992ffa041a64a35a952f73af5fbeab4a36f844d288ab06133b1"
+    },
+    "opengraph-bundles": {
+      "source": "SpecterOps/og-automation",
+      "sourceType": "github",
+      "skillPath": "skills/opengraph-bundles/SKILL.md",
+      "computedHash": "00b55f1b41d6c1833f9611867993fb14838d32b9b8ee76ea60aead7e24a1791c"
+    },
+    "opengraph-documentation": {
+      "source": "SpecterOps/og-automation",
+      "sourceType": "github",
+      "skillPath": "skills/opengraph-documentation/SKILL.md",
+      "computedHash": "5b6b049a587b49eafe73de2f1a8591a85c35cc04ac5348b74ebaf9bdde7a8135"
+    },
+    "opengraph-edge-docs": {
+      "source": "SpecterOps/og-automation",
+      "sourceType": "github",
+      "skillPath": "skills/opengraph-edge-docs/SKILL.md",
+      "computedHash": "a0b487578111bdaf632a6b67f894ff9ec156ebd81b01bf3c2d7784a8d9773cc4"
+    },
+    "opengraph-entity-panels": {
+      "source": "SpecterOps/og-automation",
+      "sourceType": "github",
+      "skillPath": "skills/opengraph-entity-panels/SKILL.md",
+      "computedHash": "cfb190895ad9dac1a23302d40dd3c14455ae7618bab2e189d2d574dc0a32bacf"
+    },
+    "opengraph-research": {
+      "source": "SpecterOps/og-automation",
+      "sourceType": "github",
+      "skillPath": "skills/opengraph-research/SKILL.md",
+      "computedHash": "7ebce9a9cc719b51a972bf3923d3a116e0d1f848ab318478aa6184450a60ffcc"
+    },
     "openhound": {
       "source": "SpecterOps/openhound-template",
       "sourceType": "github",
       "skillPath": "{{ cookiecutter.project_slug }}/.agents/skills/openhound/SKILL.md",
       "computedHash": "c12933d92051ef0a4b655758fcc049e6261d3dca430be766f5b038031e277bb1"
     },
-    "openhound-edge-docs": {
-      "source": "SpecterOps/og-docs-automation",
+    "openhound-repo-permissions": {
+      "source": "SpecterOps/og-automation",
       "sourceType": "github",
-      "skillPath": "skills/openhound-edge-docs/SKILL.md",
-      "computedHash": "82321f5516baaf32c4bf14cafe581a4a1598759b643ab40d753f34c4b72576fb"
-    },
-    "openhound-entity-panels": {
-      "source": "SpecterOps/og-docs-automation",
-      "sourceType": "github",
-      "skillPath": "skills/openhound-entity-panels/SKILL.md",
-      "computedHash": "bba91aa73406e55731d9b057a77e20f4d57694375d02e17c1e68ddb7675f3335"
+      "skillPath": "skills/openhound-repo-permissions/SKILL.md",
+      "computedHash": "b9bfeeee5e578daea83895e69df82e62135bf15dd98f1f3b37f8cb9c20e622db"
     }
   }
 }

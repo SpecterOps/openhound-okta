@@ -1,5 +1,7 @@
 {
-  "name": "Okta: Resource Set Membership",
+  "query_key": "Okta_resource_set_membership",
+  "name": "Resource Set Membership",
   "description": "Lists all resource sets and their direct and indirect members.",
-  "query": "MATCH path = (:Okta_Organization)-[:Okta_Contains]->(:Okta_ResourceSet)-[:Okta_ResourceSetContains|Okta_ResourceSetContainsMembersOf|Okta_ResourceSetContainsIndirect]->(:Okta)\nRETURN path\nLIMIT 1000"
+  "query": "MATCH path = (:Okta_Organization)-[:Okta_Contains]->(:Okta_ResourceSet)-[:Okta_ResourceSetContains|Okta_ResourceSetContainsMembersOf|Okta_ResourceSetContainsIndirect]->(:Okta)\nRETURN path\nLIMIT 1000",
+  "category": "Tenant Information"
 }

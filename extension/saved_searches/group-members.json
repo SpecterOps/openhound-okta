@@ -1,5 +1,7 @@
 {
-  "name": "Okta: Group Membership",
+  "query_key": "Okta_group_members",
+  "name": "Group Membership",
   "description": "Retrieves all group membership relationships.",
-  "query": "MATCH path = (:Okta_User)-[:Okta_MemberOf]->(:Okta_Group)\nRETURN path\nLIMIT 1000"
+  "query": "MATCH path = (:Okta_User)-[:Okta_MemberOf]->(:Okta_Group)\nRETURN path\nLIMIT 1000",
+  "category": "Tenant Information"
 }

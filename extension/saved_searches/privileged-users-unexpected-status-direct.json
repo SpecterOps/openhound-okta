@@ -1,5 +1,7 @@
 {
-  "name": "Okta: Privileged Users with Non-Active Status (Direct)",
+  "query_key": "Okta_privileged_users_unexpected_status_direct",
+  "name": "Privileged Users with Non-Active Status (Direct)",
   "description": "Finds users whose status is not ACTIVE and directly hold privileged role assignments, including deactivated, suspended, or provisioning-incomplete accounts.",
-  "query": "MATCH path = (user:Okta_User)-[:Okta_HasRoleAssignment]->(:Okta_RoleAssignment)-[:Okta_ScopedTo]->(:Okta)\nWHERE user.status <> \"ACTIVE\"\nRETURN path\nLIMIT 1000"
+  "query": "MATCH path = (user:Okta_User)-[:Okta_HasRoleAssignment]->(:Okta_RoleAssignment)-[:Okta_ScopedTo]->(:Okta)\nWHERE user.status <> \"ACTIVE\"\nRETURN path\nLIMIT 1000",
+  "category": "Okta Hygiene"
 }
