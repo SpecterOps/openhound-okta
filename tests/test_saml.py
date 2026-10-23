@@ -2058,8 +2058,12 @@ def test_saml_trusted_issuer_is_shared_by_entity_id_without_scalar_idp_owner():
     assert second_service_provider["issuer_id"] == expected_issuer_id
 
     first_edges = list(SamlServiceProvider.model_validate(first_service_provider).edges)
-    second_edges = list(SamlServiceProvider.model_validate(second_service_provider).edges)
-    first_trust = next(edge for edge in first_edges if edge.kind == ek.SAML_TRUSTS_ISSUER)
+    second_edges = list(
+        SamlServiceProvider.model_validate(second_service_provider).edges
+    )
+    first_trust = next(
+        edge for edge in first_edges if edge.kind == ek.SAML_TRUSTS_ISSUER
+    )
     second_trust = next(
         edge for edge in second_edges if edge.kind == ek.SAML_TRUSTS_ISSUER
     )
@@ -2105,21 +2109,15 @@ def test_saml_trusted_issuer_preserves_source_whitespace_in_identity():
 
     exact_row = saml_trusted_issuer_row(exact_idp, TEST_TENANT_DOMAIN)
     padded_row = saml_trusted_issuer_row(padded_idp, TEST_TENANT_DOMAIN)
-    padded_service_provider = saml_service_provider_row(
-        padded_idp, TEST_TENANT_DOMAIN
-    )
+    padded_service_provider = saml_service_provider_row(padded_idp, TEST_TENANT_DOMAIN)
 
     assert exact_row is not None
     assert padded_row is not None
     assert padded_service_provider is not None
     assert exact_row["entity_id"] == exact_issuer
     assert padded_row["entity_id"] == padded_issuer
-    assert exact_row["id"] == saml_trusted_issuer_id(
-        exact_issuer, TEST_TENANT_DOMAIN
-    )
-    assert padded_row["id"] == saml_trusted_issuer_id(
-        padded_issuer, TEST_TENANT_DOMAIN
-    )
+    assert exact_row["id"] == saml_trusted_issuer_id(exact_issuer, TEST_TENANT_DOMAIN)
+    assert padded_row["id"] == saml_trusted_issuer_id(padded_issuer, TEST_TENANT_DOMAIN)
     assert exact_row["id"] != padded_row["id"]
     assert padded_service_provider["issuer_id"] == padded_row["id"]
 
@@ -2476,7 +2474,16 @@ def test_saml_has_account_uses_inbound_idp_subject_template():
     )
 
 
-def test_saml_has_account_types_entra_object_id_from_resolved_link() -> None:
+@pytest.mark.parametrize(
+    "idp_url",
+    [
+        "https://login.microsoftonline.com/example/saml2",
+        "https://login.microsoftonline.us/31537af4-6d77-4bb9-a681-d2394888ea26/saml2",
+    ],
+)
+def test_saml_has_account_types_entra_object_id_from_resolved_link(
+    idp_url: str,
+) -> None:
     object_id = "10ce139c-c176-470e-98b7-a2467ed97576"
     idp_user = _idp_user(
         externalId=None,
@@ -2488,7 +2495,7 @@ def test_saml_has_account_types_entra_object_id_from_resolved_link() -> None:
             "subjectNameQualifier": "example.test",
             "msObjectIdentifier": object_id.upper(),
         },
-        idp_url="https://login.microsoftonline.com/example/saml2",
+        idp_url=idp_url,
         idp_subject_user_name_template="idpuser.email",
     )
 

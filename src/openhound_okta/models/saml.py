@@ -15,6 +15,7 @@ from openhound_okta.kinds import edges as ek
 from openhound_okta.kinds import nodes as nk
 from openhound_okta.main import app
 from openhound_okta.oin_routes import SamlRouteEvidence, resolve_oin_routes
+from openhound_okta.utils.entra_tenant import EntraTenantIdResolver
 
 
 SAML_CONTRACT_VERSION = "opengraph-saml-v0.3.0"
@@ -771,7 +772,11 @@ def saml_idp_user_identity_evidence(idp_user: Any) -> dict[str, list[str]]:
     )
     entra_object_ids: list[str] = []
     idp_url = _clean(getattr(idp_user, "idp_url", None))
-    if ms_object_identifier and idp_url and "microsoftonline.com" in idp_url.casefold():
+    if (
+        ms_object_identifier
+        and idp_url
+        and EntraTenantIdResolver.is_microsoft_login_url(idp_url)
+    ):
         try:
             entra_object_ids.append(str(UUID(ms_object_identifier)))
         except ValueError:

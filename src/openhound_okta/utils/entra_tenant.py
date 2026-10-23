@@ -170,18 +170,8 @@ class EntraTenantIdResolver:
             path segment is not a GUID (such as "common", a domain name, or a
             bare .../saml2).
         """
-        # An admin-configured IdP URL may be malformed; urlsplit raises on an
-        # unbalanced bracket in the host, which is no tenant-scoped URL either.
-        parts: SplitResult
-        try:
-            parts = urlsplit(url)
-        except ValueError:
-            return None
-
-        # Exact host match: the URL may point anywhere, and a suffix check
-        # would also accept a lookalike such as evilmicrosoftonline.com.
-        hostname: str | None = parts.hostname
-        if not hostname or hostname.lower() not in MICROSOFT_LOGIN_HOSTS:
+        parts: SplitResult | None = cls._split_microsoft_login_url(url)
+        if parts is None:
             return None
 
         # The tenant is the first path segment; it must be a GUID so that
@@ -196,6 +186,49 @@ class EntraTenantIdResolver:
         if not cls.TENANT_ID_PATTERN.fullmatch(tenant_id):
             return None
         return tenant_id
+
+    @classmethod
+    def is_microsoft_login_url(cls, url: str) -> bool:
+        """Report whether a URL points at one of MICROSOFT_LOGIN_HOSTS.
+
+        For consumers that only need to know an identity provider is
+        Entra-backed; the host alone decides, so a URL without a tenant id
+        path still qualifies.
+
+        Args:
+            url: Endpoint URL.
+
+        Returns:
+            True when the URL parses and its host is a Microsoft login host.
+        """
+        return cls._split_microsoft_login_url(url) is not None
+
+    @classmethod
+    def _split_microsoft_login_url(cls, url: str) -> SplitResult | None:
+        """Parse a URL, keeping it only when its host is a Microsoft login host.
+
+        Args:
+            url: Endpoint URL.
+
+        Returns:
+            The split URL, or None when it cannot be parsed or its host is not
+            one of MICROSOFT_LOGIN_HOSTS.
+        """
+        # An admin-configured IdP URL may be malformed; urlsplit raises on an
+        # unbalanced bracket in the host, which is no Microsoft URL either.
+        parts: SplitResult
+        try:
+            parts = urlsplit(url)
+        except ValueError:
+            return None
+
+        # Exact host match: the URL may point anywhere, and a suffix or
+        # substring check would also accept a lookalike such as
+        # evilmicrosoftonline.com.
+        hostname: str | None = parts.hostname
+        if not hostname or hostname.lower() not in MICROSOFT_LOGIN_HOSTS:
+            return None
+        return parts
 
     @classmethod
     def _domain_name(cls, msft_tenant: str) -> str:

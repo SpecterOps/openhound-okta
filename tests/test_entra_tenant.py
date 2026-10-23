@@ -152,3 +152,19 @@ def test_unresolvable_entra_tenant_is_looked_up_once(caplog):
 )
 def test_tenant_id_is_taken_from_tenant_scoped_microsoft_urls(url, expected_tenant_id):
     assert EntraTenantIdResolver.tenant_id_from_url(url) == expected_tenant_id
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://login.microsoftonline.com/example/saml2", True),
+        ("https://login.microsoftonline.com/common/oauth2/v2.0/authorize", True),
+        ("https://LOGIN.MICROSOFTONLINE.US/saml2", True),
+        (f"https://sts.windows.net/{TENANT_ID}/", True),
+        (f"https://evilmicrosoftonline.com/{TENANT_ID}/saml2", False),
+        ("https://example.okta.test/saml2", False),
+        ("https://login.microsoftonline.com]/saml2", False),
+    ],
+)
+def test_microsoft_login_urls_are_recognised_by_host_alone(url, expected):
+    assert EntraTenantIdResolver.is_microsoft_login_url(url) is expected
