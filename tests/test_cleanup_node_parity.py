@@ -158,7 +158,19 @@ def test_policy_parses_native_okta_payload():
     assert properties.created == datetime(2025, 10, 2, 9, 21, 35, tzinfo=UTC)
 
 
-def test_policy_type_collection_excludes_client_update_policy():
-    assert "CLIENT_UPDATE" not in {
-        policy_type["policy_type"] for policy_type in policy_types()
+def test_policy_type_collection_covers_every_documented_policy_type():
+    # Every value of the management API's PolicyType enum.
+    assert {policy_type["policy_type"] for policy_type in policy_types()} == {
+        "OKTA_SIGN_ON",
+        "PASSWORD",
+        "MFA_ENROLL",
+        "IDP_DISCOVERY",
+        "ACCESS_POLICY",
+        "DEVICE_SIGNAL_COLLECTION",
+        "PROFILE_ENROLLMENT",
+        "POST_AUTH_SESSION",
+        "ENTITY_RISK",
+        "SESSION_VIOLATION_DETECTION",
+        "CLIENT_UPDATE",
+        "IDENTITY_CLAIM_SOURCING",
     }

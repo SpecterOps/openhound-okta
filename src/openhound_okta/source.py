@@ -2239,13 +2239,36 @@ def policy_types():
 def policies(policy: dict, ctx: SourceContext):
     """DLT resource, fetches Okta policies via GET /policies.
 
+    A policy type the org does not support (for example an Early Access type
+    that is not enabled) answers 400; that type is logged as a warning and
+    skipped so the remaining types are still collected. Other HTTP errors
+    propagate.
+
     Yields:
         policy (Policy): Policy records.
     """
     policy_type = policy["policy_type"]
-    for page in ctx.pool.paginate("/api/v1/policies", params={"type": policy_type}):
-        for item in page:
-            yield item
+    try:
+        for page in ctx.pool.paginate("/api/v1/policies", params={"type": policy_type}):
+            for item in page:
+                yield item
+    except requests.HTTPError as e:
+        status_code = getattr(e.response, "status_code", None)
+        if status_code != 400:
+            raise
+        try:
+            # e.g. E0000002 "The request was not valid: Invalid policy type
+            # specified. Missing Required Feature Flag SUPPORT_FOR_REAUTH_WITH_EXTERNAL_IDP"
+            body = e.response.json()
+            detail = f"{body.get('errorCode')} {body.get('errorSummary')}"
+        except (ValueError, AttributeError):
+            detail = str(e)
+        logger.warning(
+            "Skipping policy type %s, which is not available in this org: %s",
+            policy_type,
+            detail,
+            extra={"resource": "policies", "phase": "collect"},
+        )
 
 
 @app.transformer(name="policy_mappings", columns=PolicyMapping, parallelized=True)
