@@ -44,6 +44,7 @@ from openhound_okta.source import (
     _group_page_sizes,
     groups,
     identity_provider_users,
+    policies,
     resources,
     source,
     user_role_assignment_rows,
@@ -2203,6 +2204,93 @@ def test_api_services_other_http_errors_propagate():
 
     with pytest.raises(requests.HTTPError):
         list(inspect.unwrap(api_services)(ctx))
+
+
+UNSUPPORTED_POLICY_TYPE_BODY = (
+    b'{"errorCode": "E0000002", "errorSummary": "The request was not valid: '
+    b"Invalid policy type specified. Missing Required Feature Flag "
+    b'SUPPORT_FOR_REAUTH_WITH_EXTERNAL_IDP", "errorLink": "E0000002", '
+    b'"errorId": "oae4OLpq_kFQduaoxFIOOvtKg", "errorCauses": []}'
+)
+
+
+class ScriptedPoliciesPool:
+    """Pool for the policies transformer: one scripted paginate reply.
+
+    Attributes:
+        action: An int raises an HTTPError with that status and ``error_body``;
+            a list is the single page of items yielded.
+        params: Query parameters of the last paginate call.
+    """
+
+    def __init__(self, action: ScriptedPoolAction, error_body: bytes = b"{}") -> None:
+        self.action = action
+        self.error_body = error_body
+        self.params: dict[str, str] | None = None
+
+    def paginate(self, path: str, **kwargs) -> Iterator[list[dict[str, str]]]:
+        self.params = kwargs.get("params")
+        if isinstance(self.action, int):
+            raise requests.HTTPError(
+                response=_response(
+                    self.action,
+                    f"https://example.okta.test{path}",
+                    content=self.error_body,
+                )
+            )
+        yield self.action
+
+
+def test_policies_skips_unavailable_policy_type_with_a_warning(caplog):
+    pool = ScriptedPoliciesPool(400, UNSUPPORTED_POLICY_TYPE_BODY)
+    ctx = SimpleNamespace(pool=pool)
+
+    with caplog.at_level(logging.WARNING):
+        rows = list(
+            inspect.unwrap(policies)({"policy_type": "IDENTITY_CLAIM_SOURCING"}, ctx)
+        )
+
+    assert rows == []
+    assert pool.params == {"type": "IDENTITY_CLAIM_SOURCING"}
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "Skipping policy type IDENTITY_CLAIM_SOURCING" in message
+        and "E0000002" in message
+        and "SUPPORT_FOR_REAUTH_WITH_EXTERNAL_IDP" in message
+        for message in messages
+    )
+    assert not any(record.levelno >= logging.ERROR for record in caplog.records)
+
+
+def test_policies_warning_falls_back_to_the_http_error_without_a_summary(caplog):
+    pool = ScriptedPoliciesPool(400, b"")
+    ctx = SimpleNamespace(pool=pool)
+
+    with caplog.at_level(logging.WARNING):
+        rows = list(inspect.unwrap(policies)({"policy_type": "CLIENT_UPDATE"}, ctx))
+
+    assert rows == []
+    assert any(
+        "Skipping policy type CLIENT_UPDATE" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_policies_yields_rows_for_supported_policy_type():
+    pool = ScriptedPoliciesPool([{"id": "rst1", "type": "ACCESS_POLICY"}])
+    ctx = SimpleNamespace(pool=pool)
+
+    rows = list(inspect.unwrap(policies)({"policy_type": "ACCESS_POLICY"}, ctx))
+
+    assert rows == [{"id": "rst1", "type": "ACCESS_POLICY"}]
+
+
+def test_policies_other_http_errors_propagate():
+    pool = ScriptedPoliciesPool(403)
+    ctx = SimpleNamespace(pool=pool)
+
+    with pytest.raises(requests.HTTPError):
+        list(inspect.unwrap(policies)({"policy_type": "ACCESS_POLICY"}, ctx))
 
 
 def test_application_secrets_skips_applications_without_credentials():

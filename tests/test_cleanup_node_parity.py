@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from openhound_okta.models import AuthServer, IdentityProvider, Policy, Realm
 from openhound_okta.source import policy_types
 
@@ -125,7 +127,51 @@ def test_authorization_server_policy_and_realm_emit_native_property_names():
     assert not hasattr(realm.as_node.properties, "realm_type")
 
 
-def test_policy_type_collection_excludes_client_update_policy():
-    assert "CLIENT_UPDATE" not in {
-        policy_type["policy_type"] for policy_type in policy_types()
+def test_policy_parses_native_okta_payload():
+    # Shape of a GET /api/v1/policies item as returned by Okta; `conditions` is
+    # the native key (an object or null), not `condition`.
+    policy = attach_context(
+        Policy.model_validate(
+            {
+                "id": "rstw0o8ijtDUPgM4W697",
+                "status": "ACTIVE",
+                "name": "Okta Admin Console",
+                "priority": 1,
+                "system": False,
+                "conditions": None,
+                "created": "2025-10-02T09:21:35.000Z",
+                "lastUpdated": "2025-10-02T09:21:35.000Z",
+                "_links": {
+                    "self": {"href": "https://example.okta.com/api/v1/policies/x"}
+                },
+                "_embedded": {"resourceType": "APP"},
+                "type": "ACCESS_POLICY",
+            }
+        )
+    )
+
+    assert policy.conditions is None
+    assert not hasattr(policy, "condition")
+    assert policy.created == datetime(2025, 10, 2, 9, 21, 35, tzinfo=UTC)
+    properties = policy.as_node.properties
+    assert properties.priority == 1
+    assert properties.system is False
+    assert properties.created == datetime(2025, 10, 2, 9, 21, 35, tzinfo=UTC)
+
+
+def test_policy_type_collection_covers_every_documented_policy_type():
+    # Every value of the management API's PolicyType enum.
+    assert {policy_type["policy_type"] for policy_type in policy_types()} == {
+        "OKTA_SIGN_ON",
+        "PASSWORD",
+        "MFA_ENROLL",
+        "IDP_DISCOVERY",
+        "ACCESS_POLICY",
+        "DEVICE_SIGNAL_COLLECTION",
+        "PROFILE_ENROLLMENT",
+        "POST_AUTH_SESSION",
+        "ENTITY_RISK",
+        "SESSION_VIOLATION_DETECTION",
+        "CLIENT_UPDATE",
+        "IDENTITY_CLAIM_SOURCING",
     }

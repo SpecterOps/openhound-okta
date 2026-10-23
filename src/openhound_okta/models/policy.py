@@ -54,7 +54,7 @@ class Policy(BaseAsset):
     system: bool | None = None
     description: str | None = None
     created: datetime
-    condition: str | None = None
+    conditions: dict | None = None
 
     @property
     def as_node(self):

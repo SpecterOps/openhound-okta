@@ -60,13 +60,10 @@ OKTA_ORG2ORG_APP: Final[str] = "okta_org2org"
 APPLICATION_USER_ITEM_SKIPPED_KEYS: Final[frozenset[str]] = frozenset(
     {
         "created",
-        "activated",
-        "lastLogin",
         "lastUpdated",
         "passwordChanged",
         "statusChanged",
         "lastSync",
-        "realmId",
         "_links",
         "_embedded",
     }
@@ -107,29 +104,15 @@ APPLICATION_USER_PROFILE_SKIPPED_KEYS: Final[frozenset[str]] = frozenset(
 )
 
 
-class Provider(BaseModel):
-    """Credential provider of an application user.
-
-    Attributes:
-        name: Provider name, for example OKTA.
-        type: Provider type.
-    """
-
-    name: str
-    type: str
-
-
 class Credentials(BaseModel):
     """Application credentials of the assignment.
 
     Attributes:
-        provider: Credential provider of the assignment.
         username: User name in the application; the hybrid-auth and SAML
             edges match external accounts on it.
     """
 
     model_config = ConfigDict(populate_by_name=True)
-    provider: Provider | None = None
     username: str | None = Field(default=None, alias="userName")
 
 
@@ -382,11 +365,8 @@ class ApplicationUser(BaseAsset):
     # Remaining attributes of the upstream assignment. Not collected; see the
     # module comment above.
     # created: datetime
-    # activated: datetime | None = None
-    # last_login: datetime | None = Field(default=None, alias="lastLogin")
     # last_updated: datetime | None = Field(default=None, alias="lastUpdated")
     # password_changed: datetime | None = Field(default=None, alias="passwordChanged")
-    # realm_id: str | None = Field(default=None, alias="realmId")
 
     @property
     def as_node(self) -> None:
