@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Final
 from urllib.parse import urlparse
 
 from openhound.core.models.entries_dataclass import (
@@ -8,27 +9,18 @@ from openhound.core.models.entries_dataclass import (
     PropertyMatch,
 )
 
+from openhound_okta.app_names import AppName
 from openhound_okta.kinds import edges as ek, nodes as nk
 
-ACTIVE_DIRECTORY_APP = "active_directory"
-LDAP_INTERFACE_APP = "ldap_interface"
-OKTA_ORG2ORG_APP = "okta_org2org"
-JAMF_SAML_APP = "jamfsoftwareserver"
-JAMF_SWA_APP = "casper"
-GITHUB_CLOUD_APP = "githubcloud"
-ONE_PASSWORD_BUSINESS_APP = "1password_business"
-SNOWFLAKE_APP = "snowflake"
-OFFICE365_APP = "office365"
-
-SUPPORTED_HYBRID_AUTH_APPS = frozenset(
+SUPPORTED_HYBRID_AUTH_APPS: Final[frozenset[str]] = frozenset(
     {
-        OKTA_ORG2ORG_APP,
-        JAMF_SAML_APP,
-        JAMF_SWA_APP,
-        GITHUB_CLOUD_APP,
-        ONE_PASSWORD_BUSINESS_APP,
-        SNOWFLAKE_APP,
-        OFFICE365_APP,
+        AppName.OKTA_ORG2ORG,
+        AppName.JAMF_SAML,
+        AppName.JAMF_SWA,
+        AppName.GITHUB_CLOUD,
+        AppName.ONE_PASSWORD_BUSINESS,
+        AppName.SNOWFLAKE,
+        AppName.OFFICE365,
     }
 )
 
@@ -147,7 +139,7 @@ def hybrid_application_edge_kind(
     *,
     is_service: bool = False,
 ) -> str | None:
-    if app_name in {ACTIVE_DIRECTORY_APP, LDAP_INTERFACE_APP} or is_service:
+    if app_name in {AppName.ACTIVE_DIRECTORY, AppName.LDAP_INTERFACE} or is_service:
         return None
     if is_saml_application(sign_on_mode) or is_oidc_application(sign_on_mode):
         return ek.OUTBOUND_ORG_SSO
@@ -174,9 +166,9 @@ def outbound_trust_target(
 ) -> HybridTarget | None:
     settings = app_settings or {}
 
-    if app_name == OKTA_ORG2ORG_APP:
+    if app_name == AppName.OKTA_ORG2ORG:
         return HybridTarget.by_id(nk.IDP, _uppercase_match_value(settings.get("idpId")))
-    if app_name in {JAMF_SAML_APP, JAMF_SWA_APP}:
+    if app_name in {AppName.JAMF_SAML, AppName.JAMF_SWA}:
         domain = settings.get("domain")
         if _is_missing_match_value(domain):
             return None
@@ -184,23 +176,25 @@ def outbound_trust_target(
             nk.JAMF_SSO_INTEGRATION,
             _uppercase_match_value(f"{domain}-SSO"),
         )
-    if app_name == GITHUB_CLOUD_APP:
+    if app_name == AppName.GITHUB_CLOUD:
         return HybridTarget.by_name(nk.GITHUB_ORGANIZATION, settings.get("githubOrg"))
-    if app_name == ONE_PASSWORD_BUSINESS_APP:
-        domain = one_password_domain(settings.get("subDomain"), settings.get("regionType"))
+    if app_name == AppName.ONE_PASSWORD_BUSINESS:
+        domain = one_password_domain(
+            settings.get("subDomain"), settings.get("regionType")
+        )
         if not domain:
             return None
         return HybridTarget.by_properties(
             nk.ONE_PASSWORD_ACCOUNT,
             (("domain", domain),),
         )
-    if app_name == SNOWFLAKE_APP:
+    if app_name == AppName.SNOWFLAKE:
         sub_domain = settings.get("subDomain")
         return HybridTarget.by_id(
             nk.SNOWFLAKE_ACCOUNT,
             sub_domain.upper() if sub_domain is not None else None,
         )
-    if app_name == OFFICE365_APP:
+    if app_name == AppName.OFFICE365:
         return HybridTarget.by_id(
             nk.AZ_TENANT,
             _uppercase_match_value(settings.get("microsoftTenantId")),
@@ -217,14 +211,14 @@ def hybrid_user_target(
 ) -> HybridTarget | None:
     settings = app_settings or {}
 
-    if app_name == OKTA_ORG2ORG_APP:
+    if app_name == AppName.OKTA_ORG2ORG:
         return HybridTarget.by_id(nk.USER, _uppercase_match_value(external_id))
-    if app_name in {JAMF_SAML_APP, JAMF_SWA_APP}:
+    if app_name in {AppName.JAMF_SAML, AppName.JAMF_SWA}:
         return HybridTarget.by_properties(
             nk.JAMF_ACCOUNT,
             (("email", target_user_name), ("domainName", settings.get("domain"))),
         )
-    if app_name == GITHUB_CLOUD_APP:
+    if app_name == AppName.GITHUB_CLOUD:
         return HybridTarget.by_properties(
             nk.GITHUB_USER,
             (
@@ -232,7 +226,7 @@ def hybrid_user_target(
                 ("environment_name", settings.get("githubOrg")),
             ),
         )
-    if app_name == ONE_PASSWORD_BUSINESS_APP:
+    if app_name == AppName.ONE_PASSWORD_BUSINESS:
         account_name = one_password_domain(
             settings.get("subDomain"), settings.get("regionType")
         )
@@ -245,14 +239,14 @@ def hybrid_user_target(
                 ("account_name", account_name),
             ),
         )
-    if app_name == SNOWFLAKE_APP:
+    if app_name == AppName.SNOWFLAKE:
         sub_domain = settings.get("subDomain")
         if sub_domain is None or target_user_name is None:
             return None
         return HybridTarget.by_id(
             nk.SNOWFLAKE_USER, f"{sub_domain}.{target_user_name}".upper()
         )
-    if app_name == OFFICE365_APP:
+    if app_name == AppName.OFFICE365:
         return HybridTarget.by_properties(
             nk.AZ_USER,
             (
@@ -273,7 +267,7 @@ def hybrid_group_target(
 
     settings = app_settings or {}
 
-    if app_name == ACTIVE_DIRECTORY_APP:
+    if app_name == AppName.ACTIVE_DIRECTORY:
         return HybridTarget.by_properties(
             nk.AD_GROUP,
             (
@@ -281,7 +275,7 @@ def hybrid_group_target(
                 ("domain", settings.get("namingContext")),
             ),
         )
-    if app_name == OKTA_ORG2ORG_APP:
+    if app_name == AppName.OKTA_ORG2ORG:
         return HybridTarget.by_properties(
             nk.GROUP,
             (
@@ -289,7 +283,7 @@ def hybrid_group_target(
                 ("okta_domain", okta_org2org_domain(settings.get("baseUrl"))),
             ),
         )
-    if app_name == OFFICE365_APP:
+    if app_name == AppName.OFFICE365:
         return HybridTarget.by_properties(
             nk.AZ_GROUP,
             (

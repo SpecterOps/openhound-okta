@@ -23,6 +23,7 @@ from dlt.sources.helpers.rest_client.client import RESTClient
 from dlt.sources.helpers.rest_client.paginators import HeaderLinkPaginator
 
 from .main import app
+from .models.application_users import ALWAYS_COLLECTED_APP_USERS
 from .models import (
     Agent,
     AgentPool,
@@ -1850,6 +1851,26 @@ def application_user_rows(application: Application, ctx: SourceContext):
     )
 
 
+def app_user_collection_filter(
+    app_ids: frozenset[str],
+) -> Callable[[Application], bool]:
+    """Build the DLT item filter applied when application-user collection is limited.
+
+    Args:
+        app_ids: Okta application IDs collected in addition to ALWAYS_COLLECTED_APP_USERS.
+
+    Returns:
+        Predicate that keeps applications whose name is always collected or whose ID is listed.
+    """
+
+    def collects_app_users(application: Application) -> bool:
+        return (
+            application.name in ALWAYS_COLLECTED_APP_USERS or application.id in app_ids
+        )
+
+    return collects_app_users
+
+
 @app.transformer(
     name="saml_federation_providers",
     columns=SamlFederationProvider,
@@ -2520,6 +2541,8 @@ def source(
     ),
     group_push_mappings_page_size: int = GROUP_PUSH_MAPPINGS_PAGE_SIZE,
     identity_provider_users_page_size: int = IDENTITY_PROVIDER_USERS_PAGE_SIZE,
+    limit_app_user_collection: bool = False,
+    app_user_collection_app_ids: list[str] | None = None,
     endpoint_concurrency: int = DEFAULT_ENDPOINT_CONCURRENCY,
     org_concurrency: int = DEFAULT_ORG_CONCURRENCY,
     rate_limit_max_elapsed_seconds: float = DEFAULT_RATE_LIMIT_MAX_ELAPSED_SECONDS,
@@ -2536,6 +2559,10 @@ def source(
         application_group_assignments_page_size: Groups requested per application page.
         group_push_mappings_page_size: Mappings requested per group-push page.
         identity_provider_users_page_size: Users requested per identity-provider page.
+        limit_app_user_collection: Collect application users only for the app types in
+            ALWAYS_COLLECTED_APP_USERS and the applications in app_user_collection_app_ids.
+        app_user_collection_app_ids: Additional Okta application IDs whose users are collected
+            when limit_app_user_collection is enabled.
         endpoint_concurrency: Maximum simultaneous requests for each endpoint family.
         org_concurrency: Maximum simultaneous requests across all endpoint families.
         rate_limit_max_elapsed_seconds: Maximum retry window for an individual 429 request.
@@ -2596,6 +2623,8 @@ def source(
             ),
             "group_push_mappings_page_size": group_push_mappings_page_size,
             "identity_provider_users_page_size": identity_provider_users_page_size,
+            "limit_app_user_collection": limit_app_user_collection,
+            "app_user_collection_app_id_count": len(app_user_collection_app_ids or ()),
             "endpoint_concurrency": endpoint_concurrency,
             "org_concurrency": org_concurrency,
             "rate_limit_max_elapsed_seconds": rate_limit_max_elapsed_seconds,
@@ -2641,6 +2670,12 @@ def source(
     privileged_users_resource = privileged_users(ctx)
     factor_claims = UserFactorClaims()
     group_memberships_resource = groups_resource | group_memberships(ctx)
+    application_users_resource = applications_resource | application_users(ctx)
+    if limit_app_user_collection:
+        application_users_resource.add_filter(
+            app_user_collection_filter(frozenset(app_user_collection_app_ids or ())),
+            insert_at=0,
+        )
     return (
         organization(ctx),
         users_resource,
@@ -2653,7 +2688,7 @@ def source(
         applications_resource,
         applications_resource | group_assigned_apps(ctx),
         applications_resource | application_grants(ctx),
-        applications_resource | application_users(ctx),
+        application_users_resource,
         applications_resource | saml_federation_providers(),
         applications_resource | saml_issuers(),
         applications_resource | saml_assertion_consumer_services(),

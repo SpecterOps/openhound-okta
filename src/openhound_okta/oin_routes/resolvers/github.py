@@ -1,6 +1,8 @@
 from collections.abc import Mapping
 from typing import Any
 
+from openhound_okta.app_names import AppName
+
 from ..contract import (
     CallableRouteProvider,
     OinRouteResolution,
@@ -40,7 +42,7 @@ def _github_organization_route(
 
 GITHUB_ORGANIZATION_PROVIDER = CallableRouteProvider(
     profile_id="github_organization",
-    app_keys=("githubcloud",),
+    app_keys=(AppName.GITHUB_CLOUD,),
     app_fields=("githubOrg", "orgName"),
     resolver=_github_organization_route,
     evidence_references=("openhound_saml:os-0bef",),
