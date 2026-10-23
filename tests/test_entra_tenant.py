@@ -147,6 +147,7 @@ def test_unresolvable_entra_tenant_is_looked_up_once(caplog):
         (f"https://evilmicrosoftonline.com/{TENANT_ID}/saml2", None),
         (f"https://login.notmicrosoftonline.com/{TENANT_ID}/saml2", None),
         (f"https://portal.microsoftonline.com/{TENANT_ID}/saml2", None),
+        (f"https://login.microsoftonline.com]/{TENANT_ID}/saml2", None),
     ],
 )
 def test_tenant_id_is_taken_from_tenant_scoped_microsoft_urls(url, expected_tenant_id):

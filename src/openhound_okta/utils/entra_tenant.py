@@ -165,14 +165,21 @@ class EntraTenantIdResolver:
             url: Endpoint URL.
 
         Returns:
-            The lowercase tenant id GUID, or None when the host is not one of
-            MICROSOFT_LOGIN_HOSTS or the first path segment is not a GUID
-            (such as "common", a domain name, or a bare .../saml2).
+            The lowercase tenant id GUID, or None when the URL cannot be
+            parsed, the host is not one of MICROSOFT_LOGIN_HOSTS, or the first
+            path segment is not a GUID (such as "common", a domain name, or a
+            bare .../saml2).
         """
-        # Exact host match: an admin-configured IdP URL may point anywhere, and
-        # a suffix check would also accept a lookalike such as
-        # evilmicrosoftonline.com.
-        parts: SplitResult = urlsplit(url)
+        # An admin-configured IdP URL may be malformed; urlsplit raises on an
+        # unbalanced bracket in the host, which is no tenant-scoped URL either.
+        parts: SplitResult
+        try:
+            parts = urlsplit(url)
+        except ValueError:
+            return None
+
+        # Exact host match: the URL may point anywhere, and a suffix check
+        # would also accept a lookalike such as evilmicrosoftonline.com.
         hostname: str | None = parts.hostname
         if not hostname or hostname.lower() not in MICROSOFT_LOGIN_HOSTS:
             return None
