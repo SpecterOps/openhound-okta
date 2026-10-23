@@ -1,12 +1,13 @@
-from datetime import datetime
+from collections.abc import Iterator
+from typing import Any, Final
 
 from openhound.core.asset import BaseAsset, EdgeDef
-from openhound.core.models.entries_dataclass import Edge, EdgeProperties
-from openhound.core.models.entries_dataclass import EdgePath
+from openhound.core.models.entries_dataclass import Edge, EdgePath, EdgeProperties
 from pydantic import BaseModel, ConfigDict, Field
 
 from openhound_okta.graph import OktaOwnedEdgePath
-from openhound_okta.kinds import edges as ek, nodes as nk
+from openhound_okta.kinds import edges as ek
+from openhound_okta.kinds import nodes as nk
 from openhound_okta.main import app
 from openhound_okta.models.hybrid_auth import (
     HybridAuthEdgeProperties,
@@ -23,58 +24,165 @@ from openhound_okta.models.saml import (
 )
 
 # To ignore system apps optionally
-SYSTEM_APPS = [
-    "okta_oin_submission_tester_app",  # Okta OIN Submission Tester
-    "okta_access_requests_resource_catalog",  # Okta Identity Governance
-    "okta_enduser",  # Okta Dashboard
-    "okta_browser_plugin",  # Okta Browser Plugin
-    "active_directory",  # Active Directory, for which there are sync edges
-    "ldap_interface",  # LDAP Interface, similar to AD
-]
+SYSTEM_APPS: Final[frozenset[str]] = frozenset(
+    {
+        "okta_oin_submission_tester_app",  # Okta OIN Submission Tester
+        "okta_access_requests_resource_catalog",  # Okta Identity Governance
+        "okta_enduser",  # Okta Dashboard
+        "okta_browser_plugin",  # Okta Browser Plugin
+        "active_directory",  # Active Directory, for which there are sync edges
+        "ldap_interface",  # LDAP Interface, similar to AD
+    }
+)
 
-IGNORED_OUTBOUND_SYNC_APPS = {
-    "okta_flow_sso",  # Okta Workflows
-    "okta_atspoke_sso",  # Okta Access Requests
-}
+IGNORED_OUTBOUND_SYNC_APPS: Final[frozenset[str]] = frozenset(
+    {
+        "okta_flow_sso",  # Okta Workflows
+        "okta_atspoke_sso",  # Okta Access Requests
+    }
+)
 
-ACTIVE_DIRECTORY_APP = "active_directory"
-LDAP_INTERFACE_APP = "ldap_interface"
-OKTA_ORG2ORG_APP = "okta_org2org"
+ACTIVE_DIRECTORY_APP: Final[str] = "active_directory"
+LDAP_INTERFACE_APP: Final[str] = "ldap_interface"
+OKTA_ORG2ORG_APP: Final[str] = "okta_org2org"
+
+
+# Application user rows are one per assignment, so every attribute kept on
+# them is multiplied by millions in a large tenant. The application_users
+# transformer therefore skips the assignment keys (APPLICATION_USER_ITEM_SKIPPED_KEYS)
+# and profile attributes (APPLICATION_USER_PROFILE_SKIPPED_KEYS) that nothing
+# reads. Attributes that are NOT collected stay in the models below, commented
+# out, to document the upstream shape.
+
+# Keys of a GET /apps/{appId}/users item skipped at collection time: nothing
+# reads the timestamps, links or embedded user copies, and dropping them keeps
+# the largest collected table narrow. The profile is trimmed separately.
+APPLICATION_USER_ITEM_SKIPPED_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "created",
+        "activated",
+        "lastLogin",
+        "lastUpdated",
+        "passwordChanged",
+        "statusChanged",
+        "lastSync",
+        "realmId",
+        "_links",
+        "_embedded",
+    }
+)
+
+# Application user profile attributes skipped at collection time. Nothing
+# reads them, and the Entra licence assignments are large. Every other
+# attribute is kept because SAML claim mappings may reference it; department,
+# city and country are plausible appuser.* claim sources and so are kept too.
+# TODO: Instead of guessing, keep only the attributes the application's own
+# SAML attribute statements and NameID/user name templates reference, per app.
+APPLICATION_USER_PROFILE_SKIPPED_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "licenses",  # Assigned Office 365 licenses
+        "division",
+        "organization",
+        "costCenter",
+        "title",
+        "managerId",
+        "managerDn",
+        "honorificPrefix",
+        "honorificSuffix",
+        "middleName",
+        "nickName",
+        "primaryPhone",
+        "primaryPhoneType",
+        "addressType",
+        "streetAddress",
+        "locality",
+        "region",
+        "state",
+        "postalCode",
+        "countryCode",
+        "locale",
+        "preferredLanguage",
+        "timezone",
+    }
+)
 
 
 class Provider(BaseModel):
+    """Credential provider of an application user.
+
+    Attributes:
+        name: Provider name, for example OKTA.
+        type: Provider type.
+    """
+
     name: str
     type: str
 
 
 class Credentials(BaseModel):
+    """Application credentials of the assignment.
+
+    Attributes:
+        provider: Credential provider of the assignment.
+        username: User name in the application; the hybrid-auth and SAML
+            edges match external accounts on it.
+    """
+
     model_config = ConfigDict(populate_by_name=True)
     provider: Provider | None = None
     username: str | None = Field(default=None, alias="userName")
 
 
 class Profile(BaseModel):
+    """Application-specific user profile.
+
+    extra="allow" keeps attributes beyond the declared ones because SAML claim
+    mappings may reference any of them. Attributes listed in
+    APPLICATION_USER_PROFILE_SKIPPED_KEYS are not collected and stay commented
+    out below.
+
+    Attributes:
+        email: Email address pushed to or pulled from the application.
+        first_name: Given name.
+        last_name: Family name.
+        employee_number: Employee number.
+        user_type: User type.
+        login: Login in the application; NameID fallback.
+        dn: Active Directory distinguished name.
+        cn: Active Directory common name.
+        object_sid: Active Directory object SID; anchors the AD sync edges.
+        sam_account_name: Active Directory sAMAccountName.
+        immutable_id: Entra ID anchor of the assignment (Office 365 app).
+        initial_status: Set by Okta on users pushed to an Org2Org app; its
+            presence tells push from pull.
+        department: Department; a plausible SAML claim source.
+        city: City; a plausible SAML claim source.
+    """
+
     model_config = ConfigDict(populate_by_name=True, extra="allow")
     email: str | None = None
     first_name: str | None = Field(default=None, alias="firstName")
     last_name: str | None = Field(default=None, alias="lastName")
-    department: str | None = None
-    city: str | None = None
-    country_code: str | None = Field(default=None, alias="countryCode")
     employee_number: str | None = Field(default=None, alias="employeeNumber")
-    division: str | None = None
-    organization: str | None = None
-    title: str | None = None
     user_type: str | None = Field(default=None, alias="userType")
-    manager_id: str | None = Field(default=None, alias="managerId")
     login: str | None = None
-    state: str | None = None
     dn: str | None = None
-    manager_dn: str | None = Field(default=None, alias="managerDn")
     cn: str | None = None
     object_sid: str | None = Field(default=None, alias="objectSid")
     sam_account_name: str | None = Field(default=None, alias="samAccountName")
+    immutable_id: str | None = Field(default=None, alias="immutableId")
     initial_status: str | None = Field(default=None, alias="initialStatus")
+    department: str | None = None
+    city: str | None = None
+
+    # Not collected.
+    # country_code: str | None = Field(default=None, alias="countryCode")
+    # division: str | None = None
+    # organization: str | None = None
+    # title: str | None = None
+    # manager_id: str | None = Field(default=None, alias="managerId")
+    # state: str | None = None
+    # manager_dn: str | None = Field(default=None, alias="managerDn")
 
 
 @app.asset(
@@ -223,17 +331,36 @@ class Profile(BaseModel):
     ],
 )
 class ApplicationUser(BaseAsset):
+    """Assignment of an Okta user to an application.
+
+    Only the assignment keys the edges and lookups consume are collected; see
+    the module comment above.
+
+    Attributes:
+        id: Okta user ID of the assigned user.
+        profile: Application-specific user profile without the skipped
+            attributes.
+        status: Assignment status.
+        credentials: Application credentials, read for the target user name.
+        external_id: ID of the user in the external application.
+        app_id: Okta application ID.
+        app_features: Enabled provisioning features of the application.
+        app_name: Okta application name (OIN key).
+        app_status: Application status.
+        app_settings: Application settings, read by hybrid_user_target.
+        app_sign_on_mode: Application sign-on mode.
+        app_subject_name_id_template: SAML subject NameID template.
+        app_subject_name_id_format: SAML subject NameID format.
+        app_user_name_template: Application user name template.
+        scope: "USER" for direct assignments, "GROUP" for group assignments.
+        sync_state: Provisioning sync state of the assignment.
+    """
+
     model_config = ConfigDict(populate_by_name=True)
 
     id: str
-    created: datetime
-    activated: datetime | None = None
-    last_login: datetime | None = Field(default=None, alias="lastLogin")
-    last_updated: datetime | None = Field(default=None, alias="lastUpdated")
-    password_changed: datetime | None = Field(default=None, alias="passwordChanged")
     profile: Profile
     status: str
-    realm_id: str | None = Field(default=None, alias="realmId")
     credentials: Credentials | None = None
     external_id: str | None = Field(default=None, alias="externalId")
 
@@ -241,9 +368,8 @@ class ApplicationUser(BaseAsset):
     app_id: str
     app_features: list[str] = Field(default_factory=list)
     app_name: str
-    app_label: str
     app_status: str | None = None
-    app_settings: dict | None = None
+    app_settings: dict[str, Any] | None = None
     app_sign_on_mode: str | None = None
     app_subject_name_id_template: str | None = None
     app_subject_name_id_format: str | None = None
@@ -253,12 +379,23 @@ class ApplicationUser(BaseAsset):
     scope: str = Field(default="USER")
     sync_state: str | None = Field(default=None, alias="syncState")
 
+    # Remaining attributes of the upstream assignment. Not collected; see the
+    # module comment above.
+    # created: datetime
+    # activated: datetime | None = None
+    # last_login: datetime | None = Field(default=None, alias="lastLogin")
+    # last_updated: datetime | None = Field(default=None, alias="lastUpdated")
+    # password_changed: datetime | None = Field(default=None, alias="passwordChanged")
+    # realm_id: str | None = Field(default=None, alias="realmId")
+
     @property
-    def as_node(self):
+    def as_node(self) -> None:
+        """Assignments are edges only; they emit no node."""
         return None
 
     @property
-    def _read_password_updates_edge(self):
+    def _read_password_updates_edge(self) -> Iterator[Edge]:
+        """Application can read password updates of the user (push feature)."""
         if "PUSH_PASSWORD_UPDATES" in self.app_features:
             yield Edge(
                 kind=ek.READ_PASSWORD_UPDATES,
@@ -268,7 +405,8 @@ class ApplicationUser(BaseAsset):
             )
 
     @property
-    def _app_assignment_edge(self):
+    def _app_assignment_edge(self) -> Iterator[Edge]:
+        """Direct user-to-application assignment."""
         # Note: Check if we want to filter default assignments (factual to the environment)
         # or filter out default assignments (to clean up the graph)
         if self.scope == "USER":
@@ -281,10 +419,12 @@ class ApplicationUser(BaseAsset):
 
     @property
     def _target_user_name(self) -> str | None:
+        """User name in the external application, if Okta stores one."""
         return self.credentials.username if self.credentials else None
 
     @property
-    def _hybrid_sign_on_edges(self):
+    def _hybrid_sign_on_edges(self) -> Iterator[Edge]:
+        """SSO or SWA edge to the matching account in another collector."""
         edge_kind = hybrid_user_sign_on_edge_kind(self.app_sign_on_mode)
         if edge_kind is None:
             return
@@ -310,10 +450,12 @@ class ApplicationUser(BaseAsset):
 
     @property
     def _inbound_user_sync_enabled(self) -> bool:
+        """Whether the application is a profile source for Okta users."""
         return "PROFILE_MASTERING" in self.app_features
 
     @property
     def _is_inbound_sync(self) -> bool:
+        """Whether this assignment is pulled into Okta rather than pushed out."""
         if self.app_name == ACTIVE_DIRECTORY_APP:
             return self.scope == "USER"
 
@@ -332,7 +474,8 @@ class ApplicationUser(BaseAsset):
         return self._inbound_user_sync_enabled
 
     @property
-    def _user_push_pull_edges(self):
+    def _user_push_pull_edges(self) -> Iterator[Edge]:
+        """Provisioning direction edge for synchronized assignments."""
         if self.sync_state != "SYNCHRONIZED":
             return
 
@@ -352,7 +495,8 @@ class ApplicationUser(BaseAsset):
             )
 
     @property
-    def _password_sync_edge(self):
+    def _password_sync_edge(self) -> Iterator[Edge]:
+        """User and password sync edges between an AD user and the Okta user."""
         if (
             self.sync_state == "SYNCHRONIZED"
             and self.app_name == ACTIVE_DIRECTORY_APP
@@ -389,7 +533,8 @@ class ApplicationUser(BaseAsset):
                     )
 
     @property
-    def _okta_org2org_edges(self):
+    def _okta_org2org_edges(self) -> Iterator[Edge]:
+        """User and password sync edges between users of two Okta orgs."""
         if self.app_name != OKTA_ORG2ORG_APP or not self.external_id:
             return
 
@@ -418,15 +563,16 @@ class ApplicationUser(BaseAsset):
                 )
 
     @property
-    def _saml_assertion_edges(self):
+    def _saml_assertion_edges(self) -> Iterator[Edge]:
+        """SAML eligibility and claim value edges for active SAML assignments."""
         if self.app_sign_on_mode != "SAML_2_0":
             return
         if self.app_status is not None and self.app_status != "ACTIVE":
             return
         if self.status not in {"ACTIVE", "PROVISIONED"}:
             return
-        lookup = getattr(self, "_lookup", None)
-        combined_context_lookup = getattr(lookup, "user_saml_context", None)
+        lookup: Any = getattr(self, "_lookup", None)
+        combined_context_lookup: Any = getattr(lookup, "user_saml_context", None)
         combined_context_available = callable(combined_context_lookup)
         legacy_context_available = False
         if not combined_context_available:
@@ -505,7 +651,8 @@ class ApplicationUser(BaseAsset):
             )
 
     @property
-    def edges(self):
+    def edges(self) -> Iterator[Edge]:
+        """All edges this assignment contributes to the graph."""
         yield from self._app_assignment_edge
         yield from self._read_password_updates_edge
         yield from self._user_push_pull_edges

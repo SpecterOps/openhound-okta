@@ -71,6 +71,10 @@ from .models import (
     UserFactor,
     UserRoleAssignment,
 )
+from .models.application_users import (
+    APPLICATION_USER_ITEM_SKIPPED_KEYS,
+    APPLICATION_USER_PROFILE_SKIPPED_KEYS,
+)
 from .models.built_in_role import (
     BUILT_IN_ROLES,
     SUPPORTED_ROLE_ASSIGNMENT_TYPES,
@@ -1031,14 +1035,20 @@ def group_memberships(group: Group, ctx: SourceContext) -> Iterator[dict[str, ob
         ctx: SourceContext containing the REST client for API calls.
 
     Yields:
-        membership (GroupMembership): Member record enriched with group_id and
+        membership (GroupMembership): Member ID and login with group_id and
             group_has_admin_privilege, the latter consumed by the chained
-            admin_group_member_factors transformer.
+            admin_group_member_factors transformer. The rest of the member's
+            user record is dropped: nothing reads it here and it is already
+            collected by the users resource, so keeping it would multiply the
+            largest table by the size of a user object.
     """
     if group.embedded.stats.users_count > 0:
         for page in ctx.pool.paginate(f"/api/v1/groups/{group.id}/users"):
             for item in page:
+                profile = item.get("profile") or {}
                 yield {
+                    "id": item.get("id"),
+                    "login": profile.get("login"),
                     "group_id": group.id,
                     # Carried along so the chained admin_group_member_factors
                     # transformer can select admin-group members without
@@ -1046,7 +1056,6 @@ def group_memberships(group: Group, ctx: SourceContext) -> Iterator[dict[str, ob
                     "group_has_admin_privilege": (
                         group.embedded.stats.has_admin_privilege
                     ),
-                    **item,
                 }
 
 
@@ -1805,6 +1814,22 @@ def application_user_rows(application: Application, ctx: SourceContext):
     user_name_template = (
         application.credentials.user_name_template if application.credentials else None
     )
+    # Application details are the same on every row, so build them once.
+    app_fields = {
+        "app_id": application.id,
+        "app_features": application.features,
+        "app_name": application.name,
+        "app_status": getattr(application, "status", None),
+        "app_settings": application.settings.app if application.settings else None,
+        "app_sign_on_mode": application.sign_on_mode,
+        "app_subject_name_id_template": (
+            sign_on.subject_name_id_template if sign_on else None
+        ),
+        "app_subject_name_id_format": (
+            sign_on.subject_name_id_format if sign_on else None
+        ),
+        "app_user_name_template": _user_name_template_value(user_name_template),
+    }
     try:
         for page in ctx.pool.paginate(
             f"/api/v1/apps/{application.id}/users",
@@ -1813,25 +1838,22 @@ def application_user_rows(application: Application, ctx: SourceContext):
             for item in page:
                 row_count += 1
                 yield {
-                    "app_id": application.id,
-                    "app_features": application.features,
-                    "app_name": application.name,
-                    "app_label": application.label,
-                    "app_status": getattr(application, "status", None),
-                    "app_settings": application.settings.app
-                    if application.settings
-                    else None,
-                    "app_sign_on_mode": application.sign_on_mode,
-                    "app_subject_name_id_template": (
-                        sign_on.subject_name_id_template if sign_on else None
-                    ),
-                    "app_subject_name_id_format": (
-                        sign_on.subject_name_id_format if sign_on else None
-                    ),
-                    "app_user_name_template": _user_name_template_value(
-                        user_name_template
-                    ),
-                    **item,
+                    **app_fields,
+                    # Profile attributes nobody reads are dropped to save
+                    # space: this is the largest collected table.
+                    "profile": {
+                        key: value
+                        for key, value in (item.get("profile") or {}).items()
+                        if key not in APPLICATION_USER_PROFILE_SKIPPED_KEYS
+                    },
+                    # Likewise the assignment timestamps, _links and _embedded
+                    # copies are dropped; the trimmed profile above stays.
+                    **{
+                        key: value
+                        for key, value in item.items()
+                        if key not in APPLICATION_USER_ITEM_SKIPPED_KEYS
+                        and key != "profile"
+                    },
                 }
     except Exception:
         telemetry.record_application_stream("failed")
