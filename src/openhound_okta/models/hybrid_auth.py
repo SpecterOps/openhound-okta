@@ -9,6 +9,10 @@ from openhound.core.models.entries_dataclass import (
 )
 
 from openhound_okta.kinds import edges as ek, nodes as nk
+from openhound_okta.utils.entra_tenant import (
+    MICROSOFT_TENANT_ID_SETTING,
+    OFFICE365_APP,
+)
 
 ACTIVE_DIRECTORY_APP = "active_directory"
 LDAP_INTERFACE_APP = "ldap_interface"
@@ -18,7 +22,6 @@ JAMF_SWA_APP = "casper"
 GITHUB_CLOUD_APP = "githubcloud"
 ONE_PASSWORD_BUSINESS_APP = "1password_business"
 SNOWFLAKE_APP = "snowflake"
-OFFICE365_APP = "office365"
 
 SUPPORTED_HYBRID_AUTH_APPS = frozenset(
     {
@@ -187,7 +190,9 @@ def outbound_trust_target(
     if app_name == GITHUB_CLOUD_APP:
         return HybridTarget.by_name(nk.GITHUB_ORGANIZATION, settings.get("githubOrg"))
     if app_name == ONE_PASSWORD_BUSINESS_APP:
-        domain = one_password_domain(settings.get("subDomain"), settings.get("regionType"))
+        domain = one_password_domain(
+            settings.get("subDomain"), settings.get("regionType")
+        )
         if not domain:
             return None
         return HybridTarget.by_properties(
@@ -203,7 +208,7 @@ def outbound_trust_target(
     if app_name == OFFICE365_APP:
         return HybridTarget.by_id(
             nk.AZ_TENANT,
-            _uppercase_match_value(settings.get("microsoftTenantId")),
+            _uppercase_match_value(settings.get(MICROSOFT_TENANT_ID_SETTING)),
         )
     return None
 
@@ -257,7 +262,10 @@ def hybrid_user_target(
             nk.AZ_USER,
             (
                 ("userprincipalname", target_user_name),
-                ("tenantid", _uppercase_match_value(settings.get("microsoftTenantId"))),
+                (
+                    "tenantid",
+                    _uppercase_match_value(settings.get(MICROSOFT_TENANT_ID_SETTING)),
+                ),
             ),
         )
     return None
@@ -294,7 +302,10 @@ def hybrid_group_target(
             nk.AZ_GROUP,
             (
                 ("displayname", group_name),
-                ("tenantid", _uppercase_match_value(settings.get("microsoftTenantId"))),
+                (
+                    "tenantid",
+                    _uppercase_match_value(settings.get(MICROSOFT_TENANT_ID_SETTING)),
+                ),
             ),
         )
     return None

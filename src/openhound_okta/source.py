@@ -96,6 +96,7 @@ from .models.saml import (
 from .models.token import Token
 from .telemetry import NullTelemetryRecorder, Telemetry
 from .utils.auth import OktaAuth, OktaBearerAuth
+from .utils.entra_tenant import EntraTenantIdResolver
 from .utils.http import (
     DEFAULT_ENDPOINT_CONCURRENCY,
     DEFAULT_ORG_CONCURRENCY,
@@ -1181,106 +1182,10 @@ def applications(ctx: SourceContext):
         for item in page:
             if item.get("signOnMode") == "SAML_2_0":
                 item = {**item, **_saml_metadata_fields(ctx, item)}
-            item = _office365_tenant_id_fields(item)
             yield item
 
 
 app.dlt_resources.append(applications)
-
-
-def _office365_tenant_id_fields(
-    application: dict[str, Any],
-    get: Callable[..., requests.Response] = requests.get,
-) -> dict[str, Any]:
-    """Add the Microsoft tenant id to an Office 365 SAML 1.1 application.
-
-    Applies only to the office365 app with SAML_1_1 sign-on that has an
-    msftTenant but no microsoftTenantId; the id is resolved from Microsoft's
-    OpenID configuration.
-
-    Args:
-        application: Raw application record.
-        get: HTTP GET function, replaceable in tests.
-
-    Returns:
-        The application, with settings.app.microsoftTenantId filled when resolved.
-    """
-    if (
-        application.get("name") != "office365"
-        or application.get("signOnMode") != "SAML_1_1"
-    ):
-        return application
-
-    settings = application.get("settings")
-    if not isinstance(settings, Mapping):
-        return application
-
-    app_settings = settings.get("app")
-    if not isinstance(app_settings, Mapping):
-        return application
-
-    if app_settings.get("microsoftTenantId"):
-        return application
-
-    msft_tenant = app_settings.get("msftTenant")
-    if not isinstance(msft_tenant, str) or not msft_tenant.strip():
-        return application
-
-    tenant_id = _microsoft_tenant_id_from_onmicrosoft_domain(msft_tenant, get=get)
-    if tenant_id is None:
-        return application
-
-    enriched_app_settings = {**app_settings, "microsoftTenantId": tenant_id}
-    enriched_settings = {**settings, "app": enriched_app_settings}
-    return {**application, "settings": enriched_settings}
-
-
-def _microsoft_tenant_id_from_onmicrosoft_domain(
-    onmicrosoft_domain: str,
-    *,
-    get: Callable[..., requests.Response] = requests.get,
-) -> str | None:
-    """Resolve a Microsoft tenant id from an onmicrosoft.com domain prefix.
-
-    Reads the tenant's OpenID configuration and takes the tenant id from the
-    token endpoint path. Failures are logged and yield None.
-
-    Args:
-        onmicrosoft_domain: Domain prefix, without ".onmicrosoft.com".
-        get: HTTP GET function, replaceable in tests.
-
-    Returns:
-        The tenant id, or None if it could not be resolved.
-    """
-    domain_name = f"{onmicrosoft_domain}.onmicrosoft.com"
-    config_url = (
-        f"https://login.microsoftonline.com/{domain_name}/"
-        ".well-known/openid-configuration"
-    )
-
-    try:
-        response = get(config_url, timeout=30)
-        response.raise_for_status()
-        config = response.json()
-    except (requests.RequestException, ValueError):
-        logger.warning(
-            "Unable to resolve Microsoft tenant ID for %s",
-            domain_name,
-            exc_info=True,
-        )
-        return None
-
-    if not isinstance(config, Mapping):
-        return None
-
-    token_endpoint = config.get("token_endpoint")
-    if not isinstance(token_endpoint, str):
-        return None
-
-    path_segments = [
-        segment for segment in urlparse(token_endpoint).path.split("/") if segment
-    ]
-    return path_segments[0] if path_segments else None
 
 
 def _saml_metadata_fields(
@@ -2652,7 +2557,7 @@ def source(
     custom_roles_resource = custom_roles(ctx)
     built_in_roles_resource = built_in_roles()
     groups_resource = groups(ctx)
-    applications_resource = applications(ctx)
+    applications_resource = applications(ctx).add_map(EntraTenantIdResolver().enrich)
     client_apps_resource = client_applications(ctx)
     agent_pools_resource = agent_pools(ctx)
     api_services_resource = api_services(ctx)
