@@ -74,11 +74,13 @@ APPLICATION_USER_ITEM_SKIPPED_KEYS: Final[frozenset[str]] = frozenset(
 
 # Application user profile attributes skipped at collection time. Nothing
 # reads them, and the Entra licence assignments are large. Every other
-# attribute is kept because SAML claim mappings may reference it.
+# attribute is kept because SAML claim mappings may reference it; department,
+# city and country are plausible appuser.* claim sources and so are kept too.
+# TODO: Instead of guessing, keep only the attributes the application's own
+# SAML attribute statements and NameID/user name templates reference, per app.
 APPLICATION_USER_PROFILE_SKIPPED_KEYS: Final[frozenset[str]] = frozenset(
     {
         "licenses",  # Assigned Office 365 licenses
-        "department",
         "division",
         "organization",
         "costCenter",
@@ -94,11 +96,9 @@ APPLICATION_USER_PROFILE_SKIPPED_KEYS: Final[frozenset[str]] = frozenset(
         "addressType",
         "streetAddress",
         "locality",
-        "city",
         "region",
         "state",
         "postalCode",
-        "country",
         "countryCode",
         "locale",
         "preferredLanguage",
@@ -155,6 +155,8 @@ class Profile(BaseModel):
         immutable_id: Entra ID anchor of the assignment (Office 365 app).
         initial_status: Set by Okta on users pushed to an Org2Org app; its
             presence tells push from pull.
+        department: Department; a plausible SAML claim source.
+        city: City; a plausible SAML claim source.
     """
 
     model_config = ConfigDict(populate_by_name=True, extra="allow")
@@ -170,10 +172,10 @@ class Profile(BaseModel):
     sam_account_name: str | None = Field(default=None, alias="samAccountName")
     immutable_id: str | None = Field(default=None, alias="immutableId")
     initial_status: str | None = Field(default=None, alias="initialStatus")
+    department: str | None = None
+    city: str | None = None
 
     # Not collected.
-    # department: str | None = None
-    # city: str | None = None
     # country_code: str | None = Field(default=None, alias="countryCode")
     # division: str | None = None
     # organization: str | None = None
