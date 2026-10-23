@@ -71,6 +71,10 @@ from .models import (
     UserFactor,
     UserRoleAssignment,
 )
+from .models.application_users import (
+    APPLICATION_USER_ITEM_SKIPPED_KEYS,
+    APPLICATION_USER_PROFILE_SKIPPED_KEYS,
+)
 from .models.built_in_role import (
     BUILT_IN_ROLES,
     SUPPORTED_ROLE_ASSIGNMENT_TYPES,
@@ -92,6 +96,7 @@ from .models.saml import (
 from .models.token import Token
 from .telemetry import NullTelemetryRecorder, Telemetry
 from .utils.auth import OktaAuth, OktaBearerAuth
+from .utils.entra_tenant import EntraTenantIdResolver
 from .utils.http import (
     DEFAULT_ENDPOINT_CONCURRENCY,
     DEFAULT_ORG_CONCURRENCY,
@@ -1031,14 +1036,20 @@ def group_memberships(group: Group, ctx: SourceContext) -> Iterator[dict[str, ob
         ctx: SourceContext containing the REST client for API calls.
 
     Yields:
-        membership (GroupMembership): Member record enriched with group_id and
+        membership (GroupMembership): Member ID and login with group_id and
             group_has_admin_privilege, the latter consumed by the chained
-            admin_group_member_factors transformer.
+            admin_group_member_factors transformer. The rest of the member's
+            user record is dropped: nothing reads it here and it is already
+            collected by the users resource, so keeping it would multiply the
+            largest table by the size of a user object.
     """
     if group.embedded.stats.users_count > 0:
         for page in ctx.pool.paginate(f"/api/v1/groups/{group.id}/users"):
             for item in page:
+                profile = item.get("profile") or {}
                 yield {
+                    "id": item.get("id"),
+                    "login": profile.get("login"),
                     "group_id": group.id,
                     # Carried along so the chained admin_group_member_factors
                     # transformer can select admin-group members without
@@ -1046,7 +1057,6 @@ def group_memberships(group: Group, ctx: SourceContext) -> Iterator[dict[str, ob
                     "group_has_admin_privilege": (
                         group.embedded.stats.has_admin_privilege
                     ),
-                    **item,
                 }
 
 
@@ -1172,106 +1182,10 @@ def applications(ctx: SourceContext):
         for item in page:
             if item.get("signOnMode") == "SAML_2_0":
                 item = {**item, **_saml_metadata_fields(ctx, item)}
-            item = _office365_tenant_id_fields(item)
             yield item
 
 
 app.dlt_resources.append(applications)
-
-
-def _office365_tenant_id_fields(
-    application: dict[str, Any],
-    get: Callable[..., requests.Response] = requests.get,
-) -> dict[str, Any]:
-    """Add the Microsoft tenant id to an Office 365 SAML 1.1 application.
-
-    Applies only to the office365 app with SAML_1_1 sign-on that has an
-    msftTenant but no microsoftTenantId; the id is resolved from Microsoft's
-    OpenID configuration.
-
-    Args:
-        application: Raw application record.
-        get: HTTP GET function, replaceable in tests.
-
-    Returns:
-        The application, with settings.app.microsoftTenantId filled when resolved.
-    """
-    if (
-        application.get("name") != "office365"
-        or application.get("signOnMode") != "SAML_1_1"
-    ):
-        return application
-
-    settings = application.get("settings")
-    if not isinstance(settings, Mapping):
-        return application
-
-    app_settings = settings.get("app")
-    if not isinstance(app_settings, Mapping):
-        return application
-
-    if app_settings.get("microsoftTenantId"):
-        return application
-
-    msft_tenant = app_settings.get("msftTenant")
-    if not isinstance(msft_tenant, str) or not msft_tenant.strip():
-        return application
-
-    tenant_id = _microsoft_tenant_id_from_onmicrosoft_domain(msft_tenant, get=get)
-    if tenant_id is None:
-        return application
-
-    enriched_app_settings = {**app_settings, "microsoftTenantId": tenant_id}
-    enriched_settings = {**settings, "app": enriched_app_settings}
-    return {**application, "settings": enriched_settings}
-
-
-def _microsoft_tenant_id_from_onmicrosoft_domain(
-    onmicrosoft_domain: str,
-    *,
-    get: Callable[..., requests.Response] = requests.get,
-) -> str | None:
-    """Resolve a Microsoft tenant id from an onmicrosoft.com domain prefix.
-
-    Reads the tenant's OpenID configuration and takes the tenant id from the
-    token endpoint path. Failures are logged and yield None.
-
-    Args:
-        onmicrosoft_domain: Domain prefix, without ".onmicrosoft.com".
-        get: HTTP GET function, replaceable in tests.
-
-    Returns:
-        The tenant id, or None if it could not be resolved.
-    """
-    domain_name = f"{onmicrosoft_domain}.onmicrosoft.com"
-    config_url = (
-        f"https://login.microsoftonline.com/{domain_name}/"
-        ".well-known/openid-configuration"
-    )
-
-    try:
-        response = get(config_url, timeout=30)
-        response.raise_for_status()
-        config = response.json()
-    except (requests.RequestException, ValueError):
-        logger.warning(
-            "Unable to resolve Microsoft tenant ID for %s",
-            domain_name,
-            exc_info=True,
-        )
-        return None
-
-    if not isinstance(config, Mapping):
-        return None
-
-    token_endpoint = config.get("token_endpoint")
-    if not isinstance(token_endpoint, str):
-        return None
-
-    path_segments = [
-        segment for segment in urlparse(token_endpoint).path.split("/") if segment
-    ]
-    return path_segments[0] if path_segments else None
 
 
 def _saml_metadata_fields(
@@ -1805,6 +1719,22 @@ def application_user_rows(application: Application, ctx: SourceContext):
     user_name_template = (
         application.credentials.user_name_template if application.credentials else None
     )
+    # Application details are the same on every row, so build them once.
+    app_fields = {
+        "app_id": application.id,
+        "app_features": application.features,
+        "app_name": application.name,
+        "app_status": getattr(application, "status", None),
+        "app_settings": application.settings.app if application.settings else None,
+        "app_sign_on_mode": application.sign_on_mode,
+        "app_subject_name_id_template": (
+            sign_on.subject_name_id_template if sign_on else None
+        ),
+        "app_subject_name_id_format": (
+            sign_on.subject_name_id_format if sign_on else None
+        ),
+        "app_user_name_template": _user_name_template_value(user_name_template),
+    }
     try:
         for page in ctx.pool.paginate(
             f"/api/v1/apps/{application.id}/users",
@@ -1813,25 +1743,22 @@ def application_user_rows(application: Application, ctx: SourceContext):
             for item in page:
                 row_count += 1
                 yield {
-                    "app_id": application.id,
-                    "app_features": application.features,
-                    "app_name": application.name,
-                    "app_label": application.label,
-                    "app_status": getattr(application, "status", None),
-                    "app_settings": application.settings.app
-                    if application.settings
-                    else None,
-                    "app_sign_on_mode": application.sign_on_mode,
-                    "app_subject_name_id_template": (
-                        sign_on.subject_name_id_template if sign_on else None
-                    ),
-                    "app_subject_name_id_format": (
-                        sign_on.subject_name_id_format if sign_on else None
-                    ),
-                    "app_user_name_template": _user_name_template_value(
-                        user_name_template
-                    ),
-                    **item,
+                    **app_fields,
+                    # Profile attributes nobody reads are dropped to save
+                    # space: this is the largest collected table.
+                    "profile": {
+                        key: value
+                        for key, value in (item.get("profile") or {}).items()
+                        if key not in APPLICATION_USER_PROFILE_SKIPPED_KEYS
+                    },
+                    # Likewise the assignment timestamps, _links and _embedded
+                    # copies are dropped; the trimmed profile above stays.
+                    **{
+                        key: value
+                        for key, value in item.items()
+                        if key not in APPLICATION_USER_ITEM_SKIPPED_KEYS
+                        and key != "profile"
+                    },
                 }
     except Exception:
         telemetry.record_application_stream("failed")
@@ -2657,7 +2584,7 @@ def source(
     custom_roles_resource = custom_roles(ctx)
     built_in_roles_resource = built_in_roles()
     groups_resource = groups(ctx)
-    applications_resource = applications(ctx)
+    applications_resource = applications(ctx).add_map(EntraTenantIdResolver().enrich)
     client_apps_resource = client_applications(ctx)
     agent_pools_resource = agent_pools(ctx)
     api_services_resource = api_services(ctx)

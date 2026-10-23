@@ -244,7 +244,7 @@ class OauthClientSettings(BaseModel):
     issuer_mode: str | None = None
     consent_method: str | None = None
     jwks: OauthKeys | None = None
-    redirect_uris: list[str] = Field(default_factory=list)
+    redirect_uris: list[str] | None = None
     initiate_login_uri: str | None = None
 
 
@@ -484,7 +484,7 @@ class Application(BaseAsset):
             return (
                 oauth_client.initiate_login_uri
                 if oauth_client.initiate_login_uri is not None
-                else next(iter(oauth_client.redirect_uris), None)
+                else next(iter(oauth_client.redirect_uris or []), None)
             )
 
         sign_on = self.settings.sign_on if self.settings else None

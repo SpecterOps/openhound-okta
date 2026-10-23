@@ -30,7 +30,8 @@ def test_identity_provider_emits_oktahound_derived_properties():
                     "type": "SAML2",
                     "endpoints": {
                         "sso": {
-                            "url": "https://login.microsoftonline.com/tenant-1/saml2"
+                            "url": "https://login.microsoftonline.com/"
+                            "31537af4-6d77-4bb9-a681-d2394888ea26/saml2"
                         }
                     },
                 },
@@ -52,7 +53,7 @@ def test_identity_provider_emits_oktahound_derived_properties():
     assert properties.issuer_mode == "DYNAMIC"
     assert properties.governed_group_ids == ["group-1"]
     assert properties.protocol_type == "SAML2"
-    assert properties.entra_tenant_id == "tenant-1"
+    assert properties.entra_tenant_id == "31537af4-6d77-4bb9-a681-d2394888ea26"
     assert not hasattr(properties, "status")
     assert not hasattr(properties, "last_updated")
 
