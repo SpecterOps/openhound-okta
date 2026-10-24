@@ -89,6 +89,22 @@ class ContainerPreflightTests(unittest.TestCase):
                 self.assert_safe_failure()
                 self.env[field] = original
 
+    def test_okta_base_url_must_be_an_origin(self) -> None:
+        """Reject URL suffixes that would corrupt Okta endpoint construction."""
+        field = "SOURCES__SOURCE__OKTA__CREDENTIALS__BASE_URL"
+        for suffix in ("/", "/oauth2/default", "?tenant=example", "#fragment", "/;param=x"):
+            with self.subTest(suffix=suffix):
+                self.env[field] = f"https://okta.example.invalid{suffix}"
+                self.assert_safe_failure()
+
+    def test_bhe_url_suffixes_remain_supported(self) -> None:
+        """Origin-only validation must not change BHE URL acceptance."""
+        self.env["DESTINATION__BLOODHOUNDENTERPRISE__URL"] = (
+            "https://bhe.example.invalid/path;param=x?tenant=example#fragment"
+        )
+        result = self.run_preflight()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_invalid_private_keys_fail_safely(self) -> None:
         """Reject missing files, public-only keys, absent kid, and malformed JSON."""
         private = self.key.as_dict(private=True)

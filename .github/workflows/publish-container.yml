@@ -20,7 +20,7 @@ jobs:
   publish:
     if: >-
       github.repository == 'SpecterOps/openhound-okta' &&
-      github.event_name == 'pull_request' &&
+      github.event_name == 'pull_request_target' &&
       github.event.action == 'closed' &&
       github.event.pull_request.merged == true &&
       github.event.pull_request.base.ref == 'main'
