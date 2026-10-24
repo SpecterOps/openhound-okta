@@ -1,11 +1,9 @@
 name: Build and Publish
 
 on:
-  pull_request_target:
+  push:
     branches:
       - main
-    types:
-      - closed
     paths:
       - "src/**"
       - "pyproject.toml"
@@ -29,31 +27,51 @@ jobs:
   tag-release:
     permissions:
       contents: write
-    # Never check out a PR head: only the reviewed commit after it has merged.
+      pull-requests: read
     if: >-
       github.repository == 'SpecterOps/openhound-okta' &&
-      github.event_name == 'pull_request_target' &&
-      github.event.action == 'closed' &&
-      github.event.pull_request.merged == true &&
-      github.event.pull_request.base.ref == 'main'
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.versioning.outputs.new_version }}
 
     steps:
+      - name: Identify merged pull request
+        id: merged-pr
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { data: pullRequests } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              ...context.repo,
+              commit_sha: context.sha,
+              per_page: 100,
+            });
+            const merged = pullRequests.find(pr =>
+              pr.merged_at &&
+              pr.merge_commit_sha === context.sha &&
+              pr.base.ref === 'main' &&
+              pr.base.repo.full_name === 'SpecterOps/openhound-okta'
+            );
+            core.setOutput('branch', merged ? merged.head.ref : '');
+            if (!merged) core.info('No matching merged PR; skipping release.');
+
       - name: Checkout
+        if: steps.merged-pr.outputs.branch != ''
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          ref: ${{ github.sha }}
 
       - name: Fetch tags
+        if: steps.merged-pr.outputs.branch != ''
         run: git fetch --tags
 
       - name: Determine next version
+        if: steps.merged-pr.outputs.branch != ''
         id: versioning
         env:
-          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+          BRANCH_NAME: ${{ steps.merged-pr.outputs.branch }}
         run: |
           # Get latest tag or fallback
           LATEST_TAG=$(git tag --list | awk '/^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/' | sort -V | tail -n 1)
@@ -137,10 +155,8 @@ jobs:
       packages: write
     if: >-
       github.repository == 'SpecterOps/openhound-okta' &&
-      github.event_name == 'pull_request_target' &&
-      github.event.action == 'closed' &&
-      github.event.pull_request.merged == true &&
-      github.event.pull_request.base.ref == 'main'
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
     uses: ./.github/workflows/publish-container.yml
     with:
       tag: ${{ needs.tag-release.outputs.new_version }}

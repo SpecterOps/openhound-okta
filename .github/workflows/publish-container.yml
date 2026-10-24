@@ -20,10 +20,8 @@ jobs:
   publish:
     if: >-
       github.repository == 'SpecterOps/openhound-okta' &&
-      github.event_name == 'pull_request_target' &&
-      github.event.action == 'closed' &&
-      github.event.pull_request.merged == true &&
-      github.event.pull_request.base.ref == 'main'
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     strategy:
       matrix:
