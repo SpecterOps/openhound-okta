@@ -2,22 +2,132 @@ name: Build and Publish
 
 on:
   push:
-    tags:
-      - "v*"
-  workflow_call:
-    inputs:
-      tag:
-        description: "Tag to build and publish"
-        required: true
-        type: string
-
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "README.md"
+      - "docker-compose/**"
+      - "Dockerfile"
+      - ".dockerignore"
+      - ".github/workflows/publish.yml"
+      - ".github/workflows/publish-container.yml"
 
 permissions:
   contents: read
-  id-token: write
+
+concurrency:
+  group: release-main
+  queue: max
+  cancel-in-progress: false
 
 jobs:
+  tag-release:
+    permissions:
+      contents: write
+      pull-requests: read
+    if: >-
+      github.repository == 'SpecterOps/openhound-okta' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.versioning.outputs.new_version }}
+
+    steps:
+      - name: Identify merged pull request
+        id: merged-pr
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { data: pullRequests } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              ...context.repo,
+              commit_sha: context.sha,
+              per_page: 100,
+            });
+            const merged = pullRequests.find(pr =>
+              pr.merged_at &&
+              pr.merge_commit_sha === context.sha &&
+              pr.base.ref === 'main' &&
+              pr.base.repo.full_name === 'SpecterOps/openhound-okta'
+            );
+            core.setOutput('branch', merged ? merged.head.ref : '');
+            if (!merged) core.info('No matching merged PR; skipping release.');
+
+      - name: Checkout
+        if: steps.merged-pr.outputs.branch != ''
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Fetch tags
+        if: steps.merged-pr.outputs.branch != ''
+        run: git fetch --tags
+
+      - name: Determine next version
+        if: steps.merged-pr.outputs.branch != ''
+        id: versioning
+        env:
+          BRANCH_NAME: ${{ steps.merged-pr.outputs.branch }}
+        run: |
+          EXISTING_TAG=$(git tag --points-at HEAD --list | awk '/^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/' | sort -V | tail -n 1)
+          if [ -n "$EXISTING_TAG" ]; then
+            echo "Reusing release tag: $EXISTING_TAG"
+            echo "new_version=$EXISTING_TAG" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Get latest tag or fallback
+          LATEST_TAG=$(git tag --list | awk '/^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/' | sort -V | tail -n 1)
+          if [ -z "$LATEST_TAG" ]; then
+            LATEST_TAG="v0.0.0"
+          fi
+
+          echo "Latest tag: $LATEST_TAG"
+
+          VERSION=${LATEST_TAG#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+
+          echo "Merged branch: $BRANCH_NAME"
+
+          if [[ "$BRANCH_NAME" == fix/* || "$BRANCH_NAME" == patch/* || "$BRANCH_NAME" == chore/* ]]; then
+            PATCH=$((PATCH + 1))
+          elif [[ "$BRANCH_NAME" == feature/* || "$BRANCH_NAME" == minor/* ]]; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          elif [[ "$BRANCH_NAME" == major/* ]]; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          else
+            echo "Branch does not trigger release."
+            exit 0
+          fi
+
+          NEW_VERSION="v$MAJOR.$MINOR.$PATCH"
+
+          echo "NEW_VERSION=$NEW_VERSION" >> "$GITHUB_ENV"
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Next version: $NEW_VERSION"
+
+      - name: Create and push tag
+        if: env.NEW_VERSION != ''
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git tag "$NEW_VERSION"
+          git push origin "$NEW_VERSION"
+
   build:
+    needs: tag-release
+    if: needs.tag-release.outputs.new_version != ''
+    permissions:
+      contents: read
+      id-token: write
     environment: pypi
     runs-on: ubuntu-latest
 
@@ -25,7 +135,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }} # using input tags or github ref if tags are manually pushed
+          ref: refs/tags/${{ needs.tag-release.outputs.new_version }}
           fetch-depth: 0
 
       - name: Set up Python
@@ -43,4 +153,17 @@ jobs:
         run: uv build
 
       - name: Publish package
-        run: uv publish
+        run: uv publish --check-url https://pypi.org/simple/
+
+  container:
+    needs: [tag-release, build]
+    permissions:
+      contents: read
+      packages: write
+    if: >-
+      github.repository == 'SpecterOps/openhound-okta' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/publish-container.yml
+    with:
+      tag: ${{ needs.tag-release.outputs.new_version }}

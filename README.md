@@ -60,6 +60,12 @@ Follow the OpenHound docs to get started:
 
 - [OpenHound Documentation](https://bloodhound.specterops.io/openhound/overview)
 
+## Docker Compose
+
+Run the BHE scheduler using the [Docker Compose deployment guide](docker-compose/README.md).
+Release images are published to `ghcr.io/specterops/openhound-okta` for Linux AMD64 and ARM64,
+with scheduler tags `<version>` and `latest`, and CLI tags `<version>-cli` and `latest-cli`.
+
 ## OAuth app authentication behavior
 
 When the collector uses Okta OAuth app credentials, it shares one bearer token across endpoint clients and refreshes
