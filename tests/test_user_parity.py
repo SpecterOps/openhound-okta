@@ -1,3 +1,4 @@
+import logging
 from typing import cast
 
 import pytest
@@ -384,6 +385,29 @@ def test_source_wires_factor_collection_by_mode() -> None:
     assert limited.resources["user_factors"]._pipe.parent.name == "privileged_users"
     assert clone._pipe.parent.name == "group_memberships"
     assert clone.table_name == "user_factors"
+
+
+def test_limit_user_mfa_collection_is_logged_as_warning(caplog) -> None:
+    from openhound_okta.source import source
+    from openhound_okta.utils.auth import OktaTokenCredentials
+
+    credentials = OktaTokenCredentials(
+        base_url="https://example.okta.test", token="test-token"
+    )
+
+    with caplog.at_level(logging.WARNING, logger="openhound_okta.source"):
+        source(credentials=credentials)
+    assert not [r for r in caplog.records if "limit_user_mfa_collection" in r.message]
+
+    with caplog.at_level(logging.WARNING, logger="openhound_okta.source"):
+        source(credentials=credentials, limit_user_mfa_collection=True)
+    messages = [
+        r.getMessage()
+        for r in caplog.records
+        if "limit_user_mfa_collection" in r.message
+    ]
+    assert len(messages) == 1
+    assert messages[0].startswith("limit_user_mfa_collection=true: ")
 
 
 def test_per_user_requests_share_one_family_distinct_from_the_listing() -> None:
