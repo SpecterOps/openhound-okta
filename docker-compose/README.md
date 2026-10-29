@@ -13,10 +13,12 @@ collection: run an on-demand scan or configure a schedule in BHE.
 - A BHE tenant with OpenHound enabled and the Okta extension assets installed.
 - An Okta OpenHound collector client in BHE and its token ID and token key.
   These are collector-client credentials, not a general user's API token.
-- An Okta OAuth service app with the collector's required scopes and admin roles,
-  its client ID, and its private RSA JWK JSON object containing a `kid`.
-  Use the same key format as an existing working Okta collector configuration;
-  a PEM file cannot be used as `private_key_path` by this collector.
+- Okta credentials with the collector's required scopes and admin roles, using
+  one of the authentication methods described in the main README: an OAuth
+  service app's client ID and private RSA JWK JSON object containing a `kid`
+  (mounted as a file or supplied base64-encoded), an API Service Integration's
+  client ID and client secret, or an SSWS API token. A PEM file cannot be used
+  as `private_key_path` by this collector.
 
 ## Prepare configuration
 
@@ -27,7 +29,7 @@ cd docker-compose
 cp .env.example .env
 cp .dlt/config.toml.example .dlt/config.toml
 cp .dlt/secrets.toml.example .dlt/secrets.toml
-cp /path/to/okta-app.jwk .dlt/okta-app.jwk
+cp /path/to/okta-app.jwk .dlt/okta-app.jwk   # private key file authentication only
 ```
 
 The resulting layout is:
@@ -43,15 +45,18 @@ docker-compose/
     └── okta-app.jwk
 ```
 
-Edit `.dlt/secrets.toml` locally and replace the placeholders:
+Edit `.dlt/config.toml` and `.dlt/secrets.toml` locally and replace the placeholders:
 
 | Setting | Value |
 | --- | --- |
-| BHE `url` | Your BHE tenant's HTTPS URL |
+| BHE `url` (in `config.toml`) | Your BHE tenant's HTTPS URL |
 | BHE `token_id`, `token_key` | The Okta OpenHound collector client's credentials |
 | Okta `base_url` | Your Okta org's HTTPS URL, such as `https://example.okta.com` |
-| Okta `client_id` | The Okta OAuth service app's client ID |
+| Okta `client_id` | The Okta OAuth service app's or API Service Integration's client ID |
 | Okta `private_key_path` | Leave `/app/.dlt/okta-app.jwk` when using the layout above |
+| Okta `private_key_b64` | The base64-encoded JWK, instead of mounting `private_key_path` |
+| Okta `client_secret` | The API Service Integration's client secret, instead of a private key |
+| Okta `token` | An SSWS API token, instead of `client_id` and a key or secret |
 
 Actual `.env`, `.dlt` configuration files, and private keys are ignored by Git.
 Only the example files are intended for publication. The `.dlt` directory is
@@ -83,8 +88,9 @@ docker compose up -d scheduler-okta
 docker compose logs -f scheduler-okta
 ```
 
-The preflight checks configuration resolution, RSA private JWK validity,
-and writable storage. It does not authenticate to Okta or BHE. The one-shot
+The preflight resolves the same credential kind the collector would, checks
+RSA private JWK validity for private key authentication, and probes writable
+storage. It does not authenticate to Okta or BHE. The one-shot
 `storage-init` service prepares the named volumes before the scheduler starts;
 the scheduler itself runs as non-root.
 
@@ -133,7 +139,7 @@ multiple copies so their containers and volumes remain separate.
 
 ## Troubleshooting
 
-- **Preflight reports a placeholder:** fill in `.dlt/secrets.toml` and rerun it.
+- **Preflight reports a placeholder:** fill in `.dlt/config.toml` and `.dlt/secrets.toml` and rerun it.
 - **Private key or secrets cannot be read:** verify the mounted file paths and
   UID `65532` read permissions. On Linux with enforcing SELinux, also verify
   that policy permits the `.dlt` bind mount. The container key path is

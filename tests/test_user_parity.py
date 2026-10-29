@@ -365,7 +365,8 @@ def test_factor_writers_replace_the_shared_table() -> None:
 
 def test_source_wires_factor_collection_by_mode() -> None:
     """Default covers the users listing; limited mode uses the two admin streams."""
-    from openhound_okta.source import OktaTokenCredentials, source
+    from openhound_okta.source import source
+    from openhound_okta.utils.auth import OktaTokenCredentials
 
     def credentials() -> OktaTokenCredentials:
         return OktaTokenCredentials(

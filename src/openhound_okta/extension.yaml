@@ -23,16 +23,19 @@ credentials:
     description: Okta base URL
     required: true
   - name: client_id
-    description: Okta app registration client ID
+    description: Client ID of the Okta service app or API Service Integration
+    required: false
+  - name: client_secret
+    description: Client secret of the Okta API Service Integration
     required: false
   - name: private_key_path
-    description: Path to Okta private key
+    description: Path to the Okta service app private key (JWK)
     required: false
   - name: private_key_b64
-    description: Base64 encoded Okta private key
+    description: Base64 encoded Okta service app private key (JWK)
     required: false
   - name: token
-    description: Classic Okta API token
+    description: Okta API token (SSWS)
     required: false
 parameters:
   - name: applications_page_size
