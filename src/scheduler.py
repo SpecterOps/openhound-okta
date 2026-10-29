@@ -13,7 +13,8 @@ def start() -> None:
     collector_name = dlt.config["destination.bloodhoundenterprise.collector_name"]
     logger.info("Initializing service for collector '%s'.", collector_name)
     service = Service(
-        bhe_uri=dlt.secrets["destination.bloodhoundenterprise.url"],
+        # The tenant URL is ordinary configuration, as in openhound's destination.
+        bhe_uri=dlt.config["destination.bloodhoundenterprise.url"],
         token_key=dlt.secrets["destination.bloodhoundenterprise.token_key"],
         token_id=dlt.secrets["destination.bloodhoundenterprise.token_id"],
         collector_name=collector_name,

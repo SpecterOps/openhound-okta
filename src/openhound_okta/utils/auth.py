@@ -13,7 +13,7 @@ from enum import Enum
 from pathlib import Path
 from threading import Lock
 from typing import Final, Union
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, urlparse
 
 import dlt
 import requests
@@ -46,6 +46,16 @@ TOKEN_REQUEST_HEADERS: Final[dict[str, str]] = {
     "content-type": "application/x-www-form-urlencoded",
     "cache-control": "no-cache",
 }
+# Configuration section under which dlt resolves the source's `credentials`
+# argument: `sources.<module>.<source name>.<argument name>`. Code that resolves
+# credentials outside the source, such as the container preflight, must use the
+# same section to see the same configuration.
+CREDENTIALS_SECTIONS: Final[tuple[str, ...]] = (
+    "sources",
+    "source",
+    "okta",
+    "credentials",
+)
 # Okta API scopes requested for every OAuth 2.0 access token; the collector's
 # service app or API Service Integration must have exactly these granted.
 OKTA_DEFAULT_SCOPE: Final[list[str]] = [
@@ -223,10 +233,11 @@ def classify_unauthorized(response: requests.Response) -> UnauthorizedClassifica
 def _base_url_hostname(base_url: str) -> str:
     """Validate the Okta org base URL and return its hostname.
 
-    This is the single rule for what a usable base URL is: a parseable HTTPS
-    URL with a hostname. Okta serves everything over HTTPS only, so any other
-    scheme is a misconfiguration that must fail before credentials leave the
-    process.
+    This is the single rule for what a usable base URL is: an HTTPS origin,
+    meaning scheme, hostname and optional port only. Okta serves everything
+    over HTTPS, and the collector builds every endpoint by appending a path to
+    the base URL, so anything beyond the origin would either send credentials
+    in plaintext or corrupt every request.
 
     Args:
         base_url: Okta org base URL.
@@ -236,22 +247,37 @@ def _base_url_hostname(base_url: str) -> str:
 
     Raises:
         ValueError: The URL is missing, malformed, lacks a scheme or hostname,
-            or does not use https.
+            does not use https, or carries user info, a path, a query or a
+            fragment.
     """
+    # Missing configuration, as opposed to a wrong one.
     if not isinstance(base_url, str) or not base_url.strip():
         raise ValueError("Okta base URL is unavailable")
     try:
-        parsed = urlparse(base_url.strip())
-        _ = parsed.port  # Raises for a malformed port.
-        hostname = parsed.hostname
+        parsed: ParseResult = urlparse(base_url.strip())
+        _ = parsed.port  # Raises for a malformed or out-of-range port.
+        hostname: str | None = parsed.hostname
     except ValueError as error:
+        # urlparse itself rejected the text, for example an unbalanced IPv6 bracket.
         raise ValueError(
             "Okta base URL must include a URL scheme and hostname"
         ) from error
+    # Without a scheme, urlparse treats the whole text as a path.
     if not parsed.scheme or not hostname:
         raise ValueError("Okta base URL must include a URL scheme and hostname")
+    # Plain HTTP would send bearer tokens and client secrets unencrypted.
     if parsed.scheme.casefold() != "https":
         raise ValueError("Okta base URL must use the https scheme")
+    # Embedded credentials (https://user:secret@host) would be sent with every
+    # request and could leak into logs; Okta never needs them.
+    if parsed.username or parsed.password:
+        raise ValueError("Okta base URL must not contain user info")
+    # Any path, including a lone "/", or a query or fragment would end up in
+    # the middle of every endpoint URL the collector constructs.
+    if parsed.path or parsed.params or parsed.query or parsed.fragment:
+        raise ValueError(
+            "Okta base URL must be an origin without a path, query or fragment"
+        )
     return hostname
 
 
@@ -547,16 +573,16 @@ class OktaCredentials(CredentialsConfiguration):
     overriding `request_auth`.
 
     Attributes:
-        base_url: Okta org base URL; must be HTTPS.
+        base_url: Okta org base URL; must be an HTTPS origin.
     """
 
     base_url: str = dlt.config.value
 
     def on_resolved(self) -> None:
-        """Reject a malformed or plaintext-HTTP base URL as soon as dlt resolves it.
+        """Reject an unusable base URL as soon as dlt resolves the credentials.
 
         Raises:
-            ValueError: `base_url` is not a valid HTTPS URL.
+            ValueError: `base_url` is not an HTTPS origin.
         """
         _base_url_hostname(self.base_url)
 
@@ -565,7 +591,7 @@ class OktaCredentials(CredentialsConfiguration):
         """Case-folded hostname of the Okta org, which scopes graph node IDs.
 
         Raises:
-            ValueError: `base_url` is not a valid HTTPS URL.
+            ValueError: `base_url` is not an HTTPS origin.
         """
         return _base_url_hostname(self.base_url).casefold()
 
@@ -647,7 +673,7 @@ class OktaPrivateKeyCredentials(OktaOAuthCredentials):
     subclasses decide where the key comes from.
     """
 
-    def _key_manager(self) -> OktaAuth:
+    def key_manager(self) -> OktaAuth:
         """Return the holder of the private key.
 
         Returns:
@@ -666,7 +692,7 @@ class OktaPrivateKeyCredentials(OktaOAuthCredentials):
             KeyError: The private key JWK has no `kid`.
             ValueError: The private key is not JSON.
         """
-        key_manager = self._key_manager()
+        key_manager = self.key_manager()
         return key_manager.jwt(
             private_key=key_manager.private_key,
             client_id=self.client_id,
@@ -685,7 +711,7 @@ class OktaAppCredentials(OktaPrivateKeyCredentials):
 
     private_key_path: TSecretStrValue = dlt.secrets.value
 
-    def _key_manager(self) -> OktaAuth:
+    def key_manager(self) -> OktaAuth:
         """Return a key holder that reads the JWK from `private_key_path`.
 
         Returns:
@@ -704,7 +730,7 @@ class OktaEncodedAppCredentials(OktaPrivateKeyCredentials):
 
     private_key_b64: TSecretStrValue = dlt.secrets.value
 
-    def _key_manager(self) -> OktaAuth:
+    def key_manager(self) -> OktaAuth:
         """Return a key holder for the decoded JWK.
 
         Returns:

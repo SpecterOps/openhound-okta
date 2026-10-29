@@ -1,5 +1,6 @@
 """Exercise the Compose preflight with offline dummy credentials."""
 
+import base64
 import json
 import os
 import subprocess
@@ -27,6 +28,8 @@ class ContainerPreflightTests(unittest.TestCase):
         self.env = {
             "PATH": os.environ.get("PATH", ""),
             "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+            # Windows cannot initialise sockets (asyncio import) without it.
+            "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
             "DLT_PROJECT_DIR": str(self.root),
             "DLT_DATA_DIR": str(self.root),
             "PIPELINES_DIR": str(self.root),
@@ -58,6 +61,20 @@ class ContainerPreflightTests(unittest.TestCase):
             check=False,
         )
 
+    def use_credentials(self, **values: str) -> None:
+        """Replace the private key file configuration with another credential kind."""
+        for name in ("CLIENT_ID", "PRIVATE_KEY_PATH"):
+            self.env.pop(f"SOURCES__SOURCE__OKTA__CREDENTIALS__{name}", None)
+        for name, value in values.items():
+            self.env[f"SOURCES__SOURCE__OKTA__CREDENTIALS__{name}"] = value
+
+    def assert_passes(self, kind: str) -> None:
+        """Require success that names the credential kind and leaks no secret."""
+        result: subprocess.CompletedProcess[str] = self.run_preflight()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(f"Okta {kind} credentials", result.stdout)
+        self.assertNotIn("secret-must-not-appear", result.stdout + result.stderr)
+
     def assert_safe_failure(self) -> None:
         """Require failure without exposing credentials or key material."""
         result = self.run_preflight()
@@ -73,14 +90,50 @@ class ContainerPreflightTests(unittest.TestCase):
         result = self.run_preflight()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Okta collector version:", result.stdout)
+        self.assertIn("Okta private key credentials", result.stdout)
         self.assertNotIn("secret-must-not-appear", result.stdout + result.stderr)
+
+    def test_base64_private_jwk_passes_offline(self) -> None:
+        """The base64-encoded JWK is validated like the mounted key file."""
+        self.use_credentials(
+            CLIENT_ID="offline-client",
+            PRIVATE_KEY_B64=base64.b64encode(self.key_path.read_bytes()).decode(),
+        )
+        self.assert_passes("private key")
+
+    def test_client_secret_passes_offline(self) -> None:
+        """An API Service Integration client secret needs no key material."""
+        self.use_credentials(
+            CLIENT_ID="offline-client", CLIENT_SECRET="secret-must-not-appear"
+        )
+        self.assert_passes("client secret")
+
+    def test_api_token_passes_offline(self) -> None:
+        """An SSWS API token needs neither a client ID nor key material."""
+        self.use_credentials(TOKEN="secret-must-not-appear")
+        self.assert_passes("API token")
+
+    def test_client_secret_placeholder_fails(self) -> None:
+        """Reject an example client secret like any other placeholder."""
+        self.use_credentials(
+            CLIENT_ID="offline-client", CLIENT_SECRET="REPLACE_WITH_CLIENT_SECRET"
+        )
+        self.assert_safe_failure()
+
+    def test_missing_credentials_fail(self) -> None:
+        """Reject a configuration with a base URL but no credential kind."""
+        self.use_credentials()
+        self.assert_safe_failure()
 
     def test_placeholders_and_insecure_urls_fail(self) -> None:
         """Reject incomplete secrets and plaintext source/destination endpoints."""
         for field, value in (
             ("DESTINATION__BLOODHOUNDENTERPRISE__TOKEN_KEY", "REPLACE_WITH_TOKEN"),
             ("DESTINATION__BLOODHOUNDENTERPRISE__URL", "http://bhe.example.invalid"),
-            ("SOURCES__SOURCE__OKTA__CREDENTIALS__BASE_URL", "http://okta.example.invalid"),
+            (
+                "SOURCES__SOURCE__OKTA__CREDENTIALS__BASE_URL",
+                "http://okta.example.invalid",
+            ),
             ("SOURCES__SOURCE__OKTA__CREDENTIALS__CLIENT_ID", "REPLACE_WITH_CLIENT_ID"),
         ):
             with self.subTest(field=field):
@@ -92,7 +145,13 @@ class ContainerPreflightTests(unittest.TestCase):
     def test_okta_base_url_must_be_an_origin(self) -> None:
         """Reject URL suffixes that would corrupt Okta endpoint construction."""
         field = "SOURCES__SOURCE__OKTA__CREDENTIALS__BASE_URL"
-        for suffix in ("/", "/oauth2/default", "?tenant=example", "#fragment", "/;param=x"):
+        for suffix in (
+            "/",
+            "/oauth2/default",
+            "?tenant=example",
+            "#fragment",
+            "/;param=x",
+        ):
             with self.subTest(suffix=suffix):
                 self.env[field] = f"https://okta.example.invalid{suffix}"
                 self.assert_safe_failure()

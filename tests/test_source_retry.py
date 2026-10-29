@@ -84,12 +84,25 @@ class FakeClock:
         self.now += delay
 
 
-def test_tenant_domain_uses_hostname_without_port_or_user_info():
-    credentials = OktaCredentials(
-        base_url="https://user:secret@MIXED.Example:443/api/v1"
-    )
+def test_tenant_domain_uses_casefolded_hostname_without_port():
+    credentials = OktaCredentials(base_url="https://MIXED.Example:443")
 
     assert credentials.tenant_domain == "mixed.example"
+
+
+@pytest.mark.parametrize(
+    ("base_url", "message"),
+    [
+        ("https://user:secret@preview.example", "user info"),
+        ("https://preview.example/", "origin"),
+        ("https://preview.example/oauth2/default", "origin"),
+        ("https://preview.example?tenant=example", "origin"),
+        ("https://preview.example#fragment", "origin"),
+    ],
+)
+def test_tenant_domain_rejects_base_urls_beyond_the_origin(base_url, message):
+    with pytest.raises(ValueError, match=message):
+        OktaCredentials(base_url=base_url).tenant_domain
 
 
 @pytest.mark.parametrize(

@@ -13,7 +13,7 @@ from openhound.core.preproc import PreProcContext
 from openhound_okta.lookup import OktaLookup
 from openhound_okta.telemetry import TelemetrySettings, build_telemetry
 from openhound_okta.transforms import transforms
-from openhound_okta.utils.auth import OktaCredentials
+from openhound_okta.utils.auth import CREDENTIALS_SECTIONS, OktaCredentials
 
 app = OpenHound("okta", help="OpenGraph collector for Okta")
 
@@ -72,9 +72,10 @@ def _tenant_domain_from_config() -> str:
     Raises:
         ValueError: No base URL is configured, or it is not a valid HTTPS URL.
     """
+    canonical_key: str = ".".join((*CREDENTIALS_SECTIONS, "base_url"))
     base_url: str | None = dlt.secrets.get(
         "sources.okta.credentials.base_url"
-    ) or dlt.secrets.get("sources.source.okta.credentials.base_url")
+    ) or dlt.secrets.get(canonical_key)
     if not isinstance(base_url, str) or not base_url.strip():
         raise ValueError("Okta base URL must be configured and use HTTPS")
     return OktaCredentials(base_url=base_url).tenant_domain
