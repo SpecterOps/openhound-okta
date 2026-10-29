@@ -123,6 +123,34 @@ def test_application_node_uses_sign_on_mode_specific_url_sources():
     )
 
 
+def test_application_accepts_null_redirect_uris():
+    """Regression test for OIDC apps whose oauthClient.redirect_uris is null.
+
+    Okta returns ``redirect_uris`` as ``null`` for some OIDC applications. The
+    field was typed as a plain list, so DLT discarded the whole application row
+    during validation, and with it every node and edge derived from the app.
+    The row must validate, and the URL fallback must treat a null list like an
+    empty one.
+    """
+    application = make_application(
+        name="oidc_client",
+        signOnMode="OPENID_CONNECT",
+        settings={
+            "oauthClient": {
+                "application_type": "service",
+                "grant_types": ["client_credentials"],
+                "redirect_uris": None,
+            }
+        },
+    )
+
+    properties = application.as_node.properties
+
+    assert application.settings.oauth_client.redirect_uris is None
+    assert properties.client_type == "service"
+    assert properties.url is None
+
+
 def test_application_node_emits_primitive_app_settings_in_snake_case():
     application = make_application(
         signOnMode="SAML_2_0",

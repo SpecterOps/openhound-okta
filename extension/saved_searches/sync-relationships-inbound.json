@@ -1,5 +1,7 @@
 {
-  "name": "Okta: Inbound User and Group Synchronization",
+  "query_key": "Okta_sync_relationships_inbound",
+  "name": "Inbound User and Group Synchronization",
   "description": "Lists all inbound user and group synchronization relationships to Okta, including password synchronization across Org2Org setups.",
-  "query": "MATCH path = (source)-[:Okta_UserSync|Okta_MembershipSync|Okta_PasswordSync]->(target)\nWHERE target:Okta_User OR target:Okta_Group\nRETURN path\nLIMIT 1000"
+  "query": "MATCH path = (source)-[:Okta_UserSync|Okta_MembershipSync|Okta_PasswordSync]->(target)\nWHERE target:Okta_User OR target:Okta_Group\nRETURN path\nLIMIT 1000",
+  "category": "Cross Platform Attack Paths"
 }

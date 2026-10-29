@@ -1,5 +1,7 @@
 {
-  "name": "Okta: Organizational Structure",
+  "query_key": "Okta_org_chart",
+  "name": "Organizational Structure",
   "description": "Retrieves all manager relationships.",
-  "query": "MATCH path = (:Okta_User)-[:Okta_ManagerOf]->(:Okta_User)\nRETURN path\nLIMIT 1000"
+  "query": "MATCH path = (:Okta_User)-[:Okta_ManagerOf]->(:Okta_User)\nRETURN path\nLIMIT 1000",
+  "category": "Tenant Information"
 }

@@ -1,0 +1,26 @@
+"""Start the BloodHound Enterprise scheduler for the configured collector."""
+
+import logging
+
+import dlt
+from openhound.scheduler.service import Service
+
+logger = logging.getLogger(__name__)
+
+
+def start() -> None:
+    """Start polling BHE for Okta collection jobs."""
+    collector_name = dlt.config["destination.bloodhoundenterprise.collector_name"]
+    logger.info("Initializing service for collector '%s'.", collector_name)
+    service = Service(
+        # The tenant URL is ordinary configuration, as in openhound's destination.
+        bhe_uri=dlt.config["destination.bloodhoundenterprise.url"],
+        token_key=dlt.secrets["destination.bloodhoundenterprise.token_key"],
+        token_id=dlt.secrets["destination.bloodhoundenterprise.token_id"],
+        collector_name=collector_name,
+    )
+    service.start()
+
+
+if __name__ == "__main__":
+    start()

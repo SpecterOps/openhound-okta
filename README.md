@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://specterops.io" target="_blank">
-    <img alt="A project powered by SpecterOps - Creators of BloodHound" src=".github/GitHub-Header.png" width="100%" style="max-width: 100%;">
+    <img alt="A project powered by SpecterOps - Creators of BloodHound" src="https://raw.githubusercontent.com/SpecterOps/OpenHound/refs/heads/main/.github/GitHub-Header.png" width="100%" style="max-width: 100%;">
   </a>
 </p>
 
@@ -60,15 +60,87 @@ Follow the OpenHound docs to get started:
 
 - [OpenHound Documentation](https://bloodhound.specterops.io/openhound/overview)
 
-## OAuth app authentication behavior
+## Docker Compose
 
-When the collector uses Okta OAuth app credentials, it shares one bearer token across endpoint clients and refreshes
-that token before it expires. Long-running collections can therefore continue across the Okta access-token lifetime
-without failing active resource pagination. If a transient proactive refresh fails while the current token is still
-valid, the collector temporarily keeps using that token and suppresses repeated refresh attempts for a short cooldown.
-If Okta rejects a bearer token with HTTP 401, the collector retries once for stale, invalid, or unknown token responses
-while preserving the current token for known non-token authorization failures. Classic SSWS API token authentication
-remains static.
+Run the BHE scheduler using the [Docker Compose deployment guide](docker-compose/README.md).
+Release images are published to `ghcr.io/specterops/openhound-okta` for Linux AMD64 and ARM64,
+with scheduler tags `<version>` and `latest`, and CLI tags `<version>-cli` and `latest-cli`.
+
+## Authentication
+
+The collector supports three Okta authentication methods. Configure exactly one of them in `.dlt/secrets.toml` or
+through the equivalent environment variables.
+
+### Private key (JWT) authentication
+
+An OAuth 2.0 service app whose client authentication is set to public key / private key.
+The private key is a JWK in JSON form, supplied either as a file path or base64-encoded:
+
+```toml
+[sources.source.okta.credentials]
+base_url = "https://<tenant>.okta.com"
+client_id = "<client-id>"
+private_key_path = "<path-to-jwk.json>"
+# Or, instead of private_key_path:
+# private_key_b64 = "<base64-encoded-jwk-json>"
+```
+
+For environment-only deployments, use the equivalent variables:
+
+```text
+SOURCES__SOURCE__OKTA__CREDENTIALS__BASE_URL=https://<tenant>.okta.com
+SOURCES__SOURCE__OKTA__CREDENTIALS__CLIENT_ID=<client-id>
+SOURCES__SOURCE__OKTA__CREDENTIALS__PRIVATE_KEY_PATH=<path-to-jwk.json>
+# Or, instead of PRIVATE_KEY_PATH:
+# SOURCES__SOURCE__OKTA__CREDENTIALS__PRIVATE_KEY_B64=<base64-encoded-jwk-json>
+```
+
+### Client secret authentication
+
+An Okta Integration Network (OIN) API Service Integration, using the client ID and client secret Okta issues when it
+is installed in the org:
+
+```toml
+[sources.source.okta.credentials]
+base_url = "https://<tenant>.okta.com"
+client_id = "<client-id>"
+client_secret = "<client-secret>"
+```
+
+For environment-only deployments, use the equivalent variables:
+
+```text
+SOURCES__SOURCE__OKTA__CREDENTIALS__BASE_URL=https://<tenant>.okta.com
+SOURCES__SOURCE__OKTA__CREDENTIALS__CLIENT_ID=<client-id>
+SOURCES__SOURCE__OKTA__CREDENTIALS__CLIENT_SECRET=<client-secret>
+```
+
+### API token (SSWS) authentication
+
+A classic API token, also called an SSWS token. Such tokens are user-specific and act with the permissions of the
+administrator they were issued to:
+
+```toml
+[sources.source.okta.credentials]
+base_url = "https://<tenant>.okta.com"
+token = "<api-token>"
+```
+
+For environment-only deployments, use the equivalent variables:
+
+```text
+SOURCES__SOURCE__OKTA__CREDENTIALS__BASE_URL=https://<tenant>.okta.com
+SOURCES__SOURCE__OKTA__CREDENTIALS__TOKEN=<api-token>
+```
+
+### Bearer token lifecycle
+
+With private key or client secret authentication, the collector uses the respective secret to fetch an OAuth 2.0
+bearer token and refreshes that token before it expires, so long-running collections continue across the Okta access
+token lifetime. If a refresh fails while the current token is
+still valid, the collector keeps using that token and retries the refresh after a short cooldown. If Okta rejects a
+bearer token, the collector retries the request with a fresh token, unless the response shows the
+failure is unrelated to the token.
 
 ## Rate-limit behavior
 
@@ -84,7 +156,9 @@ retried.
 Fan-out resources use explicit page sizes where Okta documents safe maxima. Expanded group collection requests 200
 rows per page, application-user collection requests 500 rows per page, application-group assignment collection
 requests 200 rows per page, group-push mapping collection requests 1,000 rows per page, and identity-provider user
-collection requests 200 rows per page. Application-group assignments are collected from each application's public
+collection requests 200 rows per page. MFA factor collection costs one request per covered user; in large
+organizations it can be restricted to privileged users with `limit_user_mfa_collection`. Application-group
+assignments are collected from each application's public
 assignment endpoint and retain Okta's assignment timestamp, priority, and profile field names without publishing
 assignment profile values to the graph. Rows stream to DLT; an exhausted required request fails the collection so DLT
 does not publish an incomplete replacement. If the initial expanded group page repeatedly times out, the collector
@@ -105,6 +179,7 @@ non-secret settings:
 | `SOURCES__SOURCE__OKTA__IDENTITY_PROVIDER_USERS_PAGE_SIZE` | `200` | Identity-provider users per page, from 1 through 200 |
 | `SOURCES__SOURCE__OKTA__LIMIT_APP_USER_COLLECTION` | `false` | Collect application users only for always-collected app types and listed application IDs |
 | `SOURCES__SOURCE__OKTA__APP_USER_COLLECTION_APP_IDS` | `[]` | Additional application IDs whose users are collected when the limit is enabled |
+| `SOURCES__SOURCE__OKTA__LIMIT_USER_MFA_COLLECTION` | `false` | Collect MFA factors only for privileged users (direct role assignees and admin-group members) instead of every user; factor collection costs one request per covered user |
 | `SOURCES__SOURCE__OKTA__ENDPOINT_CONCURRENCY` | `32` | Maximum simultaneous requests per endpoint family |
 | `SOURCES__SOURCE__OKTA__ORG_CONCURRENCY` | `32` | Maximum simultaneous requests across all endpoint families, kept under Okta's per-org concurrency limit (35 on Integrator Free, 75 on production orgs) |
 | `SOURCES__SOURCE__OKTA__RATE_LIMIT_MAX_ELAPSED_SECONDS` | `900` | Maximum elapsed retry window for an individual 429 request |

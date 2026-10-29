@@ -3,11 +3,10 @@ import hashlib
 import json
 import logging
 import threading
-from base64 import b64decode
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Any, Callable, Final, Union
+from typing import Any, Callable, Final
 from urllib.parse import urlparse
 from xml.etree.ElementTree import Element
 
@@ -15,10 +14,7 @@ import dlt
 import requests
 from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
-from dlt.common.configuration import configspec
-from dlt.common.configuration.specs import CredentialsConfiguration
-from dlt.common.typing import TSecretStrValue
-from dlt.sources.helpers.rest_client.auth import APIKeyAuth
+from dlt.extract import DltResource
 from dlt.sources.helpers.rest_client.client import RESTClient
 from dlt.sources.helpers.rest_client.paginators import HeaderLinkPaginator
 
@@ -72,6 +68,10 @@ from .models import (
     UserFactor,
     UserRoleAssignment,
 )
+from .models.application_users import (
+    APPLICATION_USER_ITEM_SKIPPED_KEYS,
+    APPLICATION_USER_PROFILE_SKIPPED_KEYS,
+)
 from .models.built_in_role import (
     BUILT_IN_ROLES,
     SUPPORTED_ROLE_ASSIGNMENT_TYPES,
@@ -90,9 +90,9 @@ from .models.saml import (
     saml_sp_acs_rows,
     saml_trusted_issuer_row,
 )
-from .models.token import Token
 from .telemetry import NullTelemetryRecorder, Telemetry
-from .utils.auth import OktaAuth, OktaBearerAuth
+from .utils.auth import AnyOktaCredentials
+from .utils.entra_tenant import EntraTenantIdResolver
 from .utils.http import (
     DEFAULT_ENDPOINT_CONCURRENCY,
     DEFAULT_ORG_CONCURRENCY,
@@ -106,28 +106,6 @@ from .utils.http import (
 )
 
 logger = logging.getLogger(__name__)
-
-OKTA_DEFAULT_SCOPE = [
-    "okta.users.read",
-    "okta.apps.read",
-    "okta.groups.read",
-    "okta.roles.read",
-    "okta.agentPools.read",
-    "okta.apiTokens.read",
-    "okta.authorizationServers.read",
-    "okta.devices.read",
-    "okta.policies.read",
-    "okta.orgs.read",
-    "okta.idps.read",
-    "okta.features.read",
-    "okta.clients.read",
-    "okta.appGrants.read",
-    "okta.oauthIntegrations.read",
-    "okta.authenticators.read",
-    # Optional scopes which require a dedicated license
-    "okta.realms.read",
-    "okta.realmAssignments.read",
-]
 
 # One entry per Okta rate limit bucket the collector touches. Each family's
 # EndpointThrottle paces itself from the X-Rate-Limit-* headers of its own
@@ -317,134 +295,6 @@ APPLICATION_GROUP_ASSIGNMENTS_MIN_PAGE_SIZE = 20
 APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE = 200
 GROUP_PUSH_MAPPINGS_PAGE_SIZE = 1000
 IDENTITY_PROVIDER_USERS_PAGE_SIZE = 200
-
-
-@configspec
-class OktaCredentials(CredentialsConfiguration):
-    """Base Okta credentials: the org base URL plus a credential kind label."""
-
-    base_url: str = dlt.config.value
-
-    def auth(self):
-        """Credential kind label; overridden by concrete credentials."""
-        pass
-
-
-def _app_token(okta_auth: OktaAuth, base_url: str, client_id: str) -> Token:
-    """Exchange a signed JWT assertion for an OAuth 2.0 access token.
-
-    Args:
-        okta_auth: Holder of the app's private key.
-        base_url: Okta org base URL.
-        client_id: OAuth 2.0 client id of the collector app.
-
-    Returns:
-        The token response for the collector's default scopes.
-    """
-    private_key = okta_auth.private_key
-    jwt = okta_auth.jwt(
-        private_key=private_key,
-        client_id=client_id,
-        audience=f"{base_url}/oauth2/v1/token",
-        exp_delta=60,
-    )
-    return okta_auth.token_response(base_url, jwt, " ".join(OKTA_DEFAULT_SCOPE))
-
-
-@configspec
-class OktaAppCredentials(OktaCredentials):
-    """OAuth 2.0 app credentials with the private key read from a file."""
-
-    private_key_path: TSecretStrValue = dlt.secrets.value
-    client_id: str = dlt.config.value
-
-    def auth(self) -> str:
-        """Credential kind label: "app"."""
-        return "app"
-
-    def fetch_token(self) -> Token:
-        """Fetch a fresh access token with the app's private key.
-
-        Returns:
-            The token response.
-        """
-        return _app_token(
-            OktaAuth(private_key_path=self.private_key_path),
-            self.base_url,
-            self.client_id,
-        )
-
-    @property
-    def header(self) -> str:
-        """Authorization header value with a freshly fetched bearer token."""
-        return f"Bearer {self.fetch_token().access_token}"
-
-
-@configspec
-class OktaEncodedAppCredentials(OktaCredentials):
-    """OAuth 2.0 app credentials with the private key supplied base64-encoded."""
-
-    private_key_b64: TSecretStrValue = dlt.secrets.value
-    client_id: str = dlt.config.value
-
-    def auth(self) -> str:
-        """Credential kind label: "app"."""
-        return "app"
-
-    def fetch_token(self) -> Token:
-        """Fetch a fresh access token with the decoded private key.
-
-        Returns:
-            The token response.
-        """
-        decoded_credentials = b64decode(self.private_key_b64).decode("utf-8")
-        return _app_token(
-            OktaAuth(private_key_string=decoded_credentials),
-            self.base_url,
-            self.client_id,
-        )
-
-    @property
-    def header(self) -> str:
-        """Authorization header value with a freshly fetched bearer token."""
-        return f"Bearer {self.fetch_token().access_token}"
-
-
-@configspec
-class OktaTokenCredentials(OktaCredentials):
-    """Static SSWS API token credentials."""
-
-    token: TSecretStrValue = dlt.secrets.value
-
-    def auth(self) -> str:
-        """Credential kind label: "token"."""
-        return "token"
-
-    @property
-    def header(self) -> str:
-        """Authorization header value carrying the SSWS token."""
-        return f"SSWS {self.token}"
-
-
-def _request_auth(
-    credentials: Union[
-        OktaAppCredentials, OktaEncodedAppCredentials, OktaTokenCredentials
-    ],
-):
-    """Build the requests auth for the configured credentials.
-
-    Args:
-        credentials: App or token credentials.
-
-    Returns:
-        A refreshing bearer auth for app credentials, or a static header auth
-        for an SSWS token.
-    """
-    if isinstance(credentials, (OktaAppCredentials, OktaEncodedAppCredentials)):
-        return OktaBearerAuth(credentials.fetch_token)
-    return APIKeyAuth(
-        name="Authorization", api_key=credentials.header, location="header"
-    )
 
 
 class ClientPool:
@@ -654,6 +504,36 @@ class ConsecutiveAccessDeniedBreaker:
             return False
 
 
+class UserFactorClaims:
+    """Grants each user's factor fetch to exactly one of the parallel streams.
+
+    Attributes:
+        _claimed: User IDs whose factor fetch has already been granted.
+        _lock: Guards _claimed against the parallelized transformer threads.
+    """
+
+    def __init__(self) -> None:
+        """Start with no claimed users."""
+        self._claimed: set[str] = set()
+        self._lock = threading.Lock()
+
+    def claim(self, user_id: str) -> bool:
+        """Atomically claim the factor fetch for a user.
+
+        Args:
+            user_id: Okta user ID to claim.
+
+        Returns:
+            True if this caller should fetch the user's factors,
+            False if another stream already claimed the user.
+        """
+        with self._lock:
+            if user_id in self._claimed:
+                return False
+            self._claimed.add(user_id)
+            return True
+
+
 @dataclass
 class SourceContext:
     """Context for Okta API operations.
@@ -665,6 +545,8 @@ class SourceContext:
         application_grants_breaker: Shared breaker that stops application
             OAuth 2.0 grant collection after consecutive access-denied
             responses.
+        user_factor_claims: Shared registry granting each user's factor fetch
+            to one of the factor streams.
         applications_page_size: Applications requested per applications page.
         application_users_page_size: Users requested per application-users
             page.
@@ -684,6 +566,7 @@ class SourceContext:
             APPLICATION_GRANTS_ACCESS_DENIED_LIMIT
         )
     )
+    user_factor_claims: UserFactorClaims = field(default_factory=UserFactorClaims)
     applications_page_size: int = APPLICATIONS_PAGE_SIZE
     application_users_page_size: int = APPLICATION_USERS_PAGE_SIZE
     groups_page_size: int = GROUPS_PAGE_SIZE
@@ -692,33 +575,6 @@ class SourceContext:
     )
     group_push_mappings_page_size: int = GROUP_PUSH_MAPPINGS_PAGE_SIZE
     identity_provider_users_page_size: int = IDENTITY_PROVIDER_USERS_PAGE_SIZE
-
-
-def _tenant_domain_from_base_url(base_url: str) -> str:
-    """Derive the case-folded tenant hostname from the Okta base URL.
-
-    Args:
-        base_url: Okta org base URL.
-
-    Returns:
-        The hostname, case-folded.
-
-    Raises:
-        ValueError: If the URL is missing or lacks a scheme or hostname.
-    """
-    if not isinstance(base_url, str) or not base_url.strip():
-        raise ValueError("Okta base URL is unavailable during collection")
-    try:
-        parsed = urlparse(base_url.strip())
-        _ = parsed.port
-        tenant_domain = parsed.hostname
-    except ValueError as error:
-        raise ValueError(
-            "Okta base URL must include a URL scheme and hostname"
-        ) from error
-    if not parsed.scheme or not tenant_domain:
-        raise ValueError("Okta base URL must include a URL scheme and hostname")
-    return tenant_domain.casefold()
 
 
 def _group_page_sizes(initial_page_size: int) -> tuple[int, ...]:
@@ -781,55 +637,26 @@ def users(ctx: SourceContext):
 # Authentication factor collection
 #
 # Enumerating factors costs one GET /api/v1/users/{id}/factors request per
-# user, so factors are only collected for privileged users, discovered by two
-# parallel streams:
+# user. By default every user in the users listing is covered
+# (users | user_factors). With limit_user_mfa_collection enabled only
+# privileged users are, discovered by two parallel streams:
 #   1. users with direct role assignments (privileged_users | user_factors)
 #   2. members of groups whose stats report hasAdminPrivilege, chained off the
 #      membership rows already being collected so no member list is paginated
-#      twice (groups | group_memberships | admin_group_member_factors)
-# Both write to the user_factors table. A user can appear in both streams
-# (e.g. a direct super admin who is also in several admin groups), and dlt
-# transformers cannot consume a merged, deduplicated stream, so both
-# transformers share one UserFactorClaims instance (created per source() call):
-# whichever stream claims a user ID first fetches the factors, later claimants
-# skip. For every claimed user with zero factors a scope-marker row (NULL
-# factor id) is written, so downstream the authentication_factors node
-# property can distinguish:
-#   NULL - user not covered (not privileged, factors never fetched)
+#      twice (groups | group_memberships | admin_group_member_factors, a
+#      renamed clone of user_factors fed through admin_group_members)
+# A user can appear in both streams (e.g. a direct super admin who is also in
+# several admin groups), and dlt transformers cannot consume a merged,
+# deduplicated stream, so both share ctx.user_factor_claims: whichever stream
+# claims a user ID first fetches the factors, later claimants skip. For every
+# claimed user with zero factors a scope-marker row (NULL factor id) is
+# written, so downstream the authentication_factors node property can
+# distinguish:
+#   NULL - user not covered (factors never fetched)
 #   0    - user covered, no factors usable for MFA
 #   N    - user covered, N factors in ACTIVE status
 # (see OktaLookup.user_authentication_factors_count and
 # descriptions/nodes/Okta_User.md).
-class UserFactorClaims:
-    """Grants each user's factor fetch to exactly one of the parallel streams.
-
-    Attributes:
-        _claimed: User IDs whose factor fetch has already been granted.
-        _lock: Guards _claimed against the parallelized transformer threads.
-    """
-
-    def __init__(self) -> None:
-        """Start with no claimed users."""
-        self._claimed: set[str] = set()
-        self._lock = threading.Lock()
-
-    def claim(self, user_id: str) -> bool:
-        """Atomically claim the factor fetch for a user.
-
-        Args:
-            user_id: Okta user ID to claim.
-
-        Returns:
-            True if this caller should fetch the user's factors,
-            False if another stream already claimed the user.
-        """
-        with self._lock:
-            if user_id in self._claimed:
-                return False
-            self._claimed.add(user_id)
-            return True
-
-
 def user_factor_rows(user_id: str, ctx: SourceContext) -> Iterator[dict[str, object]]:
     """Fetch one user's enrolled factors via GET /api/v1/users/{id}/factors.
 
@@ -867,99 +694,75 @@ def user_factor_rows(user_id: str, ctx: SourceContext) -> Iterator[dict[str, obj
     yield from rows or [{"user_id": user_id}]
 
 
-def privileged_user_factor_rows(
-    user: PrivilegedUser, ctx: SourceContext, claims: UserFactorClaims
-) -> Iterator[dict[str, object]]:
-    """Fetch factors for a directly privileged user, unless already claimed.
+def admin_group_members(membership: Mapping[str, object]) -> Iterator[PrivilegedUser]:
+    """Narrow a group_memberships row to its member when the group holds admin privilege.
+
+    Prepended to the admin-group clone of user_factors as a dlt yield-map step,
+    so the transformer sees the same id-only user records as the direct
+    privileged-user stream.
 
     Args:
-        user: User returned by Okta's privileged assignee inventory endpoint.
-        ctx: SourceContext containing the REST client for API calls.
-        claims: Registry shared with the admin-group stream; skips the fetch
-            when the user was already claimed there.
+        membership: A group_memberships row (carries group_has_admin_privilege).
 
     Yields:
-        user_factors rows for the user (see user_factor_rows), or nothing when
-        another stream already claimed the user.
-    """
-    if claims.claim(user.id):
-        yield from user_factor_rows(user.id, ctx)
-
-
-def admin_group_member_factor_rows(
-    membership: Mapping[str, object], ctx: SourceContext, claims: UserFactorClaims
-) -> Iterator[dict[str, object]]:
-    """Fetch factors for a member of an admin group, unless already claimed.
-
-    Args:
-        membership: A group_memberships row; only rows whose
-            group_has_admin_privilege flag is set trigger a fetch.
-        ctx: SourceContext containing the REST client for API calls.
-        claims: Registry shared with the direct-assignee stream; skips the
-            fetch when the member was already claimed there.
-
-    Yields:
-        user_factors rows for the member (see user_factor_rows), or nothing
-        for non-admin groups or already claimed users.
+        The member as a PrivilegedUser, or nothing for non-admin groups.
     """
     member_id = membership.get("id")
-    if (
-        membership.get("group_has_admin_privilege")
-        and isinstance(member_id, str)
-        and claims.claim(member_id)
-    ):
-        yield from user_factor_rows(member_id, ctx)
+    if membership.get("group_has_admin_privilege") and isinstance(member_id, str):
+        yield PrivilegedUser(id=member_id)
 
 
-# Both factor writers replace the shared user_factors table so each collection
-# is a fresh snapshot: appended leftovers from an earlier run would inflate
-# counts and let a user whose fetch failed inherit stale rows.
+# The transformer and its limited-mode clone replace the shared user_factors
+# table so each collection is a fresh snapshot: appended leftovers from an
+# earlier run would inflate counts and let a user whose fetch failed inherit
+# stale rows. table_name is explicit so the renamed clone keeps loading there.
 @app.transformer(
     name="user_factors",
-    columns=UserFactor,
-    parallelized=True,
-    write_disposition="replace",
-)
-def user_factors(
-    user: PrivilegedUser, ctx: SourceContext, claims: UserFactorClaims
-) -> Iterator[dict[str, object]]:
-    """DLT transformer, fetches factors of directly privileged users.
-
-    Args:
-        user: User returned by Okta's privileged assignee inventory endpoint.
-        ctx: SourceContext containing the REST client for API calls.
-        claims: Fetch-once registry shared with admin_group_member_factors.
-
-    Yields:
-        user_factor (UserFactor): Enrolled factor or scope-marker record.
-    """
-    yield from privileged_user_factor_rows(user, ctx, claims)
-
-
-@app.transformer(
-    name="admin_group_member_factors",
     table_name="user_factors",
     columns=UserFactor,
     parallelized=True,
     write_disposition="replace",
 )
-def admin_group_member_factors(
-    membership: Mapping[str, object], ctx: SourceContext, claims: UserFactorClaims
+def user_factors(
+    user: User | PrivilegedUser, ctx: SourceContext
 ) -> Iterator[dict[str, object]]:
-    """DLT transformer, fetches factors of admin-group members.
+    """DLT transformer, fetches a user's factors unless another stream claimed them.
 
-    Chained off group_memberships so member lists are not paginated twice;
-    writes to the same user_factors table as the user_factors transformer.
+    Chained off users (full collection) or, with limit_user_mfa_collection,
+    off privileged_users and, as a renamed clone, off admin-group memberships.
 
     Args:
-        membership: A group_memberships row (carries group_has_admin_privilege).
-        ctx: SourceContext containing the REST client for API calls.
-        claims: Fetch-once registry shared with user_factors.
+        user: User record carrying the Okta user ID.
+        ctx: SourceContext containing the REST client and the claims registry.
 
     Yields:
         user_factor (UserFactor): Enrolled factor or scope-marker record.
     """
-    yield from admin_group_member_factor_rows(membership, ctx, claims)
+    if ctx.user_factor_claims.claim(user.id):
+        yield from user_factor_rows(user.id, ctx)
+
+
+def admin_group_member_factors(ctx: SourceContext) -> DltResource:
+    """Limited-mode factor transformer for admin-group members.
+
+    A renamed clone of user_factors meant to be piped from group_memberships;
+    the prepended admin_group_members step narrows each membership row to its
+    member, or drops it for non-admin groups.
+
+    Args:
+        ctx: SourceContext shared with the user_factors transformer.
+
+    Returns:
+        The unpiped clone, still loading to the user_factors table.
+    """
+    # Rename before piping: with_name() on a piped transformer would clone the
+    # parent pipe too and paginate every member list a second time.
+    # insert_at=0 prepends the step so it filters the transformer's input.
+    return (
+        user_factors(ctx)
+        .with_name("admin_group_member_factors")
+        .add_yield_map(admin_group_members, insert_at=0)
+    )
 
 
 @app.resource(
@@ -1032,22 +835,27 @@ def group_memberships(group: Group, ctx: SourceContext) -> Iterator[dict[str, ob
         ctx: SourceContext containing the REST client for API calls.
 
     Yields:
-        membership (GroupMembership): Member record enriched with group_id and
-            group_has_admin_privilege, the latter consumed by the chained
-            admin_group_member_factors transformer.
+        membership (GroupMembership): Member ID and login with group_id and
+            group_has_admin_privilege, the latter consumed by the limited-mode
+            factor stream (see admin_group_members). The rest of the member's
+            user record is dropped: nothing reads it here and it is already
+            collected by the users resource, so keeping it would multiply the
+            largest table by the size of a user object.
     """
     if group.embedded.stats.users_count > 0:
         for page in ctx.pool.paginate(f"/api/v1/groups/{group.id}/users"):
             for item in page:
+                profile = item.get("profile") or {}
                 yield {
+                    "id": item.get("id"),
+                    "login": profile.get("login"),
                     "group_id": group.id,
-                    # Carried along so the chained admin_group_member_factors
-                    # transformer can select admin-group members without
-                    # paginating the member list a second time.
+                    # Carried along so the limited-mode factor stream
+                    # (admin_group_members) can select admin-group members
+                    # without paginating the member list a second time.
                     "group_has_admin_privilege": (
                         group.embedded.stats.has_admin_privilege
                     ),
-                    **item,
                 }
 
 
@@ -1173,106 +981,10 @@ def applications(ctx: SourceContext):
         for item in page:
             if item.get("signOnMode") == "SAML_2_0":
                 item = {**item, **_saml_metadata_fields(ctx, item)}
-            item = _office365_tenant_id_fields(item)
             yield item
 
 
 app.dlt_resources.append(applications)
-
-
-def _office365_tenant_id_fields(
-    application: dict[str, Any],
-    get: Callable[..., requests.Response] = requests.get,
-) -> dict[str, Any]:
-    """Add the Microsoft tenant id to an Office 365 SAML 1.1 application.
-
-    Applies only to the office365 app with SAML_1_1 sign-on that has an
-    msftTenant but no microsoftTenantId; the id is resolved from Microsoft's
-    OpenID configuration.
-
-    Args:
-        application: Raw application record.
-        get: HTTP GET function, replaceable in tests.
-
-    Returns:
-        The application, with settings.app.microsoftTenantId filled when resolved.
-    """
-    if (
-        application.get("name") != "office365"
-        or application.get("signOnMode") != "SAML_1_1"
-    ):
-        return application
-
-    settings = application.get("settings")
-    if not isinstance(settings, Mapping):
-        return application
-
-    app_settings = settings.get("app")
-    if not isinstance(app_settings, Mapping):
-        return application
-
-    if app_settings.get("microsoftTenantId"):
-        return application
-
-    msft_tenant = app_settings.get("msftTenant")
-    if not isinstance(msft_tenant, str) or not msft_tenant.strip():
-        return application
-
-    tenant_id = _microsoft_tenant_id_from_onmicrosoft_domain(msft_tenant, get=get)
-    if tenant_id is None:
-        return application
-
-    enriched_app_settings = {**app_settings, "microsoftTenantId": tenant_id}
-    enriched_settings = {**settings, "app": enriched_app_settings}
-    return {**application, "settings": enriched_settings}
-
-
-def _microsoft_tenant_id_from_onmicrosoft_domain(
-    onmicrosoft_domain: str,
-    *,
-    get: Callable[..., requests.Response] = requests.get,
-) -> str | None:
-    """Resolve a Microsoft tenant id from an onmicrosoft.com domain prefix.
-
-    Reads the tenant's OpenID configuration and takes the tenant id from the
-    token endpoint path. Failures are logged and yield None.
-
-    Args:
-        onmicrosoft_domain: Domain prefix, without ".onmicrosoft.com".
-        get: HTTP GET function, replaceable in tests.
-
-    Returns:
-        The tenant id, or None if it could not be resolved.
-    """
-    domain_name = f"{onmicrosoft_domain}.onmicrosoft.com"
-    config_url = (
-        f"https://login.microsoftonline.com/{domain_name}/"
-        ".well-known/openid-configuration"
-    )
-
-    try:
-        response = get(config_url, timeout=30)
-        response.raise_for_status()
-        config = response.json()
-    except (requests.RequestException, ValueError):
-        logger.warning(
-            "Unable to resolve Microsoft tenant ID for %s",
-            domain_name,
-            exc_info=True,
-        )
-        return None
-
-    if not isinstance(config, Mapping):
-        return None
-
-    token_endpoint = config.get("token_endpoint")
-    if not isinstance(token_endpoint, str):
-        return None
-
-    path_segments = [
-        segment for segment in urlparse(token_endpoint).path.split("/") if segment
-    ]
-    return path_segments[0] if path_segments else None
 
 
 def _saml_metadata_fields(
@@ -1806,6 +1518,22 @@ def application_user_rows(application: Application, ctx: SourceContext):
     user_name_template = (
         application.credentials.user_name_template if application.credentials else None
     )
+    # Application details are the same on every row, so build them once.
+    app_fields = {
+        "app_id": application.id,
+        "app_features": application.features,
+        "app_name": application.name,
+        "app_status": getattr(application, "status", None),
+        "app_settings": application.settings.app if application.settings else None,
+        "app_sign_on_mode": application.sign_on_mode,
+        "app_subject_name_id_template": (
+            sign_on.subject_name_id_template if sign_on else None
+        ),
+        "app_subject_name_id_format": (
+            sign_on.subject_name_id_format if sign_on else None
+        ),
+        "app_user_name_template": _user_name_template_value(user_name_template),
+    }
     try:
         for page in ctx.pool.paginate(
             f"/api/v1/apps/{application.id}/users",
@@ -1814,25 +1542,22 @@ def application_user_rows(application: Application, ctx: SourceContext):
             for item in page:
                 row_count += 1
                 yield {
-                    "app_id": application.id,
-                    "app_features": application.features,
-                    "app_name": application.name,
-                    "app_label": application.label,
-                    "app_status": getattr(application, "status", None),
-                    "app_settings": application.settings.app
-                    if application.settings
-                    else None,
-                    "app_sign_on_mode": application.sign_on_mode,
-                    "app_subject_name_id_template": (
-                        sign_on.subject_name_id_template if sign_on else None
-                    ),
-                    "app_subject_name_id_format": (
-                        sign_on.subject_name_id_format if sign_on else None
-                    ),
-                    "app_user_name_template": _user_name_template_value(
-                        user_name_template
-                    ),
-                    **item,
+                    **app_fields,
+                    # Profile attributes nobody reads are dropped to save
+                    # space: this is the largest collected table.
+                    "profile": {
+                        key: value
+                        for key, value in (item.get("profile") or {}).items()
+                        if key not in APPLICATION_USER_PROFILE_SKIPPED_KEYS
+                    },
+                    # Likewise the assignment timestamps, _links and _embedded
+                    # copies are dropped; the trimmed profile above stays.
+                    **{
+                        key: value
+                        for key, value in item.items()
+                        if key not in APPLICATION_USER_ITEM_SKIPPED_KEYS
+                        and key != "profile"
+                    },
                 }
     except Exception:
         telemetry.record_application_stream("failed")
@@ -2247,6 +1972,10 @@ def policy_types():
         "PROFILE_ENROLLMENT",
         "POST_AUTH_SESSION",
         "ENTITY_RISK",
+        "SESSION_VIOLATION_DETECTION",
+        "CLIENT_UPDATE",
+        # Early Access; orgs without the feature answer 400 for this type.
+        "IDENTITY_CLAIM_SOURCING",
     ]
     for policy_type in okta_policies:
         yield {"policy_type": policy_type}
@@ -2256,13 +1985,36 @@ def policy_types():
 def policies(policy: dict, ctx: SourceContext):
     """DLT resource, fetches Okta policies via GET /policies.
 
+    A policy type the org does not support (for example an Early Access type
+    that is not enabled) answers 400; that type is logged as a warning and
+    skipped so the remaining types are still collected. Other HTTP errors
+    propagate.
+
     Yields:
         policy (Policy): Policy records.
     """
     policy_type = policy["policy_type"]
-    for page in ctx.pool.paginate("/api/v1/policies", params={"type": policy_type}):
-        for item in page:
-            yield item
+    try:
+        for page in ctx.pool.paginate("/api/v1/policies", params={"type": policy_type}):
+            for item in page:
+                yield item
+    except requests.HTTPError as e:
+        status_code = getattr(e.response, "status_code", None)
+        if status_code != 400:
+            raise
+        try:
+            # e.g. E0000002 "The request was not valid: Invalid policy type
+            # specified. Missing Required Feature Flag SUPPORT_FOR_REAUTH_WITH_EXTERNAL_IDP"
+            body = e.response.json()
+            detail = f"{body.get('errorCode')} {body.get('errorSummary')}"
+        except (ValueError, AttributeError):
+            detail = str(e)
+        logger.warning(
+            "Skipping policy type %s, which is not available in this org: %s",
+            policy_type,
+            detail,
+            extra={"resource": "policies", "phase": "collect"},
+        )
 
 
 @app.transformer(name="policy_mappings", columns=PolicyMapping, parallelized=True)
@@ -2530,9 +2282,7 @@ def api_services(ctx: SourceContext) -> Iterator[dict[str, Any]]:
 
 @app.source(name="okta", max_table_nesting=0)
 def source(
-    credentials: Union[
-        OktaAppCredentials, OktaEncodedAppCredentials, OktaTokenCredentials
-    ] = dlt.secrets.value,
+    credentials: AnyOktaCredentials = dlt.secrets.value,
     applications_page_size: int = APPLICATIONS_PAGE_SIZE,
     application_users_page_size: int = APPLICATION_USERS_PAGE_SIZE,
     groups_page_size: int = GROUPS_PAGE_SIZE,
@@ -2543,6 +2293,7 @@ def source(
     identity_provider_users_page_size: int = IDENTITY_PROVIDER_USERS_PAGE_SIZE,
     limit_app_user_collection: bool = False,
     app_user_collection_app_ids: list[str] | None = None,
+    limit_user_mfa_collection: bool = False,
     endpoint_concurrency: int = DEFAULT_ENDPOINT_CONCURRENCY,
     org_concurrency: int = DEFAULT_ORG_CONCURRENCY,
     rate_limit_max_elapsed_seconds: float = DEFAULT_RATE_LIMIT_MAX_ELAPSED_SECONDS,
@@ -2552,7 +2303,9 @@ def source(
     """DLT source, defines Okta collection resources and transformers.
 
     Args:
-        credentials: Okta API credentials based on key path, encoded key or SSWS for authentication.
+        credentials: Okta API credentials: a service app private key (file
+            path or base64), an API Service Integration client secret, or an
+            SSWS API token.
         applications_page_size: Applications requested per applications page.
         application_users_page_size: Users requested per application-users page.
         groups_page_size: Groups requested per expanded groups page.
@@ -2563,6 +2316,8 @@ def source(
             ALWAYS_COLLECTED_APP_USERS and the applications in app_user_collection_app_ids.
         app_user_collection_app_ids: Additional Okta application IDs whose users are collected
             when limit_app_user_collection is enabled.
+        limit_user_mfa_collection: Collect MFA factors only for privileged users
+            (direct role assignees and admin-group members) instead of every user.
         endpoint_concurrency: Maximum simultaneous requests for each endpoint family.
         org_concurrency: Maximum simultaneous requests across all endpoint families.
         rate_limit_max_elapsed_seconds: Maximum retry window for an individual 429 request.
@@ -2625,6 +2380,7 @@ def source(
             "identity_provider_users_page_size": identity_provider_users_page_size,
             "limit_app_user_collection": limit_app_user_collection,
             "app_user_collection_app_id_count": len(app_user_collection_app_ids or ()),
+            "limit_user_mfa_collection": limit_user_mfa_collection,
             "endpoint_concurrency": endpoint_concurrency,
             "org_concurrency": org_concurrency,
             "rate_limit_max_elapsed_seconds": rate_limit_max_elapsed_seconds,
@@ -2634,7 +2390,7 @@ def source(
 
     pool = ClientPool(
         base_url=credentials.base_url,
-        auth=_request_auth(credentials),
+        auth=credentials.request_auth(),
         paginator=HeaderLinkPaginator(),
         endpoint_concurrency=endpoint_concurrency,
         org_concurrency=org_concurrency,
@@ -2645,7 +2401,7 @@ def source(
 
     ctx = SourceContext(
         pool=pool,
-        tenant_domain=_tenant_domain_from_base_url(credentials.base_url),
+        tenant_domain=credentials.tenant_domain,
         telemetry=telemetry,
         applications_page_size=applications_page_size,
         application_users_page_size=application_users_page_size,
@@ -2659,7 +2415,7 @@ def source(
     custom_roles_resource = custom_roles(ctx)
     built_in_roles_resource = built_in_roles()
     groups_resource = groups(ctx)
-    applications_resource = applications(ctx)
+    applications_resource = applications(ctx).add_map(EntraTenantIdResolver().enrich)
     client_apps_resource = client_applications(ctx)
     agent_pools_resource = agent_pools(ctx)
     api_services_resource = api_services(ctx)
@@ -2668,7 +2424,6 @@ def source(
     resource_sets_resource = resource_sets(ctx)
     users_resource = users(ctx)
     privileged_users_resource = privileged_users(ctx)
-    factor_claims = UserFactorClaims()
     group_memberships_resource = groups_resource | group_memberships(ctx)
     application_users_resource = applications_resource | application_users(ctx)
     if limit_app_user_collection:
@@ -2676,12 +2431,20 @@ def source(
             app_user_collection_filter(frozenset(app_user_collection_app_ids or ())),
             insert_at=0,
         )
+
+    factor_resources: tuple[DltResource, ...]
+    if limit_user_mfa_collection:
+        factor_resources = (
+            privileged_users_resource | user_factors(ctx),
+            group_memberships_resource | admin_group_member_factors(ctx),
+        )
+    else:
+        factor_resources = (users_resource | user_factors(ctx),)
     return (
         organization(ctx),
         users_resource,
         groups_resource,
         group_memberships_resource,
-        group_memberships_resource | admin_group_member_factors(ctx, factor_claims),
         groups_resource | group_role_assignments(ctx),
         client_apps_resource,
         client_apps_resource | client_role_assignments(ctx),
@@ -2722,5 +2485,5 @@ def source(
         built_in_roles_resource | built_in_role_permissions,
         privileged_users_resource,
         privileged_users_resource | user_role_assignments(ctx),
-        privileged_users_resource | user_factors(ctx, factor_claims),
+        *factor_resources,
     )

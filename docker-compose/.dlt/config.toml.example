@@ -1,0 +1,67 @@
+[runtime]
+log_cli_level = "INFO"
+
+[destination.bloodhoundenterprise]
+# Your BHE tenant's HTTPS URL.
+url = "https://REPLACE_WITH_TENANT.bloodhoundenterprise.io"
+collector_name = "okta"
+
+# Optional collector settings, shown with their defaults.
+[sources.source.okta]
+
+# Collect MFA factors only for privileged users instead of every user.
+# limit_user_mfa_collection = false
+
+# Collect application users only for always-collected app types and listed application IDs.
+# limit_app_user_collection = false
+
+# Maximum simultaneous requests across all endpoint families.
+# org_concurrency = 32
+
+# Maximum simultaneous requests for each endpoint family.
+# endpoint_concurrency = 32
+
+# Applications requested per page (1-200).
+# applications_page_size = 200
+
+# Users requested per application-users page (1-500).
+# application_users_page_size = 500
+
+# Groups requested per expanded groups page (1-200).
+# groups_page_size = 200
+
+# Groups requested per application-group-assignments page (20-200).
+# application_group_assignments_page_size = 200
+
+# Mappings requested per group-push page (1-1000).
+# group_push_mappings_page_size = 1000
+
+# Users requested per identity-provider-users page (1-200).
+# identity_provider_users_page_size = 200
+
+# Maximum retry window in seconds for an individual HTTP 429 request.
+# rate_limit_max_elapsed_seconds = 900
+
+# Requests kept as headroom in each observed rate-limit window.
+# rate_limit_remaining_reserve = 1
+
+# Optional collection performance telemetry, shown with its defaults.
+[sources.source.okta.telemetry]
+
+# Enable telemetry.
+# enabled = false
+
+# Output directory; must be outside the raw collection output tree.
+# output_directory = "./telemetry"
+
+# Seconds between telemetry interval records (greater than zero).
+# reporting_interval_seconds = 60
+
+# Maximum size of one telemetry file in bytes (at least 65536).
+# max_file_bytes = 10485760
+
+# Maximum interval records per telemetry file (at least 1).
+# max_interval_records = 1440
+
+# Telemetry record queue capacity (at least 2).
+# queue_capacity = 16

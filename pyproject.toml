@@ -30,6 +30,9 @@ local_scheme = "no-local-version"
 "src/openhound_okta/extension.yaml" = "openhound_okta/extension.yaml"
 
 [dependency-groups]
+container = [
+    "openhound>=0.4.0",
+]
 dev = [
     "pre-commit>=4.5.1",
     "pytest>=9.0.1",

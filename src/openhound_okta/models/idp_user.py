@@ -14,6 +14,7 @@ from openhound_okta.models.saml import (
     saml_service_provider_id,
     normalize_okta_account_state,
 )
+from openhound_okta.utils.entra_tenant import EntraTenantIdResolver
 
 
 class Profile(BaseModel):
@@ -91,7 +92,7 @@ class IDPUser(BaseAsset):
         if (
             self.idp_type == "SAML2"
             and self.idp_url
-            and "microsoftonline.com" in self.idp_url
+            and EntraTenantIdResolver.is_microsoft_login_url(self.idp_url)
             and entra_object_id
         ):
             yield Edge(

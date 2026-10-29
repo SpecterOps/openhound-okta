@@ -11,6 +11,7 @@ from openhound.core.models.entries_dataclass import (
 
 from openhound_okta.app_names import AppName
 from openhound_okta.kinds import edges as ek, nodes as nk
+from openhound_okta.utils.entra_tenant import MICROSOFT_TENANT_ID_SETTING
 
 SUPPORTED_HYBRID_AUTH_APPS: Final[frozenset[str]] = frozenset(
     {
@@ -197,7 +198,7 @@ def outbound_trust_target(
     if app_name == AppName.OFFICE365:
         return HybridTarget.by_id(
             nk.AZ_TENANT,
-            _uppercase_match_value(settings.get("microsoftTenantId")),
+            _uppercase_match_value(settings.get(MICROSOFT_TENANT_ID_SETTING)),
         )
     return None
 
@@ -251,7 +252,10 @@ def hybrid_user_target(
             nk.AZ_USER,
             (
                 ("userprincipalname", target_user_name),
-                ("tenantid", _uppercase_match_value(settings.get("microsoftTenantId"))),
+                (
+                    "tenantid",
+                    _uppercase_match_value(settings.get(MICROSOFT_TENANT_ID_SETTING)),
+                ),
             ),
         )
     return None
@@ -288,7 +292,10 @@ def hybrid_group_target(
             nk.AZ_GROUP,
             (
                 ("displayname", group_name),
-                ("tenantid", _uppercase_match_value(settings.get("microsoftTenantId"))),
+                (
+                    "tenantid",
+                    _uppercase_match_value(settings.get(MICROSOFT_TENANT_ID_SETTING)),
+                ),
             ),
         )
     return None

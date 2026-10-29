@@ -14,7 +14,14 @@ from dlt.sources.helpers.rest_client.paginators import HeaderLinkPaginator
 from dlt.sources.helpers.rest_client.auth import APIKeyAuth
 from dlt.sources.helpers.requests.session import Session
 
-from openhound_okta.models.token import Token
+import openhound_okta.source as okta_source
+from openhound_okta.models.application import Application
+from openhound_okta.utils.auth import (
+    OktaCredentials,
+    OktaTokenCredentials,
+    Token,
+    classify_unauthorized,
+)
 from openhound_okta.source import (
     API_RATE_LIMIT_ENDPOINTS,
     APPLICATIONS_PAGE_SIZE,
@@ -26,12 +33,8 @@ from openhound_okta.source import (
     IDENTITY_PROVIDER_USERS_PAGE_SIZE,
     ClientPool,
     ConsecutiveAccessDeniedBreaker,
-    OktaTokenCredentials,
-    _microsoft_tenant_id_from_onmicrosoft_domain,
-    _office365_tenant_id_fields,
     _saml_idp_metadata_fields,
     _saml_metadata_fields,
-    _tenant_domain_from_base_url,
     api_services,
     application_grants,
     application_group_assignment_rows,
@@ -44,11 +47,13 @@ from openhound_okta.source import (
     _group_page_sizes,
     groups,
     identity_provider_users,
+    policies,
     resources,
     source,
     user_role_assignment_rows,
 )
 from openhound_okta.utils.auth import OktaBearerAuth, UnauthorizedClassification
+from openhound_okta.utils.entra_tenant import EntraTenantIdResolver
 from openhound_okta.utils.http import (
     DEFAULT_REQUESTS_PER_MINUTE,
     EndpointThrottle,
@@ -79,11 +84,25 @@ class FakeClock:
         self.now += delay
 
 
-def test_tenant_domain_uses_hostname_without_port_or_user_info():
-    assert (
-        _tenant_domain_from_base_url("https://user:secret@MIXED.Example:443/api/v1")
-        == "mixed.example"
-    )
+def test_tenant_domain_uses_casefolded_hostname_without_port():
+    credentials = OktaCredentials(base_url="https://MIXED.Example:443")
+
+    assert credentials.tenant_domain == "mixed.example"
+
+
+@pytest.mark.parametrize(
+    ("base_url", "message"),
+    [
+        ("https://user:secret@preview.example", "user info"),
+        ("https://preview.example/", "origin"),
+        ("https://preview.example/oauth2/default", "origin"),
+        ("https://preview.example?tenant=example", "origin"),
+        ("https://preview.example#fragment", "origin"),
+    ],
+)
+def test_tenant_domain_rejects_base_urls_beyond_the_origin(base_url, message):
+    with pytest.raises(ValueError, match=message):
+        OktaCredentials(base_url=base_url).tenant_domain
 
 
 @pytest.mark.parametrize(
@@ -98,7 +117,12 @@ def test_tenant_domain_uses_hostname_without_port_or_user_info():
 )
 def test_tenant_domain_rejects_urls_without_scheme_or_hostname(base_url):
     with pytest.raises(ValueError, match="URL scheme and hostname"):
-        _tenant_domain_from_base_url(base_url)
+        OktaCredentials(base_url=base_url).tenant_domain
+
+
+def test_tenant_domain_rejects_plain_http():
+    with pytest.raises(ValueError, match="https"):
+        OktaCredentials(base_url="http://preview.example").tenant_domain
 
 
 def _response(
@@ -641,7 +665,7 @@ def test_401_classification_uses_oauth_challenges_and_okta_error_codes(
         content=content,
     )
 
-    assert OktaRESTClient._classify_unauthorized(response) is expected
+    assert classify_unauthorized(response) is expected
 
 
 def test_401_bearer_refresh_retry_is_bounded_to_once():
@@ -1712,11 +1736,53 @@ def test_group_push_mapping_rows_fetch_target_group_name():
     assert pool.get_paths == ["/api/v1/groups/00g-target"]
 
 
-def test_microsoft_tenant_id_is_derived_from_openid_configuration():
+def test_source_applications_resource_resolves_entra_tenant_ids():
+    credentials = OktaTokenCredentials(
+        base_url="https://example.okta.test",
+        token="token",
+    )
+
+    applications_resource = next(
+        resource
+        for resource in inspect.unwrap(source)(credentials=credentials)
+        if resource.name == "applications"
+    )
+
+    map_functions = [
+        getattr(step, "_f", None) for step in applications_resource._pipe._steps
+    ]
+    assert any(
+        isinstance(getattr(function, "__self__", None), EntraTenantIdResolver)
+        and function.__name__ == "enrich"
+        for function in map_functions
+    )
+
+
+def test_source_applications_are_enriched_before_model_validation(monkeypatch):
+    """The map must see raw API records; dlt keeps the model validator last."""
+
+    class StubPool:
+        def __init__(self, **kwargs):
+            pass
+
+        def paginate(self, path, **kwargs):
+            yield [
+                {
+                    "id": "app-1",
+                    "orn": "orn:okta:idp:example:apps:app-1",
+                    "name": "office365",
+                    "label": "Office 365",
+                    "status": "ACTIVE",
+                    "created": "2026-01-01T00:00:00Z",
+                    "signOnMode": "SAML_1_1",
+                    "settings": {"app": {"msftTenant": "contoso"}},
+                }
+            ]
+
     requested = []
 
     def get(url, **kwargs):
-        requested.append((url, kwargs))
+        requested.append(url)
         response = requests.Response()
         response.status_code = 200
         response._content = (
@@ -1725,43 +1791,33 @@ def test_microsoft_tenant_id_is_derived_from_openid_configuration():
         )
         return response
 
-    tenant_id = _microsoft_tenant_id_from_onmicrosoft_domain(
-        "contoso",
-        get=get,
+    monkeypatch.setattr(okta_source, "ClientPool", StubPool)
+    monkeypatch.setattr(
+        okta_source,
+        "EntraTenantIdResolver",
+        lambda: EntraTenantIdResolver(get=get),
+    )
+    credentials = OktaTokenCredentials(
+        base_url="https://example.okta.test",
+        token="token",
     )
 
-    assert tenant_id == "31537af4-6d77-4bb9-a681-d2394888ea26"
-    assert requested == [
-        (
-            "https://login.microsoftonline.com/contoso.onmicrosoft.com/"
-            ".well-known/openid-configuration",
-            {"timeout": 30},
-        )
-    ]
+    applications_resource = next(
+        resource
+        for resource in inspect.unwrap(source)(credentials=credentials)
+        if resource.name == "applications"
+    )
+    rows = list(applications_resource)
 
-
-def test_office365_saml_app_is_enriched_with_microsoft_tenant_id():
-    def get(url, **kwargs):
-        response = requests.Response()
-        response.status_code = 200
-        response._content = (
-            b'{"token_endpoint":"https://login.microsoftonline.com/'
-            b'tenant-id/oauth2/v2.0/token"}'
-        )
-        return response
-
-    application = {
-        "name": "office365",
-        "signOnMode": "SAML_1_1",
-        "settings": {"app": {"msftTenant": "contoso"}},
-    }
-
-    enriched = _office365_tenant_id_fields(application, get=get)
-
-    assert enriched["settings"]["app"] == {
+    assert [type(row) for row in rows] == [Application]
+    assert rows[0].settings.app == {
         "msftTenant": "contoso",
-        "microsoftTenantId": "tenant-id",
+        "microsoftTenantId": "31537af4-6d77-4bb9-a681-d2394888ea26",
     }
+    assert requested == [
+        "https://login.microsoftonline.com/contoso.onmicrosoft.com/"
+        ".well-known/openid-configuration"
+    ]
 
 
 def test_identity_provider_users_request_the_maximum_page_size():
@@ -2170,6 +2226,93 @@ def test_api_services_other_http_errors_propagate():
 
     with pytest.raises(requests.HTTPError):
         list(inspect.unwrap(api_services)(ctx))
+
+
+UNSUPPORTED_POLICY_TYPE_BODY = (
+    b'{"errorCode": "E0000002", "errorSummary": "The request was not valid: '
+    b"Invalid policy type specified. Missing Required Feature Flag "
+    b'SUPPORT_FOR_REAUTH_WITH_EXTERNAL_IDP", "errorLink": "E0000002", '
+    b'"errorId": "oae4OLpq_kFQduaoxFIOOvtKg", "errorCauses": []}'
+)
+
+
+class ScriptedPoliciesPool:
+    """Pool for the policies transformer: one scripted paginate reply.
+
+    Attributes:
+        action: An int raises an HTTPError with that status and ``error_body``;
+            a list is the single page of items yielded.
+        params: Query parameters of the last paginate call.
+    """
+
+    def __init__(self, action: ScriptedPoolAction, error_body: bytes = b"{}") -> None:
+        self.action = action
+        self.error_body = error_body
+        self.params: dict[str, str] | None = None
+
+    def paginate(self, path: str, **kwargs) -> Iterator[list[dict[str, str]]]:
+        self.params = kwargs.get("params")
+        if isinstance(self.action, int):
+            raise requests.HTTPError(
+                response=_response(
+                    self.action,
+                    f"https://example.okta.test{path}",
+                    content=self.error_body,
+                )
+            )
+        yield self.action
+
+
+def test_policies_skips_unavailable_policy_type_with_a_warning(caplog):
+    pool = ScriptedPoliciesPool(400, UNSUPPORTED_POLICY_TYPE_BODY)
+    ctx = SimpleNamespace(pool=pool)
+
+    with caplog.at_level(logging.WARNING):
+        rows = list(
+            inspect.unwrap(policies)({"policy_type": "IDENTITY_CLAIM_SOURCING"}, ctx)
+        )
+
+    assert rows == []
+    assert pool.params == {"type": "IDENTITY_CLAIM_SOURCING"}
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "Skipping policy type IDENTITY_CLAIM_SOURCING" in message
+        and "E0000002" in message
+        and "SUPPORT_FOR_REAUTH_WITH_EXTERNAL_IDP" in message
+        for message in messages
+    )
+    assert not any(record.levelno >= logging.ERROR for record in caplog.records)
+
+
+def test_policies_warning_falls_back_to_the_http_error_without_a_summary(caplog):
+    pool = ScriptedPoliciesPool(400, b"")
+    ctx = SimpleNamespace(pool=pool)
+
+    with caplog.at_level(logging.WARNING):
+        rows = list(inspect.unwrap(policies)({"policy_type": "CLIENT_UPDATE"}, ctx))
+
+    assert rows == []
+    assert any(
+        "Skipping policy type CLIENT_UPDATE" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_policies_yields_rows_for_supported_policy_type():
+    pool = ScriptedPoliciesPool([{"id": "rst1", "type": "ACCESS_POLICY"}])
+    ctx = SimpleNamespace(pool=pool)
+
+    rows = list(inspect.unwrap(policies)({"policy_type": "ACCESS_POLICY"}, ctx))
+
+    assert rows == [{"id": "rst1", "type": "ACCESS_POLICY"}]
+
+
+def test_policies_other_http_errors_propagate():
+    pool = ScriptedPoliciesPool(403)
+    ctx = SimpleNamespace(pool=pool)
+
+    with pytest.raises(requests.HTTPError):
+        list(inspect.unwrap(policies)({"policy_type": "ACCESS_POLICY"}, ctx))
 
 
 def test_application_secrets_skips_applications_without_credentials():

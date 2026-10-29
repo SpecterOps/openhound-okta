@@ -21,8 +21,8 @@ class UserProperties(OktaNodeProperties):
     created: datetime
     enabled: bool = False
     has_role_assignments: bool = False
-    # None means factors were not collected for the user (not privileged);
-    # 0 means the user is privileged and has no enrolled factors.
+    # None means factors were not collected for the user (e.g. not privileged
+    # under limit_user_mfa_collection); 0 means the user has no active factors.
     authentication_factors: int | None = None
     login: str | None = None
     email: str | None = None

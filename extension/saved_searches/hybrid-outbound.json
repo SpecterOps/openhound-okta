@@ -1,5 +1,7 @@
 {
-  "name": "Okta: Hybrid Relationships Outbound",
+  "query_key": "Okta_hybrid_outbound",
+  "name": "Hybrid Relationships Outbound",
   "description": "Retrieves all hybrid relationships from Okta to external systems.",
-  "query": "MATCH path = (:Okta)-[]->(target)\nWHERE NOT target:Okta\nRETURN path\nLIMIT 1000"
+  "query": "MATCH path = (:Okta)-[]->(target)\nWHERE NOT target:Okta\nRETURN path\nLIMIT 1000",
+  "category": "Cross Platform Attack Paths"
 }

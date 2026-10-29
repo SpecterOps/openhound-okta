@@ -11,11 +11,11 @@ from openhound_okta.models.hybrid_auth import SUPPORTED_HYBRID_AUTH_APPS
 from openhound_okta.oin_routes.registry import OIN_ROUTE_REGISTRY
 from openhound_okta.source import (
     APPLICATION_USERS_PAGE_SIZE,
-    OktaTokenCredentials,
     app_user_collection_filter,
     application_users,
     source,
 )
+from openhound_okta.utils.auth import OktaTokenCredentials
 
 
 def _application(app_id: str, name: str) -> SimpleNamespace:

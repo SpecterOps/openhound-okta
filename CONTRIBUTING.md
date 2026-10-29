@@ -25,19 +25,17 @@ winget configure https://raw.githubusercontent.com/SpecterOps/openhound-okta/mai
 The configuration also enables [Windows Developer Mode](https://learn.microsoft.com/en-us/windows/advanced-settings/developer-mode). Some resources (Git, Node.js,
 Developer Mode) install machine-wide, so expect a User Account Control elevation prompt.
 
-### 2. Clone the repository with submodules
+### 2. Clone the repository
 
 ```bash
-git clone --recurse-submodules https://github.com/SpecterOps/openhound-okta.git
+git clone https://github.com/SpecterOps/openhound-okta.git
 cd openhound-okta
 ```
-
-If you already cloned without submodules, run `git submodule update --init`.
 
 ### 3. Install agent skills
 
 If you use a coding agent (Claude Code or Codex), install the shared agent skills
-(the documentation skills from `og-docs-automation` and the skills from the
+(the documentation skills from `og-automation` and the skills from the
 OpenHound template, both fetched from GitHub):
 
 ```bash

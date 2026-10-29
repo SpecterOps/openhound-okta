@@ -1,15 +1,18 @@
 name: okta
-version: 0.0.3
-schema_version: v2.9.0
-description: "OpenHound collector for Okta using OpenHound"
+version: 0.10.2
+description: "OpenGraph collector for Okta"
 authors:
   - name: Michael Grafnetter
-    email: mgrafnetter@specterops.io
-  - name: jdreijer
-    email: jdreijer@specterops.io
+    url: https://github.com/MichaelGrafnetter
+  - name: Joey Dreijer
+    url: https://github.com/d3vzer0
+  - name: Jared Atkinson
+    url: https://github.com/jaredcatkinson
+  - name: Jim Sykora
+    url: https://github.com/JimSycurity
 
 type: local
-license: MIT
+license: Apache-2.0
 homepage: https://github.com/specterops/openhound-okta
 references:
   - name: OpenHound
@@ -20,22 +23,61 @@ credentials:
     description: Okta base URL
     required: true
   - name: client_id
-    description: Okta app registration client ID
+    description: Client ID of the Okta service app or API Service Integration
+    required: false
+  - name: client_secret
+    description: Client secret of the Okta API Service Integration
     required: false
   - name: private_key_path
-    description: Path to Okta private key
+    description: Path to the Okta service app private key (JWK)
     required: false
-  - name: private_key_encoded
-    description: Base64 encoded Okta private key
+  - name: private_key_b64
+    description: Base64 encoded Okta service app private key (JWK)
     required: false
   - name: token
-    description: Classic Okta API token
+    description: Okta API token (SSWS)
     required: false
 parameters:
-  - name: size
-    description: An example parameter specifying batch size for fetching data
+  - name: applications_page_size
+    description: Applications requested per applications page (1-200)
     required: false
-    default: 10000
+    default: 200
+  - name: application_users_page_size
+    description: Users requested per application-users page (1-500)
+    required: false
+    default: 500
+  - name: groups_page_size
+    description: Groups requested per expanded groups page (1-200)
+    required: false
+    default: 200
+  - name: application_group_assignments_page_size
+    description: Groups requested per application-group-assignments page (20-200)
+    required: false
+    default: 200
+  - name: group_push_mappings_page_size
+    description: Mappings requested per group-push page (1-1000)
+    required: false
+    default: 1000
+  - name: identity_provider_users_page_size
+    description: Users requested per identity-provider-users page (1-200)
+    required: false
+    default: 200
+  - name: endpoint_concurrency
+    description: Maximum simultaneous requests for each endpoint family
+    required: false
+    default: 32
+  - name: org_concurrency
+    description: Maximum simultaneous requests across all endpoint families
+    required: false
+    default: 32
+  - name: rate_limit_max_elapsed_seconds
+    description: Maximum elapsed retry window in seconds for an individual 429 request
+    required: false
+    default: 900
+  - name: rate_limit_remaining_reserve
+    description: Requests retained as headroom in each observed rate-limit window
+    required: false
+    default: 1
   - name: limit_app_user_collection
     description: Collect application user assignments only for a limited set of app types and listed application IDs
     required: false
@@ -43,5 +85,29 @@ parameters:
   - name: app_user_collection_app_ids
     description: Additional Okta application IDs whose user assignments are collected when the limit is enabled
     required: false
+  - name: telemetry.enabled
+    description: Enable collection performance telemetry
+    required: false
+    default: false
+  - name: telemetry.output_directory
+    description: Telemetry output directory, must be outside the raw collection output tree
+    required: false
+    default: ./telemetry
+  - name: telemetry.reporting_interval_seconds
+    description: Seconds between telemetry interval records (greater than zero)
+    required: false
+    default: 60
+  - name: telemetry.max_file_bytes
+    description: Maximum size of one telemetry file in bytes (at least 65536)
+    required: false
+    default: 10485760
+  - name: telemetry.max_interval_records
+    description: Maximum interval records per telemetry file (at least 1)
+    required: false
+    default: 1440
+  - name: telemetry.queue_capacity
+    description: Telemetry record queue capacity (at least 2)
+    required: false
+    default: 16
 
 tags: [ "okta", "extension", "opengraph", "bloodhound" ]

@@ -157,7 +157,8 @@ max_parallel_items = 22
     cookie = run_context.push_context()
     try:
         run_context.reload(str(tmp_path))
-        from openhound_okta.source import OktaTokenCredentials, source
+        from openhound_okta.source import source
+        from openhound_okta.utils.auth import OktaTokenCredentials
 
         source_object = source(
             credentials=OktaTokenCredentials(
@@ -193,7 +194,8 @@ max_parallel_items = 22
     cookie = run_context.push_context()
     try:
         run_context.reload(str(tmp_path))
-        from openhound_okta.source import OktaTokenCredentials, source
+        from openhound_okta.source import source
+        from openhound_okta.utils.auth import OktaTokenCredentials
 
         source_object = source(
             credentials=OktaTokenCredentials(
@@ -235,7 +237,8 @@ org_concurrency = 12
     cookie = run_context.push_context()
     try:
         run_context.reload(str(tmp_path))
-        from openhound_okta.source import OktaTokenCredentials, source
+        from openhound_okta.source import source
+        from openhound_okta.utils.auth import OktaTokenCredentials
 
         source(
             credentials=OktaTokenCredentials(
@@ -249,6 +252,41 @@ org_concurrency = 12
 
     assert recorded[0]["endpoint_concurrency"] == 4
     assert recorded[0]["org_concurrency"] == 7
+
+
+def test_limit_user_mfa_collection_is_read_from_config_toml(tmp_path):
+    settings_directory = tmp_path / ".dlt"
+    settings_directory.mkdir()
+    (settings_directory / "config.toml").write_text(
+        """
+[sources.source.okta]
+limit_user_mfa_collection = true
+""".strip()
+    )
+    recorded: list[dict] = []
+
+    class RecordingTelemetry(NullTelemetryRecorder):
+        def set_effective_settings(self, values):
+            recorded.append(dict(values))
+
+    run_context = Container()[PluggableRunContext]
+    cookie = run_context.push_context()
+    try:
+        run_context.reload(str(tmp_path))
+        from openhound_okta.source import source
+        from openhound_okta.utils.auth import OktaTokenCredentials
+
+        source(
+            credentials=OktaTokenCredentials(
+                base_url="https://example.okta.test",
+                token="not-used",
+            ),
+            telemetry=RecordingTelemetry(),
+        )
+    finally:
+        run_context.pop_context(cookie)
+
+    assert recorded[0]["limit_user_mfa_collection"] is True
 
 
 def test_environment_overrides_config_toml(monkeypatch, tmp_path):
