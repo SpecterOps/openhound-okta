@@ -12,7 +12,7 @@ import dlt
 from dlt.common.configuration import resolve_configuration
 from joserfc.jwk import RSAKey
 
-from openhound_okta.source import OktaAppCredentials
+from openhound_okta.utils.auth import OktaAppCredentials
 
 
 class PreflightError(ValueError):
@@ -34,7 +34,10 @@ def https_url(name: str, value: str, *, origin_only: bool = False) -> None:
         or not parsed.hostname
         or parsed.username
         or parsed.password
-        or (origin_only and (parsed.path or parsed.params or parsed.query or parsed.fragment))
+        or (
+            origin_only
+            and (parsed.path or parsed.params or parsed.query or parsed.fragment)
+        )
     ):
         raise PreflightError(f"Set a valid HTTPS URL for {name}")
 
@@ -52,7 +55,9 @@ def main() -> None:
         sections=("sources", "source", "okta", "credentials"),
     )
     for field in ("base_url", "client_id", "private_key_path"):
-        required(f"sources.source.okta.credentials.{field}", getattr(credentials, field))
+        required(
+            f"sources.source.okta.credentials.{field}", getattr(credentials, field)
+        )
     https_url("Okta base_url", credentials.base_url, origin_only=True)
     key_data = json.loads(Path(credentials.private_key_path).read_text())
     required("the Okta JWK kid", key_data.get("kid"))

@@ -273,7 +273,8 @@ limit_user_mfa_collection = true
     cookie = run_context.push_context()
     try:
         run_context.reload(str(tmp_path))
-        from openhound_okta.source import OktaTokenCredentials, source
+        from openhound_okta.source import source
+        from openhound_okta.utils.auth import OktaTokenCredentials
 
         source(
             credentials=OktaTokenCredentials(
