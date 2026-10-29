@@ -116,8 +116,9 @@ application types listed in `ALWAYS_COLLECTED_APP_USERS` (Active Directory, LDAP
 Okta Org2Org, Microsoft Office 365, the OIN apps parsed for hybrid authentication or SAML
 normalization, and apps commonly assigned in customer tenants) and for the application IDs in
 `app_user_collection_app_ids`. Application-group assignments are still collected for every
-application. Skipped applications keep their nodes and group-based assignment edges but receive
-no direct user `Okta_AppAssignment`, sync, or hybrid sign-on edges.
+application. Skipped applications keep their nodes, group-based assignment edges, and
+application-level hybrid edges, but lose the edges derived from individual user assignments:
+direct user `Okta_AppAssignment`, sync, and user-specific hybrid sign-on edges.
 
 ## Optional collection performance telemetry
 
