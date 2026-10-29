@@ -177,11 +177,23 @@ non-secret settings:
 | `SOURCES__SOURCE__OKTA__APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE` | `200` | Application-group assignments per page, from 20 through 200 |
 | `SOURCES__SOURCE__OKTA__GROUP_PUSH_MAPPINGS_PAGE_SIZE` | `1000` | Group push mappings per page, from 1 through 1,000 |
 | `SOURCES__SOURCE__OKTA__IDENTITY_PROVIDER_USERS_PAGE_SIZE` | `200` | Identity-provider users per page, from 1 through 200 |
+| `SOURCES__SOURCE__OKTA__LIMIT_APP_USER_COLLECTION` | `false` | Collect application users only for always-collected app types and listed application IDs |
+| `SOURCES__SOURCE__OKTA__APP_USER_COLLECTION_APP_IDS` | `[]` | Additional application IDs whose users are collected when the limit is enabled |
 | `SOURCES__SOURCE__OKTA__LIMIT_USER_MFA_COLLECTION` | `false` | Collect MFA factors only for privileged users (direct role assignees and admin-group members) instead of every user; factor collection costs one request per covered user |
 | `SOURCES__SOURCE__OKTA__ENDPOINT_CONCURRENCY` | `32` | Maximum simultaneous requests per endpoint family |
 | `SOURCES__SOURCE__OKTA__ORG_CONCURRENCY` | `32` | Maximum simultaneous requests across all endpoint families, kept under Okta's per-org concurrency limit (35 on Integrator Free, 75 on production orgs) |
 | `SOURCES__SOURCE__OKTA__RATE_LIMIT_MAX_ELAPSED_SECONDS` | `900` | Maximum elapsed retry window for an individual 429 request |
 | `SOURCES__SOURCE__OKTA__RATE_LIMIT_REMAINING_RESERVE` | `1` | Requests held in reserve when pacing against a rate-limit window |
+
+Application-user collection is the largest request volume in big tenants. With
+`limit_app_user_collection = true`, the collector requests `/api/v1/apps/{id}/users` only for
+application types listed in `ALWAYS_COLLECTED_APP_USERS` (Active Directory, LDAP Interface,
+Okta Org2Org, Microsoft Office 365, the OIN apps parsed for hybrid authentication or SAML
+normalization, and apps commonly assigned in customer tenants) and for the application IDs in
+`app_user_collection_app_ids`. Application-group assignments are still collected for every
+application. Skipped applications keep their nodes, group-based assignment edges, and
+application-level hybrid edges, but lose the edges derived from individual user assignments:
+direct user `Okta_AppAssignment`, sync, and user-specific hybrid sign-on edges.
 
 ## Optional collection performance telemetry
 

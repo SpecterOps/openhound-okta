@@ -1,3 +1,5 @@
+from openhound_okta.app_names import AppName
+
 from .declarative import RouteProfile, RouteTemplate, RouteVariable
 from .validators import (
     github_slug,
@@ -12,7 +14,7 @@ from .validators import (
 OIN_ROUTE_PROFILES = (
     RouteProfile(
         profile_id="asana",
-        app_keys=("asana",),
+        app_keys=(AppName.ASANA,),
         variables=(),
         routes=(
             RouteTemplate(
@@ -36,7 +38,7 @@ OIN_ROUTE_PROFILES = (
     ),
     RouteProfile(
         profile_id="okta_org2org",
-        app_keys=("okta_org2org",),
+        app_keys=(AppName.OKTA_ORG2ORG,),
         variables=(
             RouteVariable(
                 name="acs_url",
@@ -67,7 +69,7 @@ OIN_ROUTE_PROFILES = (
     ),
     RouteProfile(
         profile_id="jamf_pro",
-        app_keys=("jamfsoftwareserver",),
+        app_keys=(AppName.JAMF_SAML,),
         variables=(
             RouteVariable(
                 name="domain",
@@ -92,7 +94,7 @@ OIN_ROUTE_PROFILES = (
     ),
     RouteProfile(
         profile_id="github_enterprise",
-        app_keys=("githubenterprisemanageduser",),
+        app_keys=(AppName.GITHUB_ENTERPRISE_MANAGED_USER,),
         variables=(
             RouteVariable(
                 name="enterprise_name",
@@ -117,7 +119,7 @@ OIN_ROUTE_PROFILES = (
     ),
     RouteProfile(
         profile_id="palo_alto_globalprotect",
-        app_keys=("panw_globalprotect",),
+        app_keys=(AppName.PALO_ALTO_GLOBALPROTECT,),
         variables=(
             RouteVariable(
                 name="base_url",
@@ -145,7 +147,7 @@ OIN_ROUTE_PROFILES = (
     ),
     RouteProfile(
         profile_id="slack",
-        app_keys=("slack",),
+        app_keys=(AppName.SLACK,),
         variables=(
             RouteVariable(
                 name="domain",
@@ -175,7 +177,7 @@ OIN_ROUTE_PROFILES = (
     ),
     RouteProfile(
         profile_id="zoom_single_vanity",
-        app_keys=("zoomus",),
+        app_keys=(AppName.ZOOM,),
         variables=(
             RouteVariable(
                 name="subdomain",

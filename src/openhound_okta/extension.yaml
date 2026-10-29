@@ -78,6 +78,17 @@ parameters:
     description: Requests retained as headroom in each observed rate-limit window
     required: false
     default: 1
+  - name: limit_app_user_collection
+    description: Collect application user assignments only for a limited set of app types and listed application IDs
+    required: false
+    default: false
+  - name: app_user_collection_app_ids
+    description: Additional Okta application IDs whose user assignments are collected when the limit is enabled
+    required: false
+  - name: limit_user_mfa_collection
+    description: Collect MFA factors only for privileged users (direct role assignees and admin-group members) instead of every user
+    required: false
+    default: false
   - name: telemetry.enabled
     description: Enable collection performance telemetry
     required: false

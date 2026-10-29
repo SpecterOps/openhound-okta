@@ -2,6 +2,8 @@ from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlsplit
 
+from openhound_okta.app_names import AppName
+
 from ..contract import (
     CallableRouteProvider,
     OinRouteResolution,
@@ -86,7 +88,7 @@ def _miro_route(app_settings: Mapping[str, Any]) -> OinRouteResolution:
 
 MIRO_PROVIDER = CallableRouteProvider(
     profile_id="miro",
-    app_keys=("realtime_board",),
+    app_keys=(AppName.MIRO,),
     app_fields=("customAcsUrl", "customEntityId"),
     resolver=_miro_route,
     evidence_references=(
