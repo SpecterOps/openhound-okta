@@ -1,3 +1,5 @@
+import logging
+
 import duckdb
 import pytest
 
@@ -18,6 +20,8 @@ from openhound_okta.source import (
 )
 from openhound_okta.transforms import (
     insert_principals_with_admin_roles,
+    non_admin_apps,
+    non_admin_groups,
     non_admin_users,
     principals_with_admin_roles,
 )
@@ -349,6 +353,156 @@ def test_non_admin_users_excludes_inherited_admins_from_privileged_inventory():
     assert con.execute(
         "SELECT id FROM okta.non_admin_users ORDER BY id"
     ).fetchall() == [("plain-user",)]
+
+
+def test_non_admin_users_excludes_admin_group_members_missing_from_inventory():
+    con = duckdb.connect()
+    con.execute("CREATE SCHEMA okta")
+    con.execute("CREATE TABLE okta.users (id VARCHAR)")
+    con.execute("CREATE TABLE okta.privileged_users (id VARCHAR)")
+    con.execute(
+        "CREATE TABLE okta.group_memberships "
+        "(id VARCHAR, group_id VARCHAR, group_has_admin_privilege BOOLEAN)"
+    )
+    con.execute(
+        "INSERT INTO okta.users VALUES "
+        "('direct-user'), ('inherited-user'), ('plain-user')"
+    )
+    con.execute("INSERT INTO okta.privileged_users VALUES ('direct-user')")
+    con.execute(
+        "INSERT INTO okta.group_memberships VALUES "
+        "('inherited-user', 'admin-group', TRUE), "
+        "('plain-user', 'plain-group', FALSE)"
+    )
+
+    principals_with_admin_roles(con)
+    insert_principals_with_admin_roles(con)
+    non_admin_users(con)
+
+    assert con.execute(
+        "SELECT id FROM okta.non_admin_users ORDER BY id"
+    ).fetchall() == [("plain-user",)]
+
+
+def test_non_admin_users_excludes_members_of_role_assigned_groups_without_flag():
+    con = duckdb.connect()
+    con.execute("CREATE SCHEMA okta")
+    con.execute("CREATE TABLE okta.users (id VARCHAR)")
+    con.execute(
+        "CREATE TABLE okta.group_memberships "
+        "(id VARCHAR, group_id VARCHAR, group_has_admin_privilege BOOLEAN)"
+    )
+    con.execute(
+        "CREATE TABLE okta.group_role_assignments "
+        "(source_id VARCHAR, status VARCHAR, assignment_type VARCHAR)"
+    )
+    con.execute(
+        "INSERT INTO okta.users VALUES "
+        "('inherited-user'), ('inactive-role-user'), ('plain-user')"
+    )
+    con.execute(
+        "INSERT INTO okta.group_memberships VALUES "
+        "('inherited-user', 'admin-group', FALSE), "
+        "('inactive-role-user', 'inactive-group', FALSE), "
+        "('plain-user', 'plain-group', FALSE), "
+        "('uncollected-user', 'admin-group', FALSE)"
+    )
+    con.execute(
+        "INSERT INTO okta.group_role_assignments VALUES "
+        "('admin-group', 'ACTIVE', 'GROUP'), "
+        "('inactive-group', 'INACTIVE', 'GROUP')"
+    )
+
+    principals_with_admin_roles(con)
+    insert_principals_with_admin_roles(con)
+    non_admin_users(con)
+
+    assert con.execute(
+        "SELECT id FROM okta.non_admin_users ORDER BY id"
+    ).fetchall() == [("inactive-role-user",), ("plain-user",)]
+    assert con.execute(
+        "SELECT id FROM okta.principals_with_admin_roles "
+        "WHERE principal_type = 'user' ORDER BY id"
+    ).fetchall() == [("inherited-user",)]
+
+
+def test_admin_principal_transform_classifies_resource_set_binding_assignees():
+    con = duckdb.connect()
+    con.execute("CREATE SCHEMA okta")
+    con.execute("CREATE TABLE okta.users (id VARCHAR)")
+    con.execute("CREATE TABLE okta.groups (id VARCHAR)")
+    con.execute("CREATE TABLE okta.applications (id VARCHAR)")
+    con.execute(
+        "CREATE TABLE okta.group_memberships "
+        "(id VARCHAR, group_id VARCHAR, group_has_admin_privilege BOOLEAN)"
+    )
+    con.execute(
+        "CREATE TABLE okta.resource_set_role_assignments "
+        "(resource_set_id VARCHAR, role_id VARCHAR, assignee_id VARCHAR)"
+    )
+    con.execute(
+        "INSERT INTO okta.users VALUES ('bound-user'), ('member-user'), ('plain-user')"
+    )
+    con.execute("INSERT INTO okta.groups VALUES ('bound-group'), ('plain-group')")
+    con.execute("INSERT INTO okta.applications VALUES ('bound-app'), ('plain-app')")
+    con.execute(
+        "INSERT INTO okta.group_memberships VALUES "
+        "('member-user', 'bound-group', FALSE), "
+        "('plain-user', 'plain-group', FALSE)"
+    )
+    con.execute(
+        "INSERT INTO okta.resource_set_role_assignments VALUES "
+        "('rs-1', 'role-1', 'bound-user'), "
+        "('rs-1', 'role-1', 'bound-group'), "
+        "('rs-1', 'role-1', 'bound-app'), "
+        "('rs-1', 'role-1', 'uncollected-integration')"
+    )
+
+    principals_with_admin_roles(con)
+    insert_principals_with_admin_roles(con)
+    non_admin_users(con)
+    non_admin_groups(con)
+    non_admin_apps(con)
+
+    assert con.execute(
+        "SELECT id, principal_type FROM okta.principals_with_admin_roles "
+        "ORDER BY principal_type, id"
+    ).fetchall() == [
+        ("bound-app", "client"),
+        ("bound-group", "group"),
+        ("bound-user", "user"),
+        ("member-user", "user"),
+    ]
+    assert con.execute("SELECT id FROM okta.non_admin_users").fetchall() == [
+        ("plain-user",)
+    ]
+    assert con.execute("SELECT id FROM okta.non_admin_groups").fetchall() == [
+        ("plain-group",)
+    ]
+    assert con.execute("SELECT id FROM okta.non_admin_apps").fetchall() == [
+        ("plain-app",)
+    ]
+
+
+def test_admin_principal_transform_warns_when_inventory_is_missing(caplog):
+    con = duckdb.connect()
+    con.execute("CREATE SCHEMA okta")
+    con.execute(
+        "CREATE TABLE okta.group_memberships "
+        "(id VARCHAR, group_id VARCHAR, group_has_admin_privilege BOOLEAN)"
+    )
+
+    principals_with_admin_roles(con)
+    with caplog.at_level(logging.WARNING, logger="openhound_okta.transforms"):
+        insert_principals_with_admin_roles(con)
+
+    warnings = [record.getMessage() for record in caplog.records]
+    assert len(warnings) == 1
+    assert warnings[0].startswith(
+        "The privileged user inventory is unavailable, so users with direct "
+        "role assignments are not excluded from management edge targets: "
+    )
+    assert "privileged_users" in warnings[0]
 
 
 def test_org_wide_standard_role_assignment_is_scoped_to_org():
