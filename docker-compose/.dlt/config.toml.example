@@ -15,6 +15,9 @@ collector_name = "okta"
 # Collect application users only for always-collected app types and listed application IDs.
 # limit_app_user_collection = false
 
+# Additional application IDs whose users are collected when the limit is enabled.
+# app_user_collection_app_ids = []
+
 # Maximum simultaneous requests across all endpoint families.
 # org_concurrency = 32
 

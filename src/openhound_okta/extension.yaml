@@ -85,6 +85,10 @@ parameters:
   - name: app_user_collection_app_ids
     description: Additional Okta application IDs whose user assignments are collected when the limit is enabled
     required: false
+  - name: limit_user_mfa_collection
+    description: Collect MFA factors only for privileged users (direct role assignees and admin-group members) instead of every user
+    required: false
+    default: false
   - name: telemetry.enabled
     description: Enable collection performance telemetry
     required: false
