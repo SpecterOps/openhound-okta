@@ -97,8 +97,8 @@ SOURCES__SOURCE__OKTA__CREDENTIALS__PRIVATE_KEY_PATH=<path-to-jwk.json>
 
 ### Client secret authentication
 
-A service app whose client authentication is set to client secret, or an Okta Integration Network (OIN) API Service
-Integration:
+An Okta Integration Network (OIN) API Service Integration, using the client ID and client secret Okta issues when it
+is installed in the org:
 
 ```toml
 [sources.source.okta.credentials]

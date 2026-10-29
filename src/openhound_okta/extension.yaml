@@ -26,7 +26,7 @@ credentials:
     description: Client ID of the Okta service app or API Service Integration
     required: false
   - name: client_secret
-    description: Client secret of the Okta service app or API Service Integration
+    description: Client secret of the Okta API Service Integration
     required: false
   - name: private_key_path
     description: Path to the Okta service app private key (JWK)

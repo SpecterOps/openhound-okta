@@ -720,15 +720,16 @@ class OktaEncodedAppCredentials(OktaPrivateKeyCredentials):
 
 @configspec
 class OktaClientSecretCredentials(OktaOAuthCredentials):
-    """Client secret of an Okta service app or API Service Integration.
+    """Client secret of an installed Okta API Service Integration.
 
-    The client authenticates with the client_secret_basic method. HTTPBasicAuth
-    adds the secret to the Authorization header only while the token request is
+    Only Okta Integration Network (OIN) API Service Integrations may obtain
+    Okta API scopes with the client_secret_basic method. HTTPBasicAuth adds
+    the secret to the Authorization header only while the token request is
     prepared, so it never enters the form body, the URL, logs, or validation
     errors.
 
     Attributes:
-        client_secret: Client secret of the service app or integration.
+        client_secret: Client secret issued when the integration was installed.
     """
 
     client_secret: TSecretStrValue = dlt.secrets.value

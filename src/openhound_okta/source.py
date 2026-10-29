@@ -2281,8 +2281,8 @@ def source(
 
     Args:
         credentials: Okta API credentials: a service app private key (file
-            path or base64), a service app or API Service Integration client
-            secret, or an SSWS API token.
+            path or base64), an API Service Integration client secret, or an
+            SSWS API token.
         applications_page_size: Applications requested per applications page.
         application_users_page_size: Users requested per application-users page.
         groups_page_size: Groups requested per expanded groups page.
