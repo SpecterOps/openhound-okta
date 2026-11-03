@@ -19,14 +19,14 @@ from openhound.core.preproc import PreProcessor
 from openhound_okta.kinds import edges as ek, nodes as nk
 from openhound_okta.lookup import OktaLookup
 from openhound_okta.models import ApplicationSecrets
-from openhound_okta.source import (
-    ClientPool,
-    SourceContext,
+from openhound_okta.client import ClientPool
+from openhound_okta.source_context import SourceContext
+from openhound_okta.resources.applications import (
     application_secrets,
     applications,
-    identity_providers,
-    organization,
 )
+from openhound_okta.resources.federation import identity_providers
+from openhound_okta.resources.organization import organization
 from openhound_okta.transforms import transforms
 
 PLAINTEXT_SECRET = "SYNTHETIC-PLAINTEXT-SECRET-bed10001"

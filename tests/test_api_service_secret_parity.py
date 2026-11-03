@@ -1,3 +1,4 @@
+import inspect
 from types import SimpleNamespace
 
 import duckdb
@@ -5,8 +6,7 @@ import duckdb
 from openhound_okta.kinds import edges as ek
 from openhound_okta.lookup import OktaLookup
 from openhound_okta.models import ApiService, ApiServiceSecrets, ApplicationSecrets
-from openhound_okta.source import (
-    api_service_secret_rows,
+from openhound_okta.resources.applications import (
     api_service_secrets,
     api_services,
     application_secrets,
@@ -44,10 +44,14 @@ def make_api_service() -> ApiService:
     )
 
 
-def test_api_service_secret_rows_use_the_integration_credentials_endpoint():
+def test_api_service_secrets_use_the_integration_credentials_endpoint():
     pool = FakePool()
 
-    rows = list(api_service_secret_rows(make_api_service(), SimpleNamespace(pool=pool)))
+    rows = list(
+        inspect.unwrap(api_service_secrets)(
+            make_api_service(), SimpleNamespace(pool=pool)
+        )
+    )
 
     assert pool.paths == [
         "/integrations/api/v1/api-services/integration-1/credentials/secrets"

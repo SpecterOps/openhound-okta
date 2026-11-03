@@ -1,3 +1,4 @@
+import inspect
 from types import SimpleNamespace
 
 from openhound_okta.models import (
@@ -7,7 +8,7 @@ from openhound_okta.models import (
     ApplicationSecrets,
 )
 from openhound_okta.models.api_token import token_window_timespan
-from openhound_okta.source import application_jwk_rows
+from openhound_okta.resources.applications import application_jwks
 
 
 class StubLookup:
@@ -152,7 +153,7 @@ class FakePool:
         ]
 
 
-def test_application_jwk_rows_use_credentials_endpoint_for_full_jwk_metadata():
+def test_application_jwks_use_credentials_endpoint_for_full_jwk_metadata():
     application = SimpleNamespace(
         id="app-1",
         name="App 1",
@@ -174,7 +175,9 @@ def test_application_jwk_rows_use_credentials_endpoint_for_full_jwk_metadata():
     )
     pool = FakePool()
 
-    rows = list(application_jwk_rows(application, SimpleNamespace(pool=pool)))
+    rows = list(
+        inspect.unwrap(application_jwks)(application, SimpleNamespace(pool=pool))
+    )
 
     assert pool.paths == ["/api/v1/apps/app-1/credentials/jwks"]
     assert rows == [

@@ -1,3 +1,4 @@
+import inspect
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -8,13 +9,12 @@ from dlt.pipeline.exceptions import PipelineStepFailed
 
 from openhound_okta.main import preprocessing_resources
 from openhound_okta.models.group_assigned_apps import GroupAssignedApp
-from openhound_okta.source import (
-    APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE,
-    OktaTokenCredentials,
-    application_group_assignment_rows,
+from openhound_okta.auth import OktaTokenCredentials
+from openhound_okta.source_context import APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE
+from openhound_okta.source import source
+from openhound_okta.resources.applications import (
     applications,
     group_assigned_apps,
-    source,
 )
 
 
@@ -64,7 +64,7 @@ def test_application_group_assignments_preserve_parent_and_assignment_evidence()
         application_group_assignments_page_size=APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE,
     )
 
-    rows = list(application_group_assignment_rows(application(), ctx))
+    rows = list(inspect.unwrap(group_assigned_apps)(application(), ctx))
 
     assert rows == [
         {
@@ -102,7 +102,7 @@ def test_application_group_assignments_consume_every_page_and_deduplicate_identi
         application_group_assignments_page_size=200,
     )
 
-    rows = list(application_group_assignment_rows(application(), ctx))
+    rows = list(inspect.unwrap(group_assigned_apps)(application(), ctx))
 
     assert [row["group_id"] for row in rows] == [
         "00g-group",
@@ -142,7 +142,7 @@ def test_application_group_assignments_fail_on_missing_group_id(
     )
 
     with pytest.raises(ValueError, match="without a usable group ID"):
-        list(application_group_assignment_rows(application(), ctx))
+        list(inspect.unwrap(group_assigned_apps)(application(), ctx))
 
 
 def test_application_group_assignments_accept_complete_empty_response():
@@ -153,7 +153,7 @@ def test_application_group_assignments_accept_complete_empty_response():
     )
 
     rows = list(
-        application_group_assignment_rows(
+        inspect.unwrap(group_assigned_apps)(
             application(status="INACTIVE"),
             ctx,
         )
@@ -171,7 +171,7 @@ def test_application_group_assignments_fail_on_conflicting_duplicate():
     )
 
     with pytest.raises(ValueError, match="conflicting application-group assignments"):
-        list(application_group_assignment_rows(application(), ctx))
+        list(inspect.unwrap(group_assigned_apps)(application(), ctx))
 
 
 def test_application_group_assignments_stream_first_row_before_later_page_failure():
@@ -186,7 +186,7 @@ def test_application_group_assignments_stream_first_row_before_later_page_failur
         pool=FailingPool([]),
         application_group_assignments_page_size=200,
     )
-    rows = application_group_assignment_rows(application(), ctx)
+    rows = inspect.unwrap(group_assigned_apps)(application(), ctx)
 
     assert next(rows)["group_id"] == "00g-group"
     with pytest.raises(RuntimeError, match="opaque continuation failed"):
@@ -208,7 +208,7 @@ def test_application_group_assignments_ignore_mapping_key_order_in_duplicates():
     )
     ctx = SimpleNamespace(pool=pool, application_group_assignments_page_size=200)
 
-    rows = list(application_group_assignment_rows(application(), ctx))
+    rows = list(inspect.unwrap(group_assigned_apps)(application(), ctx))
 
     assert [row["group_id"] for row in rows] == ["00g-group"]
 
@@ -228,7 +228,7 @@ def test_application_group_assignments_fail_on_different_duplicate_evidence(
     pool = RecordingPool([[assignment(), conflicting_assignment]])
     ctx = SimpleNamespace(pool=pool, application_group_assignments_page_size=200)
 
-    rows = application_group_assignment_rows(application(), ctx)
+    rows = inspect.unwrap(group_assigned_apps)(application(), ctx)
 
     assert next(rows)["assignment_priority"] == 0
     with pytest.raises(ValueError, match="conflicting application-group assignments"):
@@ -459,7 +459,9 @@ def test_group_assignment_table_replaces_stale_rows(tmp_path):
     assert stored_group_ids() == []
 
 
-def test_group_assignment_failed_continuation_preserves_prior_replacement_snapshot(tmp_path):
+def test_group_assignment_failed_continuation_preserves_prior_replacement_snapshot(
+    tmp_path,
+):
     pipeline = dlt.pipeline(
         pipeline_name="group_assignment_atomic_replace_test",
         pipelines_dir=str(tmp_path / "pipelines"),

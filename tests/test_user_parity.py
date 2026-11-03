@@ -1,15 +1,16 @@
+import inspect
 from typing import cast
 
 import pytest
 
 from openhound_okta.models import PrivilegedUser, User
 from openhound_okta.models.user import UserProperties
-from openhound_okta.source import (
-    ClientPool,
-    SourceContext,
+from openhound_okta.client import ClientPool
+from openhound_okta.source_context import SourceContext
+from openhound_okta.resources.identities import (
     UserFactorClaims,
-    admin_group_member_factor_rows,
-    privileged_user_factor_rows,
+    admin_group_member_factors,
+    user_factors,
 )
 
 
@@ -268,10 +269,10 @@ def test_user_factors_fetched_once_for_multi_path_privileged_user() -> None:
     ctx = make_stub_context(pool)
     claims = UserFactorClaims()
 
-    rows = list(privileged_user_factor_rows(PrivilegedUser(id="user-1"), ctx, claims))
+    rows = list(inspect.unwrap(user_factors)(PrivilegedUser(id="user-1"), ctx, claims))
     for group_id in ("group-1", "group-2", "group-3"):
         rows.extend(
-            admin_group_member_factor_rows(
+            inspect.unwrap(admin_group_member_factors)(
                 make_membership(group_id, "user-1"), ctx, claims
             )
         )
@@ -287,7 +288,7 @@ def test_admin_group_member_factors_skips_non_admin_group_members() -> None:
     claims = UserFactorClaims()
 
     assert not list(
-        admin_group_member_factor_rows(
+        inspect.unwrap(admin_group_member_factors)(
             make_membership("group-1", "user-1", admin=False), ctx, claims
         )
     )
@@ -300,7 +301,7 @@ def test_factorless_privileged_user_emits_scope_marker_row() -> None:
     ctx = make_stub_context(pool)
     claims = UserFactorClaims()
 
-    rows = list(privileged_user_factor_rows(PrivilegedUser(id="user-1"), ctx, claims))
+    rows = list(inspect.unwrap(user_factors)(PrivilegedUser(id="user-1"), ctx, claims))
 
     assert rows == [{"user_id": "user-1"}]
 
@@ -319,7 +320,7 @@ def test_failed_factor_fetch_yields_nothing_so_user_reads_as_uncollected() -> No
         pool = FailingPool()
 
     rows = list(
-        privileged_user_factor_rows(
+        inspect.unwrap(user_factors)(
             PrivilegedUser(id="user-1"),
             cast(SourceContext, FailingContext()),
             UserFactorClaims(),
@@ -354,7 +355,7 @@ def test_factor_fetch_rate_limit_exhaustion_propagates() -> None:
 
     with pytest.raises(OktaRetryExhaustedError):
         list(
-            privileged_user_factor_rows(
+            inspect.unwrap(user_factors)(
                 PrivilegedUser(id="user-1"),
                 cast(SourceContext, ExhaustedContext()),
                 UserFactorClaims(),
@@ -364,7 +365,10 @@ def test_factor_fetch_rate_limit_exhaustion_propagates() -> None:
 
 def test_factor_writers_replace_the_shared_table() -> None:
     """Both factor transformers snapshot user_factors per collection run."""
-    from openhound_okta.source import admin_group_member_factors, user_factors
+    from openhound_okta.resources.identities import (
+        admin_group_member_factors,
+        user_factors,
+    )
 
     claims = UserFactorClaims()
 
@@ -440,7 +444,7 @@ def test_chained_factor_extraction_paginates_each_member_list_once() -> None:
     from dlt.common.schema import Schema
     from dlt.extract import DltSource
 
-    from openhound_okta.source import (
+    from openhound_okta.resources.identities import (
         admin_group_member_factors,
         group_memberships,
         groups,
@@ -569,7 +573,7 @@ def test_factor_pipeline_loads_one_deduplicated_replaced_snapshot(tmp_path) -> N
     import duckdb
 
     from openhound_okta.lookup import OktaLookup
-    from openhound_okta.source import (
+    from openhound_okta.resources.identities import (
         admin_group_member_factors,
         group_memberships,
         groups,

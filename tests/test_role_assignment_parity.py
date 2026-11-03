@@ -11,7 +11,7 @@ from openhound_okta.models import (
     ResourceSetRoleAssignment,
     UserRoleAssignment,
 )
-from openhound_okta.source import (
+from openhound_okta.resources.authorization import (
     _is_direct_active_role_assignment,
     _role_assignment_scope,
     _resource_set_binding_assignee_id,
