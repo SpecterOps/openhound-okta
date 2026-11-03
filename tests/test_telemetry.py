@@ -105,9 +105,7 @@ def test_config_toml_settings_are_loaded_from_the_okta_telemetry_section(
     assert {key for key, _ in requested} == set(values)
 
 
-def test_disabled_telemetry_ignores_other_invalid_configuration(
-    monkeypatch, tmp_path
-):
+def test_disabled_telemetry_ignores_other_invalid_configuration(monkeypatch, tmp_path):
     monkeypatch.delenv("SOURCES__SOURCE__OKTA__TELEMETRY__ENABLED", raising=False)
     monkeypatch.delenv(
         "SOURCES__SOURCE__OKTA__TELEMETRY__QUEUE_CAPACITY", raising=False
@@ -152,7 +150,8 @@ max_parallel_items = 22
     cookie = run_context.push_context()
     try:
         run_context.reload(str(tmp_path))
-        from openhound_okta.source import OktaTokenCredentials, source
+        from openhound_okta.auth import OktaTokenCredentials
+        from openhound_okta.source import source
 
         source_object = source(
             credentials=OktaTokenCredentials(
@@ -183,14 +182,13 @@ max_parallel_items = 22
 """.strip()
     )
     monkeypatch.setenv("SOURCES__SOURCE__OKTA__EXTRACT__WORKERS", "9")
-    monkeypatch.setenv(
-        "SOURCES__SOURCE__OKTA__EXTRACT__MAX_PARALLEL_ITEMS", "27"
-    )
+    monkeypatch.setenv("SOURCES__SOURCE__OKTA__EXTRACT__MAX_PARALLEL_ITEMS", "27")
     run_context = Container()[PluggableRunContext]
     cookie = run_context.push_context()
     try:
         run_context.reload(str(tmp_path))
-        from openhound_okta.source import OktaTokenCredentials, source
+        from openhound_okta.auth import OktaTokenCredentials
+        from openhound_okta.source import source
 
         source_object = source(
             credentials=OktaTokenCredentials(
@@ -492,9 +490,7 @@ def test_exporter_rejects_non_standard_json_numbers(tmp_path, caplog):
     assert "exporter_failure" in caplog.text
 
 
-def test_writer_uses_literal_lf_without_newline_translation(
-    monkeypatch, tmp_path
-):
+def test_writer_uses_literal_lf_without_newline_translation(monkeypatch, tmp_path):
     import os
 
     open_calls = []
@@ -816,7 +812,9 @@ def test_collect_settings_telemetry_cannot_fail_collection(
         settings_calls.append(source)
         raise RuntimeError("settings-secret")
 
-    monkeypatch.setattr(main, "_extract_performance_settings_from_source", fail_settings)
+    monkeypatch.setattr(
+        main, "_extract_performance_settings_from_source", fail_settings
+    )
 
     from openhound_okta import source as source_module
 
@@ -958,9 +956,7 @@ def test_benchmark_isolated_run_detects_unreported_worker_exit(
         lambda method: Context(),
     )
 
-    with pytest.raises(
-        RuntimeError, match="exited with -9 before reporting a result"
-    ):
+    with pytest.raises(RuntimeError, match="exited with -9 before reporting a result"):
         benchmark.isolated_run(True, tmp_path, 3)
 
     assert process.started is True
@@ -969,9 +965,7 @@ def test_benchmark_isolated_run_detects_unreported_worker_exit(
     assert all(timeout > 0 for timeout in results.timeouts)
 
 
-def test_representative_collection_replay_preserves_graph_parity(
-    monkeypatch, tmp_path
-):
+def test_representative_collection_replay_preserves_graph_parity(monkeypatch, tmp_path):
     from tools.benchmark_collection_telemetry import run_once
 
     monkeypatch.delenv("SOURCES__SOURCE__OKTA__EXTRACT__WORKERS", raising=False)

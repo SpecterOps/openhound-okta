@@ -6,9 +6,9 @@ import requests
 from pydantic import ValidationError
 from requests import Request
 
-import openhound_okta.source as source_module
+import openhound_okta.auth as source_module
 from openhound_okta.models.token import Token
-from openhound_okta.source import (
+from openhound_okta.auth import (
     OktaAppCredentials,
     OktaEncodedAppCredentials,
     OktaTokenCredentials,
@@ -137,7 +137,9 @@ def test_okta_bearer_auth_requires_non_negative_refresh_skew():
         OktaBearerAuth(lambda: _token("token-1"), refresh_skew_seconds=-1)
 
 
-@pytest.mark.parametrize("refresh_skew_seconds", [float("nan"), float("inf"), float("-inf")])
+@pytest.mark.parametrize(
+    "refresh_skew_seconds", [float("nan"), float("inf"), float("-inf")]
+)
 def test_okta_bearer_auth_requires_finite_refresh_skew(refresh_skew_seconds):
     with pytest.raises(ValueError, match="refresh_skew_seconds must be finite"):
         OktaBearerAuth(

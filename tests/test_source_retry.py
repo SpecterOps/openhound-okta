@@ -15,7 +15,28 @@ from dlt.sources.helpers.rest_client.auth import APIKeyAuth
 from dlt.sources.helpers.requests.session import Session
 
 from openhound_okta.models.token import Token
-from openhound_okta.source import (
+from openhound_okta.auth import OktaTokenCredentials
+from openhound_okta.resources.applications import (
+    _microsoft_tenant_id_from_onmicrosoft_domain,
+    _office365_tenant_id_fields,
+    api_services,
+    application_grants,
+    group_assigned_apps,
+    application_secrets,
+    application_group_push_mapping_row,
+    application_group_push_mappings,
+    application_jwks,
+    application_users,
+)
+from openhound_okta.resources.authorization import user_role_assignments
+from openhound_okta.resources.federation import (
+    _saml_idp_metadata_fields,
+    _saml_metadata_fields,
+    identity_provider_users,
+)
+from openhound_okta.resources.identities import _group_page_sizes, groups
+from openhound_okta.source import source
+from openhound_okta.source_context import (
     APPLICATION_GRANTS_ACCESS_DENIED_LIMIT,
     APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE,
     APPLICATION_USERS_PAGE_SIZE,
@@ -23,25 +44,7 @@ from openhound_okta.source import (
     GROUP_PUSH_MAPPINGS_PAGE_SIZE,
     IDENTITY_PROVIDER_USERS_PAGE_SIZE,
     ConsecutiveAccessDeniedBreaker,
-    OktaTokenCredentials,
-    _microsoft_tenant_id_from_onmicrosoft_domain,
-    _office365_tenant_id_fields,
-    _saml_idp_metadata_fields,
-    _saml_metadata_fields,
     _tenant_domain_from_base_url,
-    api_services,
-    application_grants,
-    application_group_assignment_rows,
-    application_secrets,
-    application_group_push_mapping_row,
-    application_group_push_mappings,
-    application_jwk_rows,
-    application_user_rows,
-    _group_page_sizes,
-    groups,
-    identity_provider_users,
-    source,
-    user_role_assignment_rows,
 )
 from openhound_okta.utils.auth import OktaBearerAuth, UnauthorizedClassification
 from openhound_okta.utils.http import (
@@ -351,7 +354,7 @@ def test_application_group_assignments_follow_opaque_next_link_without_query_exp
         sign_on_mode="SAML_2_0",
     )
 
-    rows = list(application_group_assignment_rows(application, ctx))
+    rows = list(inspect.unwrap(group_assigned_apps)(application, ctx))
 
     assert [row["group_id"] for row in rows] == ["00g-first", "00g-second"]
     assert adapter.requested_urls == [first_url, cursor_url]
@@ -1423,7 +1426,7 @@ def test_user_role_retry_exhaustion_is_not_silently_discarded():
     ctx = SimpleNamespace(pool=FailingRolePool())
 
     with pytest.raises(OktaRetryExhaustedError) as exc:
-        next(user_role_assignment_rows("00u123", ctx))
+        next(inspect.unwrap(user_role_assignments)(SimpleNamespace(id="00u123"), ctx))
 
     assert exc.value is error
 
@@ -1465,7 +1468,7 @@ def test_application_jwk_retry_exhaustion_is_not_silently_discarded():
     ctx = SimpleNamespace(pool=FailingJwkPool())
 
     with pytest.raises(OktaRetryExhaustedError) as exc:
-        next(application_jwk_rows(application, ctx))
+        next(inspect.unwrap(application_jwks)(application, ctx))
 
     assert exc.value is error
 
@@ -1691,7 +1694,7 @@ def test_application_users_streams_rows_and_requests_the_maximum_page_size():
         pool=pool,
         application_users_page_size=APPLICATION_USERS_PAGE_SIZE,
     )
-    rows = application_user_rows(application, ctx)
+    rows = inspect.unwrap(application_users)(application, ctx)
 
     first_row = next(rows)
     assert first_row["id"] == "00u_first"
