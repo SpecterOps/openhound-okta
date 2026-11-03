@@ -464,3 +464,17 @@ def test_synthetic_data_count(mock_okta_api: FastAPI, okta_client: ClientPool) -
     ]
 
     assert len(users) == 15
+
+
+def test_response_rate_limit_enforced(okta_client: ClientPool) -> None:
+    """Allow the configured request budget, then reject the next request with 429."""
+    response = okta_client.get("/api/v1/users")
+    assert response.status_code == 200
+    rate_limit = int(response.headers["X-Rate-Limit-Limit"])
+
+    for _ in range(rate_limit - 1):
+        assert okta_client.get("/api/v1/users").status_code == 200
+
+    response = okta_client.get("/api/v1/users")
+    assert response.status_code == 429
+    assert response.headers["X-Rate-Limit-Remaining"] == "0"
