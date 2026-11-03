@@ -1,6 +1,21 @@
+from pathlib import Path
+
 import duckdb
 
 USERS_ID_INDEX_NAME = "users_id_idx"
+SQL_TRANSFORMS_PATH = Path(__file__).parent / "sql"
+SCHEMA_PLACEHOLDER = "__SCHEMA__"
+SQL_TRANSFORMS_FILES = (
+    "10_principals_with_admin_roles.sql",
+    "20_insert_privileged_users.sql",
+    "21_insert_user_role_assignments.sql",
+    "22_insert_group_role_assignments.sql",
+    "23_insert_client_role_assignments.sql",
+    "30_deduplicate_admin_principals.sql",
+    "40_non_admin_users.sql",
+    "50_non_admin_groups.sql",
+    "60_non_admin_apps.sql",
+)
 
 
 def ensure_users_id_index(con: duckdb.DuckDBPyConnection, schema: str = "okta") -> bool:
@@ -28,91 +43,12 @@ def ensure_users_id_index(con: duckdb.DuckDBPyConnection, schema: str = "okta") 
     return True
 
 
-def principals_with_admin_roles(con, schema: str = "okta") -> None:
-    con.execute(f"""
-        CREATE OR REPLACE TABLE {schema}.principals_with_admin_roles (
-            id VARCHAR,
-            principal_type VARCHAR
-        )
-    """)
-
-
-def insert_principals_with_admin_roles(
-    con,
-    schema: str = "okta",
-) -> None:
-    principals = [
-        f"""SELECT DISTINCT id, 'user' AS principal_type
-            FROM {schema}.privileged_users""",
-        f"""SELECT source_id AS id, 'user' AS principal_type
-            FROM {schema}.user_role_assignments
-            WHERE status = 'ACTIVE' AND assignment_type = 'USER'""",
-        f"""SELECT source_id AS id, 'group' AS principal_type
-            FROM {schema}.group_role_assignments
-            WHERE status = 'ACTIVE' AND assignment_type = 'GROUP'""",
-        f"""SELECT source_id AS id, 'client' AS principal_type
-            FROM {schema}.client_role_assignments
-            WHERE status = 'ACTIVE' AND assignment_type = 'CLIENT'""",
-    ]
-    for principal in principals:
-        try:
-            con.execute(f"""
-                INSERT INTO {schema}.principals_with_admin_roles
-                {principal}
-                """)
-        except duckdb.CatalogException:
-            pass
-
-        except Exception as e:
-            raise e
-
-    con.execute(f"""
-        CREATE OR REPLACE TABLE {schema}.principals_with_admin_roles AS
-        SELECT DISTINCT id, principal_type
-        FROM {schema}.principals_with_admin_roles
-    """)
-
-
-def non_admin_users(con, schema: str = "okta") -> None:
-    """Users with no role assignment"""
-    con.execute(f"""
-        CREATE OR REPLACE TABLE {schema}.non_admin_users AS
-        SELECT id FROM {schema}.users
-        WHERE id NOT IN (
-            SELECT id FROM {schema}.principals_with_admin_roles
-            WHERE principal_type = 'user'
-        )
-    """)
-
-
-def non_admin_groups(con, schema: str = "okta") -> None:
-    """Groups with no role assignment"""
-    con.execute(f"""
-        CREATE OR REPLACE TABLE {schema}.non_admin_groups AS
-        SELECT id FROM {schema}.groups
-        WHERE id NOT IN (
-            SELECT id FROM {schema}.principals_with_admin_roles
-            WHERE principal_type = 'group'
-        )
-    """)
-
-
-def non_admin_apps(con, schema: str = "okta") -> None:
-    """Applications with no role assignment"""
-    con.execute(f"""
-        CREATE OR REPLACE TABLE {schema}.non_admin_apps AS
-        SELECT id FROM {schema}.applications
-        WHERE id NOT IN (
-            SELECT id FROM {schema}.principals_with_admin_roles
-            WHERE principal_type = 'client'
-        )
-    """)
-
-
 def transforms(con: duckdb.DuckDBPyConnection, schema: str = "okta") -> None:
-    ensure_users_id_index(con, schema)
-    principals_with_admin_roles(con, schema)
-    insert_principals_with_admin_roles(con, schema)
-    non_admin_users(con, schema)
-    non_admin_groups(con, schema)
-    non_admin_apps(con, schema)
+    """Execute preprocessing SQL files in their declared order."""
+    for filename in SQL_TRANSFORMS_FILES:
+        query = (
+            (SQL_TRANSFORMS_PATH / filename)
+            .read_text(encoding="utf-8")
+            .replace(SCHEMA_PLACEHOLDER, schema)
+        )
+        con.execute(query)
