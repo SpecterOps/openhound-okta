@@ -451,3 +451,16 @@ def test_response_rate_limit_counter(
     for item in range(2, 20):
         response = okta_client.get("/api/v1/users")
         assert int(response.headers["X-Rate-Limit-Remaining"]) == rate_limit - item
+
+
+def test_synthetic_data_count(mock_okta_api: FastAPI, okta_client: ClientPool) -> None:
+    """Verify three synthetic pages of five users return fifteen records."""
+    mock_okta_api.state.page_counts = {r"/api/v1/users": 3}
+
+    users = [
+        user
+        for page in okta_client.paginate("/api/v1/users", params={"limit": 5})
+        for user in page
+    ]
+
+    assert len(users) == 15
