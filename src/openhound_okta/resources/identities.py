@@ -49,11 +49,10 @@ def users(ctx: SourceContext):
         ctx: SourceContext containing the REST client for API calls.
 
     Yields:
-        user (User): Okta user record.
+        Pages of Okta user records.
     """
     for page in ctx.pool.paginate("/api/v1/users"):
-        for user in page:
-            yield user
+        yield page
 
 
 # Authentication factor collection
@@ -262,7 +261,7 @@ def groups(ctx: SourceContext):
     write_disposition="replace",
 )
 def group_memberships(group: Group, ctx: SourceContext) -> Iterator[dict[str, object]]:
-    """DLT transformer, fetches group members via GET /groups/{groupId}/users.
+    """Fetch group members via GET /groups/{groupId}/skinny_users.
 
     Args:
         group: Okta group record whose members to fetch.
@@ -274,7 +273,7 @@ def group_memberships(group: Group, ctx: SourceContext) -> Iterator[dict[str, ob
             admin_group_member_factors transformer.
     """
     if group.embedded.stats.users_count > 0:
-        for page in ctx.pool.paginate(f"/api/v1/groups/{group.id}/users"):
+        for page in ctx.pool.paginate(f"/api/v1/groups/{group.id}/skinny_users"):
             for item in page:
                 yield {
                     "group_id": group.id,
