@@ -88,7 +88,7 @@ def _saml_metadata_root(
     object_id: str,
 ) -> Element | None:
     try:
-        response = ctx.pool.get_saml_metadata(path)
+        response = ctx.pool.client.get(path, headers={"accept": "application/xml"})
         return ET.fromstring(response.content)
     except OktaRetryExhaustedError:
         logger.error(
