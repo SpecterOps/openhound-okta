@@ -7,10 +7,8 @@ from collections.abc import Iterator, Mapping
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-import dlt
 import requests
 from dlt.extract.resource import DltResource
-
 from openhound_okta.main import app
 from openhound_okta.models import (
     ApiService,
@@ -62,9 +60,11 @@ def _application_group_assignment_fingerprint(
     return hashlib.sha256(canonical_evidence.encode("utf-8")).hexdigest()
 
 
-# This authoritative transformer and its shared parent use DLT directly so
-# OpenHound's best-effort wrapper cannot publish a partial replacement snapshot.
-@dlt.transformer(
+# Replaces direct @dlt.transformer and manual registration with OpenHound's
+# standard registration and best-effort error handling so unrelated collection
+# can continue. Errors are logged and suppressed, a failed continuation may
+# intentionally load a partial replacement snapshot, even when the run succeeds.
+@app.transformer(
     name="group_assigned_apps",
     columns=GroupAssignedApp,
     parallelized=True,
@@ -135,10 +135,13 @@ def group_assigned_apps(application: Application, ctx: SourceContext):
         raise
 
 
-app.dlt_resources.append(group_assigned_apps)
-
-
-@dlt.resource(name="applications", columns=Application, parallelized=True)
+# Replaces direct @dlt.resource and manual registration with OpenHound's wrapper
+# for consistent registration, collector-group metadata and best-effort errors.
+# Inventory/enrichment failures may truncate this generator and its descendants,
+# accepting incomplete results rather than failing the whole run is intentional.
+@app.resource(
+    name="applications", columns=Application, parallelized=True, collector_group="apps"
+)
 def applications(ctx: SourceContext):
     """DLT resource, fetches Okta applications via GET /api/v1/apps.
 
@@ -154,9 +157,6 @@ def applications(ctx: SourceContext):
                 item = {**item, **_saml_metadata_fields(ctx, item)}
             item = _office365_tenant_id_fields(item)
             yield item
-
-
-app.dlt_resources.append(applications)
 
 
 def _office365_tenant_id_fields(
@@ -298,7 +298,7 @@ def application_jwks(application: Application, ctx: SourceContext):
         yield from embedded_rows
 
 
-@app.transformer(name="application_grants", columns=ApplicationGrant)
+@app.transformer(name="application_grants", columns=ApplicationGrant, parallelized=True)
 def application_grants(
     application: Application, ctx: SourceContext
 ) -> Iterator[dict[str, Any]]:
@@ -390,7 +390,7 @@ def application_group_push_mapping_row(
         return row
 
     try:
-        target_group = ctx.pool.get(f"/api/v1/groups/{target_group_id}").json()
+        target_group = ctx.pool.client.get(f"/api/v1/groups/{target_group_id}").json()
     except OktaRetryExhaustedError:
         raise
     except Exception as e:
@@ -461,7 +461,7 @@ def api_service_secrets(api_service: ApiService, ctx: SourceContext):
 
 @app.transformer(name="application_users", columns=ApplicationUser, parallelized=True)
 def application_users(application: Application, ctx: SourceContext):
-    """DLT transformer, fetches users assigned to an Okta application via GET /apps/{applicationId}/users.
+    """Fetch application assignments via GET /apps/{applicationId}/skinny_users.
 
     Args:
         application (Application): Okta application record.
@@ -478,7 +478,7 @@ def application_users(application: Application, ctx: SourceContext):
     )
     try:
         for page in ctx.pool.paginate(
-            f"/api/v1/apps/{application.id}/users",
+            f"/api/v1/apps/{application.id}/skinny_users",
             params={"limit": ctx.application_users_page_size},
         ):
             for item in page:
