@@ -6,16 +6,16 @@ import dlt
 from dlt.common.configuration import inject_section, resolve_configuration
 from dlt.extract.pipe_iterator import PipeIterator
 from dlt.extract.source import DltSource
-from openhound.core.app import OpenHound
 from openhound.core.collect import CollectContext
 from openhound.core.convert import ConvertContext
 from openhound.core.preproc import PreProcContext
 
+from openhound_okta.app import OktaOpenHound
 from openhound_okta.lookup import OktaLookup
 from openhound_okta.telemetry import TelemetrySettings, build_telemetry
 from openhound_okta.transforms import transforms
 
-app = OpenHound("okta", help="OpenGraph collector for Okta")
+app = OktaOpenHound("okta", help="OpenGraph collector for Okta")
 
 _TELEMETRY_CONFIG_PREFIX = "sources.source.okta.telemetry"
 
