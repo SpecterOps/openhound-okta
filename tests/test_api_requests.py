@@ -17,7 +17,8 @@ from dlt.sources.helpers.rest_client.client import RESTClient
 from dlt.sources.helpers.rest_client.paginators import HeaderLinkPaginator
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.testclient import TestClient
-from openhound_okta.source import ClientPool, OktaTokenCredentials, _request_auth
+from openhound_okta.auth import OktaTokenCredentials, _request_auth
+from openhound_okta.client import ClientPool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import JSONResponse, Response
@@ -35,14 +36,18 @@ DEFAULT_PAGE_COUNTS: dict[str, int] = {
     r"/api/v1/iam/roles": 20,
     r"/api/v1/iam/resource-sets": 10,
     r"/api/v1/groups/[^/]+/users": 5,
+    r"/api/v1/groups/[^/]+/skinny_users": 5,
     r"/api/v1/apps/[^/]+/users": 10,
+    r"/api/v1/apps/[^/]+/skinny_users": 10,
 }
 
 # First match wins: exact/subresource rules precede their broader families.
 RATE_LIMIT_RULES: dict[str, int] = {
     r"/api/v1/users.*": 300,
+    r"/api/v1/groups/[^/]+/skinny_users": 250,
     r"/api/v1/groups/[^/]+": 500,
     r"/api/v1/groups.*": 250,
+    r"/api/v1/apps/[^/]+/skinny_users": 50,
     r"/api/v1/apps.*": 50,
     r"/api/v1/devices.*": 50,
     r"/api/v1/iam.*": 800,
@@ -244,6 +249,20 @@ def mock_okta_api() -> FastAPI:
             request, load_json("group_members.json"), limit=limit, after=after
         )
 
+    @app.get("/api/v1/groups/{group_id}/skinny_users")
+    async def group_skinny_users(
+        group_id: str,
+        request: Request,
+        limit: PageLimit = DEFAULT_PAGE_SIZE,
+        after: Annotated[int, Query(ge=0)] = 0,
+    ) -> Any:
+        """Return sample members without credentials for any group ID."""
+        members = [
+            {key: value for key, value in member.items() if key != "credentials"}
+            for member in load_json("group_members.json")
+        ]
+        return synthetic_page(request, members, limit=limit, after=after)
+
     @app.get("/api/v1/apps")
     async def applications(
         request: Request,
@@ -263,6 +282,18 @@ def mock_okta_api() -> FastAPI:
         after: Annotated[int, Query(ge=0)] = 0,
     ) -> Any:
         """Return sample assigned users for any application ID."""
+        return synthetic_page(
+            request, load_json("application_users.json"), limit=limit, after=after
+        )
+
+    @app.get("/api/v1/apps/{app_id}/skinny_users")
+    async def application_skinny_users(
+        app_id: str,
+        request: Request,
+        limit: PageLimit = DEFAULT_PAGE_SIZE,
+        after: Annotated[int, Query(ge=0)] = 0,
+    ) -> Any:
+        """Return sample skinny assignments for any application ID."""
         return synthetic_page(
             request, load_json("application_users.json"), limit=limit, after=after
         )
@@ -421,7 +452,7 @@ def test_collector_client_uses_mock_okta_api(
     mock_okta_api: FastAPI, okta_client: ClientPool
 ) -> None:
     """Verify collector requests reach the FastAPI mock and return its sample data."""
-    response = okta_client.get("/api/v1/org")
+    response = okta_client.client.get("/api/v1/org")
 
     assert response.status_code == 200
     assert response.json() == load_json("organization.json")
@@ -434,7 +465,7 @@ def test_response_contains_rate_limit_headers(
     mock_okta_api: FastAPI, okta_client: ClientPool
 ) -> None:
     """Verify the first organization request reports its bucket budget and reset."""
-    response = okta_client.get("/api/v1/org")
+    response = okta_client.client.get("/api/v1/org")
 
     assert response.headers["X-Rate-Limit-Limit"] == "500"
     assert response.headers["X-Rate-Limit-Remaining"] == "499"
@@ -446,10 +477,10 @@ def test_response_contains_rate_limit_headers(
 def test_response_rate_limit_counter(
     mock_okta_api: FastAPI, okta_client: ClientPool
 ) -> None:
-    init_response = okta_client.get("/api/v1/users")
+    init_response = okta_client.client.get("/api/v1/users")
     rate_limit = int(init_response.headers["X-Rate-Limit-Limit"])
     for item in range(2, 20):
-        response = okta_client.get("/api/v1/users")
+        response = okta_client.client.get("/api/v1/users")
         assert int(response.headers["X-Rate-Limit-Remaining"]) == rate_limit - item
 
 
@@ -468,13 +499,47 @@ def test_synthetic_data_count(mock_okta_api: FastAPI, okta_client: ClientPool) -
 
 def test_response_rate_limit_enforced(okta_client: ClientPool) -> None:
     """Allow the configured request budget, then reject the next request with 429."""
-    response = okta_client.get("/api/v1/users")
+    response = okta_client.client.get("/api/v1/users")
     assert response.status_code == 200
     rate_limit = int(response.headers["X-Rate-Limit-Limit"])
 
     for _ in range(rate_limit - 1):
-        assert okta_client.get("/api/v1/users").status_code == 200
+        assert okta_client.client.get("/api/v1/users").status_code == 200
 
-    response = okta_client.get("/api/v1/users")
+    response = okta_client.client.get("/api/v1/users")
     assert response.status_code == 429
     assert response.headers["X-Rate-Limit-Remaining"] == "0"
+
+
+@pytest.mark.parametrize(("family", "limit"), [("apps", 50), ("groups", 250)])
+def test_skinny_users_have_independent_rate_limit_buckets(
+    family: str,
+    limit: int,
+    mock_okta_api: FastAPI,
+    okta_client: ClientPool,
+) -> None:
+    """Skinny requests share their family budget, but do not spend the full-user budget."""
+    standard_path = f"/api/v1/{family}/parent-1/users"
+    skinny_path = f"/api/v1/{family}/parent-1/skinny_users"
+    standard = okta_client.client.get(standard_path)
+    assert standard.status_code == 200
+    standard_remaining = int(standard.headers["X-Rate-Limit-Remaining"])
+
+    for used in range(1, limit + 1):
+        response = okta_client.client.get(skinny_path)
+        assert response.status_code == 200
+        assert response.headers["X-Rate-Limit-Limit"] == str(limit)
+        assert response.headers["X-Rate-Limit-Remaining"] == str(limit - used)
+
+    exhausted = okta_client.client.get(f"/api/v1/{family}/parent-2/skinny_users")
+    assert exhausted.status_code == 429
+    assert exhausted.headers["Retry-After"] == "60"
+    assert exhausted.headers["X-Rate-Limit-Remaining"] == "0"
+    standard = okta_client.client.get(standard_path)
+    assert standard.status_code == 200
+    assert int(standard.headers["X-Rate-Limit-Remaining"]) == standard_remaining - 1
+
+    mock_okta_api.state.rate_limits.now += 60
+    reset = okta_client.client.get(skinny_path)
+    assert reset.status_code == 200
+    assert reset.headers["X-Rate-Limit-Remaining"] == str(limit - 1)
