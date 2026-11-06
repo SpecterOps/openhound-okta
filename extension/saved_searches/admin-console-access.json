@@ -1,7 +1,0 @@
-{
-  "query_key": "Okta_admin_console_access",
-  "name": "Principals with Admin Console Access",
-  "description": "Identifies principals with access to the Okta Admin Console.",
-  "query": "MATCH path = (:Okta_Organization)-[:Okta_Contains]->(:Okta)-[:Okta_AppAssignment]->(console:Okta_Application)\nWHERE console.name = \"saasure\"\nRETURN path\nLIMIT 1000",
-  "category": "Dangerous Privileges"
-}
