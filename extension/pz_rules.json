@@ -1,0 +1,56 @@
+{
+  "pz_rules": [
+    {
+      "key": "Okta_operational_directory_agents",
+      "name": "Okta: Operational Directory Agents with Delegated Authentication",
+      "description": "Operational Okta AD and LDAP agents associated with applications configured for outbound delegated authentication.",
+      "enabled": true,
+      "allow_disable": true,
+      "seeds": [
+        {
+          "type": 2,
+          "value": "MATCH (agent:Okta_Agent {operational_status: 'OPERATIONAL'})-[:Okta_AgentMemberOf]->(:Okta_AgentPool)-[:Okta_AgentPoolFor]->(app:Okta_Application)\nWHERE 'OUTBOUND_DEL_AUTH' IN app.features\nAND agent.type IN ['AD', 'LDAP']\nRETURN agent"
+        }
+      ]
+    },
+    {
+      "key": "Okta_organization",
+      "name": "Okta: Organization",
+      "description": "Organization nodes in Okta.",
+      "enabled": true,
+      "allow_disable": true,
+      "seeds": [
+        {
+          "type": 2,
+          "value": "MATCH (n:Okta_Organization)\nRETURN n"
+        }
+      ]
+    },
+    {
+      "key": "Okta_tier0_devices",
+      "name": "Okta: Tier Zero Devices",
+      "description": "Devices associated with principals who have SUPER_ADMIN or ORG_ADMIN role assignments.",
+      "enabled": true,
+      "allow_disable": true,
+      "seeds": [
+        {
+          "type": 2,
+          "value": "MATCH (n:Okta_Device)-[:Okta_DeviceOf]->(:Okta)-[:Okta_HasRoleAssignment|Okta_MemberOf*1..2]->(r:Okta_RoleAssignment)-[:Okta_ScopedTo]->(:Okta_Organization)\nWHERE r.type = \"SUPER_ADMIN\"\nOR r.type = \"ORG_ADMIN\"\nRETURN n"
+        }
+      ]
+    },
+    {
+      "key": "Okta_tier0_principals",
+      "name": "Okta: Tier Zero Principals",
+      "description": "Principals with SUPER_ADMIN or ORG_ADMIN role assignments.",
+      "enabled": true,
+      "allow_disable": true,
+      "seeds": [
+        {
+          "type": 2,
+          "value": "MATCH (n:Okta)-[:Okta_HasRoleAssignment|Okta_MemberOf*1..2]->(r:Okta_RoleAssignment)-[:Okta_ScopedTo]->(:Okta_Organization)\nWHERE r.type = \"SUPER_ADMIN\"\nOR r.type = \"ORG_ADMIN\"\nRETURN n"
+        }
+      ]
+    }
+  ]
+}
