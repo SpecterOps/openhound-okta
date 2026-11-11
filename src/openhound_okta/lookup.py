@@ -309,9 +309,9 @@ class OktaLookup(LookupManager):
                         TRY_CAST(json_extract_string(_embedded, '$.stats.users_count') AS BIGINT)
                     )
                 FROM {self.schema}.groups
-                WHERE {column} = ?
+                WHERE {column} = {"?" if selector == "id" else "lower(?)"}
                 """,
-                [group if selector == "id" else group.lower()],
+                [group],
             ).fetchall()
         except DuckDBError:
             return None
@@ -321,7 +321,8 @@ class OktaLookup(LookupManager):
             return None
         return tuple((group_id, count) for group_id, _, count in rows)
 
-    @lru_cache
+    # Unbounded: keys are the distinct groups named in Role expressions.
+    @lru_cache(maxsize=None)
     def _group_member_ids(self, group_id: str) -> frozenset[str] | None:
         """Read one group's collected member IDs with a single scan.
 
@@ -354,6 +355,8 @@ class OktaLookup(LookupManager):
             return None
         if not candidates:
             return False  # the full group listing has no such group
+        if len(candidates) != 1:  # a repeated group ID is not one group
+            return None
         ((group_id, reported_count),) = candidates
         if reported_count is None:
             return None

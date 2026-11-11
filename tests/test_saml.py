@@ -2886,6 +2886,8 @@ BOTH = [("00u_saml_user", "00g_admin"), ("00u_saml_user", "00g_ops")]
         ),
         pytest.param(ROLE_TESTS, [ADMINS, ("00g_admin2", "Admins", 0), OPS], BOTH, [], True, id="two groups share a name"),
         pytest.param(ROLE_TESTS, [ADMINS, ("00g_ops", "Ops", 2)], BOTH, [], True, id="membership not proven complete"),
+        pytest.param([f'isMemberOfGroupName("ΟΔΟΣ") ? "{ADMIN_PAIR}" : null'], [("00g_gr", "ΟΔΟΣ", 1)], [("00u_saml_user", "00g_gr")], [ADMIN_PAIR], False, id="non-ASCII group name"),
+        pytest.param(ROLE_TESTS, [ADMINS, OPS, OPS], BOTH, [], True, id="repeated group id"),
     ],
 )  # fmt: skip
 def test_role_expression_values_follow_group_membership(

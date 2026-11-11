@@ -82,7 +82,8 @@ where the first match wins, `isMemberOfAnyGroup` with several IDs, the name
 prefix, contains, and regular expression functions, `&&` and `||`, and any
 other text. It is also unknown when a name test matches two groups or differs
 from the group name only in letter case, because Okta does not document the
-case rule. A test of a group that no collected group matches is false.
+case rule. One unknown test makes the whole result unknown, even when another
+test passes. A test of a group that no collected group matches is false.
 
 Membership is proven for a group only when the number of collected members
 equals the member count (`_embedded.stats.usersCount`) that Okta reports for the
