@@ -1,19 +1,19 @@
 {
   "consumer": {
     "repository": "SpecterOps/openhound_saml",
-    "revision": "c9ae37a76b8b7a873fa77aeb22b24ac40a53e3d4"
+    "revision": "361dd9e13419ec2169bdfd993ad92500c3177269"
   },
   "contract": {
     "id": "opengraph-saml-v0.4.0",
     "artifacts": {
-      "contract.json": "2c3a79288580a189602aceceb20acbb2957ec756ecbc2fd12a0acfdce1736465",
-      "registry.json": "e10154dc19fcb443538b9543d9349bfe668dc2e5ede143bc10194f92240051b9",
-      "identity-vectors.json": "f47f958351a1c9fa3604cdca388cb2cc85d98c46c75a2a4f6731253f521e2a7c",
-      "normalized-fact.schema.json": "ba9161847279489ee59c32a7a58fe8d9e776173660974210faf3fd666caadec2",
-      "openhound_okta_group_membership_v1.json": "f7ffd0a1601056a0701c5702fe733de0ff162503d3a83c382096cbe2dc471131",
+      "contract.json": "4544f975942b4ee1d05fcc8b6c82d2fef2b27733458a223a5676ca02e9362e05",
+      "registry.json": "e15a07735277b736a2b4ed97be21a08cd3b12f2ee002bd5d87e592576bf0d406",
+      "identity-vectors.json": "ec5d136b6dd81a9e61806864a1e3226cd88a074bf678131f5fc26671d964041d",
+      "normalized-fact.schema.json": "2d7929bcdf036eeb550da4015895de5db1b2c51ed664d83f88c73e103e922a6b",
+      "openhound_okta_group_membership_v1.json": "9de309dd8e0c9789a40a780bba5a26500cb62ab760a172d72f9a8bfb0accb9ee",
       "claim-projection-tuples.json": "1887667cd1e108f4f62e37e971a7ae15393759ce27a18cbd8ec60d29016f5dbd",
-      "contract-vectors.json": "cb03b56d7130642cdd3c8297c8787803eab0370eb52681a8b6cf11550220299c",
-      "observable-output-examples.json": "1da75f0ef5c660748870e494aff630a4212de563b9d80b89863d8bcb9554a00e"
+      "contract-vectors.json": "3ccf7ee26449967db9c98d05d61b5f12d0062f0735be5cd8d41800ee3137035c",
+      "observable-output-examples.json": "af9cc4c0bcdedbc2cd41d40bf3f1466f125acd83c3a3558297bc52d3b6dbbe30"
     }
   },
   "profile": "openhound_okta_group_membership_v1",
