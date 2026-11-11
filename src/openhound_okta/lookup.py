@@ -322,16 +322,22 @@ class OktaLookup(LookupManager):
         return tuple((group_id, count) for group_id, _, count in rows)
 
     @lru_cache
-    def _collected_member_count(self, group_id: str) -> int | None:
+    def _group_member_ids(self, group_id: str) -> frozenset[str] | None:
+        """Read one group's collected member IDs with a single scan.
+
+        The table has no index, so one cached read per group replaces a scan per
+        user. None means the table is unreadable.
+        """
+
         try:
-            row = self.client.execute(
-                f"""SELECT count(DISTINCT id) FROM {self.schema}.group_memberships
+            rows = self.client.execute(
+                f"""SELECT DISTINCT id FROM {self.schema}.group_memberships
                     WHERE group_id = ?""",
                 [group_id],
-            ).fetchone()
+            ).fetchall()
         except DuckDBError:
             return None
-        return None if row is None else row[0]
+        return frozenset(member_id for (member_id,) in rows)
 
     def user_group_membership(
         self, user_id: str, selector: GroupSelector, group: str
@@ -353,17 +359,10 @@ class OktaLookup(LookupManager):
             return None
         if reported_count == 0:
             return False
-        if self._collected_member_count(group_id) != reported_count:
+        members = self._group_member_ids(group_id)
+        if members is None or len(members) != reported_count:
             return None
-        try:
-            row = self.client.execute(
-                f"""SELECT 1 FROM {self.schema}.group_memberships
-                    WHERE group_id = ? AND id = ? LIMIT 1""",
-                [group_id, user_id],
-            ).fetchone()
-        except DuckDBError:
-            return None
-        return row is not None
+        return user_id in members
 
     @lru_cache
     def non_admin_users(self):
