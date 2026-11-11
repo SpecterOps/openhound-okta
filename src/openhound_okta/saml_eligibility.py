@@ -117,14 +117,15 @@ def derive_saml_group_eligibility_identity(
 
 
 def saml_group_eligibility_relationship_context(
-    *, org_id: str, group_id: str
+    *, environment_id: str, group_id: str
 ) -> dict[str, object]:
     """Return the v0.4 relationship-context values for one group grant.
 
     The values equal the SAML producer library's context for the same set grant,
-    so the grant reads the same in the entity panel. The assignment model has no
-    group name, so the group ID is the label and `native_object_name` is left out
-    rather than written as null.
+    so the grant reads the same in the entity panel. Callers pass the upper-case
+    group ID and environment ID that the grant's keys and Okta nodes use. The
+    assignment model has no group name, so the group ID is the label and
+    `native_object_name` is left out rather than written as null.
     """
 
     # The library writes the literal "none" when a producer has no source kind,
@@ -147,7 +148,7 @@ def saml_group_eligibility_relationship_context(
         "producer_source_kind": "none",
         "native_relationship_kind": nk.APPLICATION,
         "native_object_id": group_id,
-        "source_environmentid": org_id,
-        "target_environmentid": org_id,
+        "source_environmentid": environment_id,
+        "target_environmentid": environment_id,
         "native_evidence_refs": [],
     }

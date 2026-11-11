@@ -444,10 +444,10 @@ def test_shadow_mode_emits_non_traversable_group_eligibility_operand():
     properties = vars(eligibility.properties)
     expected_context = {
         "relationship_context_version": "saml-relationship-context-v0.4.0",
-        "name": "00g-group",
-        "displayname": "00g-group",
-        "description": "00g-group is eligible for the SAML provider",
-        "summary": "00g-group is eligible for the SAML provider",
+        "name": "00G-GROUP",
+        "displayname": "00G-GROUP",
+        "description": "00G-GROUP is eligible for the SAML provider",
+        "summary": "00G-GROUP is eligible for the SAML provider",
         "relationship_kind": "SAML_EligibleFor",
         "relationship_category": "saml_eligibility",
         "source_role": "eligibility_subject",
@@ -458,9 +458,9 @@ def test_shadow_mode_emits_non_traversable_group_eligibility_operand():
         "producer_extension": "openhound-okta",
         "producer_source_kind": "none",
         "native_relationship_kind": "Okta_Application",
-        "native_object_id": "00g-group",
-        "source_environmentid": "00o-org",
-        "target_environmentid": "00o-org",
+        "native_object_id": "00G-GROUP",
+        "source_environmentid": "00O-ORG",
+        "target_environmentid": "00O-ORG",
         "native_evidence_refs": [],
     }
     assert {key: properties[key] for key in expected_context} == expected_context
@@ -471,18 +471,18 @@ def test_group_eligibility_identity_matches_the_published_contract_vector():
     identity = derive_saml_group_eligibility_identity(
         source_id="source://openhound-okta/preview1",
         authority_id="https://preview1.example.invalid",
-        federation_provider_id="provider-okta-preview1-app-123",
-        assigned_group_ids=("group-002", "group-001"),
-        group_id="group-001",
+        federation_provider_id="PROVIDER-OKTA-PREVIEW1-APP-123",
+        assigned_group_ids=("GROUP-002", "GROUP-001"),
+        group_id="GROUP-001",
     )
 
     assert identity.canonical_policy_identity == (
-        "any_of:positive_set:group-001,positive_set:group-002"
+        "any_of:positive_set:GROUP-001,positive_set:GROUP-002"
     )
-    assert identity.policy_key == "53904144-338b-5f56-8d2a-110b4d3d2922"
-    assert identity.partition_key == "d2a8d18c-886d-5e4c-9c72-7a31b51c7021"
-    assert identity.branch_key == "53637f13-b4a0-57f3-a1c9-394f958c5c16"
-    assert identity.evidence_key == "707fd721-52b2-5697-a428-8075851fcf67"
+    assert identity.policy_key == "fab2b26d-2904-5a1a-b443-755ea3118dcf"
+    assert identity.partition_key == "e538d561-5452-5006-93a6-1538b0b662f2"
+    assert identity.branch_key == "20c7e6a1-7250-5701-98c8-28f880d48ef1"
+    assert identity.evidence_key == "23b300b4-db10-5f80-92a1-6a86741a2098"
 
 
 def test_group_eligibility_uses_single_selector_for_one_group_assignment():

@@ -133,13 +133,15 @@ class GroupAssignedApp(BaseAsset):
             raise RuntimeError(
                 "SAML group eligibility conversion requires an Okta organization ID"
             )
+        # Upper case matches the Okta node environment IDs (OktaNodeProperties).
+        environment_id = str(org_id).upper()
         tenant_domain = getattr(self, "_extras", {}).get("tenant")
         if not isinstance(tenant_domain, str) or not tenant_domain:
             raise RuntimeError(
                 "SAML group eligibility conversion requires an Okta tenant domain"
             )
         identity = derive_saml_group_eligibility_identity(
-            source_id=f"source://openhound-okta/{str(org_id).upper()}",
+            source_id=f"source://openhound-okta/{environment_id}",
             authority_id=f"https://{tenant_domain.lower()}",
             federation_provider_id=saml_provider_id(self.id).upper(),
             assigned_group_ids=assigned_group_ids,
@@ -158,7 +160,7 @@ class GroupAssignedApp(BaseAsset):
                 eligibility_subject_type="principal_set",
                 eligibility_expansion_profile=SAML_GROUP_ELIGIBILITY_PROFILE,
                 eligibility_identity_mode="contract_uuidv5",
-                eligibility_source_id=f"source://openhound-okta/{str(org_id).upper()}",
+                eligibility_source_id=f"source://openhound-okta/{environment_id}",
                 eligibility_authority_id=f"https://{tenant_domain.lower()}",
                 canonical_policy_identity=identity.canonical_policy_identity,
                 canonical_branch_identity=identity.canonical_branch_identity,
@@ -180,7 +182,7 @@ class GroupAssignedApp(BaseAsset):
                 policy_evaluation_coverage=coverage,
                 claim_evidence_coverage=coverage,
                 **saml_group_eligibility_relationship_context(
-                    org_id=org_id, group_id=self.group_id
+                    environment_id=environment_id, group_id=group_id
                 ),
             ),
         )
