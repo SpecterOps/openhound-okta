@@ -1755,6 +1755,9 @@ class SamlPrincipalSetEligibilityEdgeProperties(EdgeProperties):
         principal_exclusion_coverage: Completeness of principal-specific exceptions.
         policy_evaluation_coverage: Completeness of policy evaluation evidence.
         claim_evidence_coverage: Completeness of claim evidence.
+
+    The relationship-context fields (`relationship_context_version` through
+    `native_evidence_refs`) come from `saml_group_eligibility_relationship_context`.
     """
 
     schema_contract_version: str
@@ -1780,6 +1783,25 @@ class SamlPrincipalSetEligibilityEdgeProperties(EdgeProperties):
     principal_exclusion_coverage: str
     policy_evaluation_coverage: str
     claim_evidence_coverage: str
+    relationship_context_version: str
+    name: str
+    displayname: str
+    description: str
+    summary: str
+    relationship_kind: str
+    relationship_category: str
+    source_role: str
+    target_role: str
+    source_technology: str
+    target_technology: str
+    derived: bool
+    producer_extension: str
+    producer_source_kind: str
+    native_relationship_kind: str
+    native_object_id: str
+    source_environmentid: str
+    target_environmentid: str
+    native_evidence_refs: list[str]
 
 
 @dataclass

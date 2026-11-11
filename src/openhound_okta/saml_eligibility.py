@@ -6,8 +6,11 @@ from dataclasses import dataclass
 from typing import Callable
 from uuid import UUID, uuid5
 
+from openhound_okta.kinds import edges as ek, nodes as nk
+
 
 SAML_V0_4_CONTRACT_VERSION = "opengraph-saml-v0.4.0"
+SAML_RELATIONSHIP_CONTEXT_VERSION_V0_4 = "saml-relationship-context-v0.4.0"
 SAML_GROUP_ELIGIBILITY_PROFILE = "openhound_okta_group_membership_v1"
 SAML_GROUP_ELIGIBILITY_MODE_EXPANDED = "expanded"
 SAML_GROUP_ELIGIBILITY_MODE_SHADOW = "shadow"
@@ -111,3 +114,40 @@ def derive_saml_group_eligibility_identity(
         selector_operator=canonical_policy_identity.split(":", 1)[0],
         branch_positive_operand_count=len(tuple(sorted(set(assigned_group_ids)))),
     )
+
+
+def saml_group_eligibility_relationship_context(
+    *, org_id: str, group_id: str
+) -> dict[str, object]:
+    """Return the v0.4 relationship-context values for one group grant.
+
+    The values equal the SAML producer library's context for the same set grant,
+    so the grant reads the same in the entity panel. The assignment model has no
+    group name, so the group ID is the label and `native_object_name` is left out
+    rather than written as null.
+    """
+
+    # The library writes the literal "none" when a producer has no source kind,
+    # and the Okta producer has none.
+    text = f"{group_id} is eligible for the SAML provider"
+    return {
+        "relationship_context_version": SAML_RELATIONSHIP_CONTEXT_VERSION_V0_4,
+        "name": group_id,
+        "displayname": group_id,
+        "description": text,
+        "summary": text,
+        "relationship_kind": ek.SAML_ELIGIBLE_FOR,
+        "relationship_category": "saml_eligibility",
+        "source_role": "eligibility_subject",
+        "target_role": "federation_provider",
+        "source_technology": "okta",
+        "target_technology": "okta",
+        "derived": False,
+        "producer_extension": "openhound-okta",
+        "producer_source_kind": "none",
+        "native_relationship_kind": nk.APPLICATION,
+        "native_object_id": group_id,
+        "source_environmentid": org_id,
+        "target_environmentid": org_id,
+        "native_evidence_refs": [],
+    }

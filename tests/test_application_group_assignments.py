@@ -441,6 +441,30 @@ def test_shadow_mode_emits_non_traversable_group_eligibility_operand():
         eligibility.properties.policy_evaluation_coverage,
         eligibility.properties.claim_evidence_coverage,
     } == {"unproven"}
+    properties = vars(eligibility.properties)
+    expected_context = {
+        "relationship_context_version": "saml-relationship-context-v0.4.0",
+        "name": "00g-group",
+        "displayname": "00g-group",
+        "description": "00g-group is eligible for the SAML provider",
+        "summary": "00g-group is eligible for the SAML provider",
+        "relationship_kind": "SAML_EligibleFor",
+        "relationship_category": "saml_eligibility",
+        "source_role": "eligibility_subject",
+        "target_role": "federation_provider",
+        "source_technology": "okta",
+        "target_technology": "okta",
+        "derived": False,
+        "producer_extension": "openhound-okta",
+        "producer_source_kind": "none",
+        "native_relationship_kind": "Okta_Application",
+        "native_object_id": "00g-group",
+        "source_environmentid": "00o-org",
+        "target_environmentid": "00o-org",
+        "native_evidence_refs": [],
+    }
+    assert {key: properties[key] for key in expected_context} == expected_context
+    assert "native_object_name" not in properties
 
 
 def test_group_eligibility_identity_matches_the_published_contract_vector():

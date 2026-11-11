@@ -18,6 +18,7 @@ from openhound_okta.saml_eligibility import (
     SAML_GROUP_ELIGIBILITY_PROFILE,
     SAML_V0_4_CONTRACT_VERSION,
     derive_saml_group_eligibility_identity,
+    saml_group_eligibility_relationship_context,
 )
 
 
@@ -178,5 +179,8 @@ class GroupAssignedApp(BaseAsset):
                 principal_exclusion_coverage=coverage,
                 policy_evaluation_coverage=coverage,
                 claim_evidence_coverage=coverage,
+                **saml_group_eligibility_relationship_context(
+                    org_id=org_id, group_id=self.group_id
+                ),
             ),
         )
