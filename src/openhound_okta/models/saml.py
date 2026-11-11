@@ -19,6 +19,11 @@ from openhound_okta.saml_eligibility import (
     SAML_GROUP_ELIGIBILITY_MODE_SHADOW,
     SAML_V0_4_CONTRACT_VERSION,
 )
+from openhound_okta.saml_group_expression import (
+    MembershipCheck,
+    evaluate_group_tests,
+    parse_group_tests,
+)
 from openhound_okta.utils.entra_tenant import EntraTenantIdResolver
 
 
@@ -691,8 +696,13 @@ def saml_application_assertion_evidence(
     application_user: Any,
     claim_mappings: list[Any] | tuple[Any, ...] | None = None,
     source_profile: Any = _MISSING,
+    group_membership: MembershipCheck | None = None,
 ) -> dict[str, Any]:
-    """Resolve every source-proven outbound assertion value for one assignment."""
+    """Resolve every source-proven outbound assertion value for one assignment.
+
+    ``group_membership`` answers whether this user is in a group, for attribute
+    expressions that test group membership.
+    """
 
     mappings = (
         [_fallback_application_claim_mapping(application_user)]
@@ -776,6 +786,22 @@ def saml_application_assertion_evidence(
             continue
 
         if not mapping_id:
+            continue
+        group_tests = parse_group_tests(expression) if family == "exceptional" else None
+        if group_tests is not None:
+            group_values = evaluate_group_tests(group_tests, group_membership)
+            evidence["claim_values"].append(
+                {
+                    "mapping_id": mapping_id,
+                    "match_values": group_values or [],
+                    "canonical_match_values": group_values or [],
+                    "unsafe_match_values": [],
+                    # A user in no tested group is a known empty value, not a
+                    # gap. Only unproven membership is incomplete.
+                    "incomplete": group_values is None,
+                    "source_property": None,
+                }
+            )
             continue
         exceptional = {
             "mapping_id": mapping_id,
@@ -1197,10 +1223,12 @@ def saml_claim_mapping_rows(application) -> list[dict[str, Any]]:
         claim_name = _statement_value(statement, "name", "attributeName", "type")
         if not expression and not claim_name:
             continue
+        # Okta's native statement names the NameFormat `namespace`.
         native_name_format = _statement_value(
             statement,
             "nameFormat",
             "name_format",
+            "namespace",
         )
         rows.append(
             {

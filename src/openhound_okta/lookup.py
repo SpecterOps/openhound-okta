@@ -9,6 +9,8 @@ from duckdb import DuckDBPyConnection
 from duckdb import Error as DuckDBError
 from openhound.core.lookup import LookupManager
 
+from openhound_okta.saml_group_expression import GroupSelector
+
 USER_SAML_CONTEXT_CACHE_MAXSIZE = 128
 
 
@@ -279,6 +281,89 @@ class OktaLookup(LookupManager):
             [app_id],
         )
         return tuple(dict(zip(selected_columns, row, strict=True)) for row in rows)
+
+    @lru_cache
+    def _group_candidates(
+        self, selector: GroupSelector, group: str
+    ) -> tuple[tuple[str, int | None], ...] | None:
+        """Return (group ID, member count) for each group a test could name.
+
+        None means the test cannot be resolved to one group: two groups share
+        the name, the name differs from the group's only in letter case (Okta
+        does not document the case rule), or the groups table is unreadable.
+        """
+
+        column = (
+            "id"
+            if selector == "id"
+            else "lower(json_extract_string(profile, '$.name'))"
+        )
+        # Query the client directly: _find_all_objects turns a failed query
+        # into an empty result, which would read as "no such group".
+        try:
+            rows = self.client.execute(
+                f"""
+                SELECT id, json_extract_string(profile, '$.name'),
+                    COALESCE(
+                        TRY_CAST(json_extract_string(_embedded, '$.stats.usersCount') AS BIGINT),
+                        TRY_CAST(json_extract_string(_embedded, '$.stats.users_count') AS BIGINT)
+                    )
+                FROM {self.schema}.groups
+                WHERE {column} = ?
+                """,
+                [group if selector == "id" else group.lower()],
+            ).fetchall()
+        except DuckDBError:
+            return None
+        if selector == "name" and (
+            len(rows) > 1 or any(name != group for _, name, _ in rows)
+        ):
+            return None
+        return tuple((group_id, count) for group_id, _, count in rows)
+
+    @lru_cache
+    def _collected_member_count(self, group_id: str) -> int | None:
+        try:
+            row = self.client.execute(
+                f"""SELECT count(DISTINCT id) FROM {self.schema}.group_memberships
+                    WHERE group_id = ?""",
+                [group_id],
+            ).fetchone()
+        except DuckDBError:
+            return None
+        return None if row is None else row[0]
+
+    def user_group_membership(
+        self, user_id: str, selector: GroupSelector, group: str
+    ) -> bool | None:
+        """Tell whether a user is in the one group a SAML test names.
+
+        Returns None, never False, when the collected data cannot prove the
+        answer. Membership is proven only when the collected members of the
+        group equal the member count Okta reports for it.
+        """
+
+        candidates = self._group_candidates(selector, group)
+        if candidates is None:
+            return None
+        if not candidates:
+            return False  # the full group listing has no such group
+        ((group_id, reported_count),) = candidates
+        if reported_count is None:
+            return None
+        if reported_count == 0:
+            return False
+        if self._collected_member_count(group_id) != reported_count:
+            return None
+        try:
+            row = self.client.execute(
+                f"""SELECT 1 FROM {self.schema}.group_memberships
+                    WHERE group_id = ? AND id = ? LIMIT 1""",
+                [group_id, user_id],
+            ).fetchone()
+        except DuckDBError:
+            return None
+        return row is not None
 
     @lru_cache
     def non_admin_users(self):

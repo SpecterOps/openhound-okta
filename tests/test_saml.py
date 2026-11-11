@@ -44,6 +44,7 @@ from openhound_okta.models.saml import (
     saml_trusted_issuer_row,
 )
 from openhound_okta.saml_eligibility import SAML_V0_4_CONTRACT_VERSION
+from openhound_okta.saml_group_expression import parse_group_tests
 from openhound_okta.oin_routes import registry as oin_route_registry
 from openhound_okta.oin_routes.contract import (
     CallableRouteProvider,
@@ -2769,3 +2770,151 @@ def test_direct_idp_user_binding_uses_authoritative_okta_lifecycle_state():
         assert account.properties.direct_binding_source == (
             "GET /api/v1/idps/{idpId}/users"
         )
+
+
+URI_NAME_FORMAT = "urn:oasis:names:tc:SAML:2.0:attrname-format:uri"
+ADMIN_PAIR = "arn:aws:iam::1:role/admin,arn:aws:iam::1:saml-provider/okta"
+OPS_PAIR = "arn:aws:iam::2:role/ops,arn:aws:iam::2:saml-provider/okta"
+ROLE_TESTS = [
+    f'isMemberOfGroupName("Admins") ? "{ADMIN_PAIR}" : null',
+    f'isMemberOfGroup("00g_ops") ? "{OPS_PAIR}" : null',
+]
+
+
+def _role_mapping_row(values: list[str]) -> dict:
+    app = _application(
+        settings={
+            "app": {},
+            "signOn": {
+                "attributeStatements": [
+                    {
+                        "type": "EXPRESSION",
+                        "name": "https://aws.amazon.com/SAML/Attributes/Role",
+                        "namespace": URI_NAME_FORMAT,
+                        "values": values,
+                    }
+                ]
+            },
+        }
+    )
+    (row,) = saml_claim_mapping_rows(app)
+    return row
+
+
+def _role_application_user(
+    values: list[str],
+    groups: list[tuple[str, str, int]],
+    memberships: list[tuple[str, str]],
+) -> ApplicationUser:
+    """Build a user whose Role attribute is evaluated by a real lookup."""
+
+    row = _role_mapping_row(values)
+    connection = duckdb.connect(":memory:")
+    connection.execute("CREATE SCHEMA okta")
+    connection.execute(
+        "CREATE TABLE okta.users (id VARCHAR, status VARCHAR, profile JSON)"
+    )
+    connection.execute(
+        "INSERT INTO okta.users VALUES ('00u_saml_user', 'ACTIVE', '{}')"
+    )
+    connection.execute(
+        "CREATE TABLE okta.groups (id VARCHAR, profile JSON, _embedded JSON)"
+    )
+    connection.executemany(
+        "INSERT INTO okta.groups VALUES (?, ?, ?)",
+        [
+            (
+                group_id,
+                json.dumps({"name": name}),
+                json.dumps({"stats": {"usersCount": count}}),
+            )
+            for group_id, name, count in groups
+        ],
+    )
+    connection.execute(
+        "CREATE TABLE okta.group_memberships (id VARCHAR, group_id VARCHAR)"
+    )
+    connection.executemany(
+        "INSERT INTO okta.group_memberships VALUES (?, ?)", memberships
+    )
+    connection.execute(
+        """
+        CREATE TABLE okta.saml_claim_mappings (
+            id VARCHAR, app_id VARCHAR, claim_name VARCHAR, mapping_type VARCHAR,
+            claim_type VARCHAR, expression VARCHAR, name_format VARCHAR
+        )
+        """
+    )
+    connection.execute(
+        "INSERT INTO okta.saml_claim_mappings VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [
+            row[key]
+            for key in (
+                "id",
+                "app_id",
+                "claim_name",
+                "mapping_type",
+                "claim_type",
+                "expression",
+                "name_format",
+            )
+        ],
+    )
+    user = _application_user(app_status="ACTIVE")
+    user._lookup = OktaLookup(connection)
+    return user
+
+
+def _role_claim(user: ApplicationUser):
+    (edge,) = [e for e in user.edges if e.kind == ek.SAML_HAS_CLAIM_VALUE]
+    return edge.properties
+
+
+ADMINS = ("00g_admin", "Admins", 1)
+OPS = ("00g_ops", "Ops", 1)
+BOTH = [("00u_saml_user", "00g_admin"), ("00u_saml_user", "00g_ops")]
+
+
+@pytest.mark.parametrize(
+    ("values", "groups", "memberships", "expected", "incomplete"),
+    [
+        pytest.param(ROLE_TESTS, [ADMINS, OPS], BOTH, [ADMIN_PAIR, OPS_PAIR], False, id="two groups"),
+        pytest.param(ROLE_TESTS, [ADMINS, OPS], [("00u_other", "00g_admin"), ("00u_other", "00g_ops")], [], False, id="no role group"),
+        pytest.param(
+            [f'isMemberOfGroupName("Admins") ? "{ADMIN_PAIR}" : isMemberOfGroup("00g_ops") ? "{OPS_PAIR}" : null'],
+            [ADMINS, OPS], BOTH, [], True, id="first match wins chain",
+        ),
+        pytest.param(ROLE_TESTS, [ADMINS, ("00g_admin2", "Admins", 0), OPS], BOTH, [], True, id="two groups share a name"),
+        pytest.param(ROLE_TESTS, [ADMINS, ("00g_ops", "Ops", 2)], BOTH, [], True, id="membership not proven complete"),
+    ],
+)  # fmt: skip
+def test_role_expression_values_follow_group_membership(
+    values, groups, memberships, expected, incomplete
+) -> None:
+    user = _role_application_user(values, groups, memberships)
+
+    claim = _role_claim(user)
+
+    assert (claim.match_values, claim.canonical_match_values) == (expected, expected)
+    assert claim.incomplete is incomplete
+
+
+def test_native_namespace_is_kept_as_the_attribute_name_format() -> None:
+    row = _role_mapping_row(ROLE_TESTS)
+
+    assert row["name_format"] == URI_NAME_FORMAT
+    assert row["name_format_was_omitted"] is False
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        'isMemberOfAnyGroup("00g_a", "00g_b") ? "x" : null',
+        'isMemberOfGroupNameStartsWith("Ad") ? "x" : null',
+        'isMemberOfGroupName("A") && isMemberOfGroupName("B") ? "x" : null',
+        'isMemberOfGroupName("A") ? "x" : "y"',
+        'isMemberOfGroupName("A") ? "x" : null, user.department',
+    ],
+)
+def test_group_expression_matcher_refuses_other_forms(expression: str) -> None:
+    assert parse_group_tests(expression) is None

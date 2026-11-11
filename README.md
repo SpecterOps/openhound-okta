@@ -52,6 +52,45 @@ nodes and trust edges are not removed immediately by an upload; they age out
 under the instance's normal retention behavior. Operators testing this change
 may purge their BloodHound instance when a clean graph is needed.
 
+## SAML attribute values from group expressions
+
+A SAML attribute statement can list expressions that each test one group and
+give one fixed value. AWS uses this form for the `Role` attribute. The producer
+writes the values of each user as one `SAML_HasClaimValue` edge on the claim
+mapping. The values are the union of the tests that pass for that user.
+
+Each list element must have this exact form, with double-quoted literals that
+contain no quote or backslash:
+
+```text
+isMemberOfGroupName("<group name>") ? "<value>" : null
+isMemberOfGroup("<group ID>") ? "<value>" : null
+```
+
+These are the single-group functions in the [Okta Expression Language group
+functions](https://developer.okta.com/docs/reference/okta-expression-language/#group-functions).
+The result for each user has three states:
+
+| State | `match_values` | `incomplete` |
+| --- | --- | --- |
+| The user is in one or more tested groups | The values of those tests | `false` |
+| The user is in no tested group | Empty | `false` |
+| The result is unknown | Empty | `true` |
+
+The result is unknown, and no value is written, for every other form: a chain
+where the first match wins, `isMemberOfAnyGroup` with several IDs, the name
+prefix, contains, and regular expression functions, `&&` and `||`, and any
+other text. It is also unknown when a name test matches two groups or differs
+from the group name only in letter case, because Okta does not document the
+case rule. A test of a group that no collected group matches is false.
+
+Membership is proven for a group only when the number of collected members
+equals the member count (`_embedded.stats.usersCount`) that Okta reports for the
+group. When the counts differ or either is missing, the test is unknown.
+
+The `namespace` of the Okta attribute statement is kept as the NameFormat of the
+claim mapping.
+
 [![Python Version](https://img.shields.io/badge/Python-3.13-brightgreen.svg)](#about)
 
 ## Getting Started
