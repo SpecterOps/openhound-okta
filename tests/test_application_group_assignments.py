@@ -426,8 +426,14 @@ def test_shadow_mode_emits_non_traversable_group_eligibility_operand():
         eligibility.properties.eligibility_expansion_profile
         == "openhound_okta_group_membership_v1"
     )
-    assert eligibility.properties.eligibility_source_id == "source://openhound-okta/00O-ORG"
-    assert eligibility.properties.eligibility_authority_id == "https://preview1.example.invalid"
+    assert (
+        eligibility.properties.eligibility_source_id
+        == "source://openhound-okta/00O-ORG"
+    )
+    assert (
+        eligibility.properties.eligibility_authority_id
+        == "https://preview1.example.invalid"
+    )
     assert (
         eligibility.properties.canonical_policy_identity
         == "any_of:positive_set:00G-GROUP,positive_set:00G-SECOND"

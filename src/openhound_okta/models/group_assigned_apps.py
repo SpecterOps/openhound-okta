@@ -151,9 +151,7 @@ class GroupAssignedApp(BaseAsset):
         yield Edge(
             kind=ek.SAML_ELIGIBLE_FOR,
             start=OktaOwnedEdgePath(value=self.group_id, match_by="id"),
-            end=OktaOwnedEdgePath(
-                value=saml_provider_id(self.id), match_by="id"
-            ),
+            end=OktaOwnedEdgePath(value=saml_provider_id(self.id), match_by="id"),
             properties=SamlPrincipalSetEligibilityEdgeProperties(
                 traversable=False,
                 schema_contract_version=SAML_V0_4_CONTRACT_VERSION,
@@ -173,9 +171,7 @@ class GroupAssignedApp(BaseAsset):
                 operand_role="positive_set",
                 policy_evaluability="static_incomplete",
                 policy_branch_count=1,
-                branch_positive_operand_count=(
-                    identity.branch_positive_operand_count
-                ),
+                branch_positive_operand_count=(identity.branch_positive_operand_count),
                 membership_coverage=coverage,
                 principal_reachability_coverage=coverage,
                 principal_exclusion_coverage=coverage,
