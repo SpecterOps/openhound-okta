@@ -22,6 +22,7 @@ from openhound_okta.saml_eligibility import (
 from openhound_okta.saml_group_expression import (
     MembershipCheck,
     evaluate_group_tests,
+    parse_fixed_value,
     parse_group_tests,
 )
 from openhound_okta.utils.entra_tenant import EntraTenantIdResolver
@@ -786,6 +787,21 @@ def saml_application_assertion_evidence(
             continue
 
         if not mapping_id:
+            continue
+        # A constant is the same value for every eligible user, so it needs no
+        # membership proof and is complete.
+        fixed_value = parse_fixed_value(expression) if family == "exceptional" else None
+        if fixed_value is not None:
+            evidence["claim_values"].append(
+                {
+                    "mapping_id": mapping_id,
+                    "match_values": [fixed_value],
+                    "canonical_match_values": [fixed_value],
+                    "unsafe_match_values": [],
+                    "incomplete": False,
+                    "source_property": None,
+                }
+            )
             continue
         group_tests = parse_group_tests(expression) if family == "exceptional" else None
         if group_tests is not None:

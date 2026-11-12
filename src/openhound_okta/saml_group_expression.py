@@ -1,13 +1,18 @@
-"""Strict matcher for one narrow form of Okta attribute expression.
+"""Strict matchers for two narrow forms of Okta attribute expression.
 
 Okta lets a SAML attribute statement list expressions that each test one group
 and give one fixed value, for example::
 
     isMemberOfGroupName("Admins") ? "arn:...:role/admin,arn:...:saml-provider/okta" : null
 
-The matcher accepts only that form (see the README section on SAML group
-expressions). It is not an Okta Expression Language evaluator: every other text is refused
-so that the caller can mark the claim value incomplete.
+The second form is one quoted constant. It gives every eligible user that value::
+
+    "arn:...:role/admin,arn:...:saml-provider/okta"
+
+The matchers accept only these forms (see the README section on SAML attribute
+values from group expressions). They are not an Okta Expression Language evaluator:
+every other text is refused so that the caller can mark the claim value
+incomplete.
 """
 
 from __future__ import annotations
@@ -27,6 +32,9 @@ _ELEMENT = (
 # The preprocessed expression joins the native list of expressions with ",".
 _EXPRESSION = re.compile(rf"{_ELEMENT}(?:,{_ELEMENT})*")
 _ELEMENTS = re.compile(_ELEMENT)
+# A whole expression that is one literal. A joined field or function does not
+# fullmatch, so it is refused.
+_FIXED_VALUE = re.compile(rf"\s*{_LITERAL}\s*")
 
 
 @dataclass(frozen=True)
@@ -52,6 +60,15 @@ def parse_group_tests(expression: str | None) -> tuple[GroupTest, ...] | None:
         GroupTest("name" if by_name else "id", group, value)
         for by_name, group, value in _ELEMENTS.findall(expression)
     )
+
+
+def parse_fixed_value(expression: str | None) -> str | None:
+    """Return the value of a one-constant expression, or None for any other text."""
+
+    if not expression:
+        return None
+    match = _FIXED_VALUE.fullmatch(expression)
+    return match.group(1) if match else None
 
 
 def evaluate_group_tests(

@@ -69,7 +69,13 @@ isMemberOfGroup("<group ID>") ? "<value>" : null
 
 These are the single-group functions in the [Okta Expression Language group
 functions](https://developer.okta.com/docs/reference/okta-expression-language/#group-functions).
-The result for each user has three states:
+
+An expression that is only one double-quoted literal, such as `"<value>"`,
+gives every eligible user that value. The value is the exact text between the
+quotes. The text must not be empty and must not contain a quote or backslash.
+This form has no group test, so `incomplete` is `false` for each eligible user.
+
+The result for each user in the group form has three states:
 
 | State | `match_values` | `incomplete` |
 | --- | --- | --- |
@@ -79,10 +85,10 @@ The result for each user has three states:
 
 The result is unknown, and no value is written, for every other form: a chain
 where the first match wins, `isMemberOfAnyGroup` with several IDs, the name
-prefix, contains, and regular expression functions, `&&` and `||`, and any
-other text. It is also unknown when a name test matches two groups or differs
-from the group name only in letter case, because Okta does not document the
-case rule. One unknown test makes the whole result unknown, even when another
+prefix, contains, and regular expression functions, `&&` and `||`, a constant
+joined to a field or function, and any other text. It is also unknown when a
+name test matches two groups or differs from the group name only in letter
+case, because Okta does not document the case rule. One unknown test makes the whole result unknown, even when another
 test passes. A test of a group that no collected group matches is false.
 
 Membership is proven for a group only when the number of collected members

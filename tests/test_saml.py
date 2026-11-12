@@ -44,7 +44,7 @@ from openhound_okta.models.saml import (
     saml_trusted_issuer_row,
 )
 from openhound_okta.saml_eligibility import SAML_V0_4_CONTRACT_VERSION
-from openhound_okta.saml_group_expression import parse_group_tests
+from openhound_okta.saml_group_expression import parse_fixed_value, parse_group_tests
 from openhound_okta.oin_routes import registry as oin_route_registry
 from openhound_okta.oin_routes.contract import (
     CallableRouteProvider,
@@ -2888,6 +2888,7 @@ BOTH = [("00u_saml_user", "00g_admin"), ("00u_saml_user", "00g_ops")]
         pytest.param(ROLE_TESTS, [ADMINS, ("00g_ops", "Ops", 2)], BOTH, [], True, id="membership not proven complete"),
         pytest.param([f'isMemberOfGroupName("ΟΔΟΣ") ? "{ADMIN_PAIR}" : null'], [("00g_gr", "ΟΔΟΣ", 1)], [("00u_saml_user", "00g_gr")], [ADMIN_PAIR], False, id="non-ASCII group name"),
         pytest.param(ROLE_TESTS, [ADMINS, OPS, OPS], BOTH, [], True, id="repeated group id"),
+        pytest.param([f'"{ADMIN_PAIR}"'], [ADMINS], [("00u_other", "00g_admin")], [ADMIN_PAIR], False, id="fixed value for every eligible user"),
     ],
 )  # fmt: skip
 def test_role_expression_values_follow_group_membership(
@@ -2916,7 +2917,10 @@ def test_native_namespace_is_kept_as_the_attribute_name_format() -> None:
         'isMemberOfGroupName("A") && isMemberOfGroupName("B") ? "x" : null',
         'isMemberOfGroupName("A") ? "x" : "y"',
         'isMemberOfGroupName("A") ? "x" : null, user.department',
+        '"x" + user.login',
+        'String.toUpperCase("x")',
     ],
 )
 def test_group_expression_matcher_refuses_other_forms(expression: str) -> None:
     assert parse_group_tests(expression) is None
+    assert parse_fixed_value(expression) is None
