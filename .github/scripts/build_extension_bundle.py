@@ -171,8 +171,10 @@ def build(root: Path, output: Path) -> Path:
     metadata = schema["schema"]
     for field in ["name", "version", "namespace"]:
         require_text(metadata, field)
+    # Restrict the schema name to a safe single filename component.
     require(re.fullmatch(r"[A-Za-z0-9_-]+", metadata["name"]), "Unsafe schema name")
     version = metadata["version"].removeprefix("v")
+    # Match major.minor.patch, with optional prerelease and build suffixes.
     require(re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?", version),
             "Invalid schema version")
     require(not {"queries", "pz_rules"} & set(schema), "Components cannot be embedded in schema")
