@@ -36,7 +36,7 @@ def require_text(record, field):
             f"Missing or invalid {field}")
 
 
-def component(root, filename, directory, wrapper, key):
+def load_component_records(root, filename, directory, wrapper):
     consolidated = root / filename
     individual = root / directory
     require(not individual.is_symlink(), f"Symlink directory: {individual}")
@@ -57,30 +57,44 @@ def component(root, filename, directory, wrapper, key):
         require(isinstance(records, list) and records, f"Empty or invalid {filename}")
     else:
         records = [read_json(path, root) for path in files]
+    return records
+
+
+def validate_query(record):
+    require_text(record, "query")
+    allowed = {"query_key", "name", "description", "query", "category"}
+    require(not set(record) - allowed, f"Unknown component fields: {set(record) - allowed}")
+
+
+def normalize_rule(record):
+    if "cypher" in record or "zone" in record:
+        require("seeds" not in record and record.get("zone") == "Tier Zero",
+                "Only Tier Zero legacy rules can be bundled; mixed formats are invalid")
+        require_text(record, "cypher")
+        record["seeds"] = [{"type": 2, "value": record.pop("cypher")}]
+        record.pop("zone")
+    seeds = record.get("seeds")
+    require(isinstance(seeds, list) and len(seeds) == 1, "Rules need exactly one seed")
+    seed = seeds[0]
+    require(isinstance(seed, dict) and set(seed) == {"type", "value"}
+            and type(seed["type"]) is int and seed["type"] == 2, "Invalid Cypher seed")
+    require_text(seed, "value")
+    for field in ["enabled", "allow_disable"]:
+        require(type(record.get(field, True)) is bool, f"Invalid {field}")
+    allowed = {"key", "name", "description", "enabled", "allow_disable", "seeds"}
+    require(not set(record) - allowed, f"Unknown component fields: {set(record) - allowed}")
+
+
+def component(root, filename, directory, wrapper, key):
+    records = load_component_records(root, filename, directory, wrapper)
     keys, names, converted = set(), set(), []
     for record in records:
         require(isinstance(record, dict), "Component records must be objects")
         record = dict(record)
         if wrapper == "queries":
-            allowed = {"query_key", "name", "description", "query", "category"}
-            require_text(record, "query")
+            validate_query(record)
         else:
-            allowed = {"key", "name", "description", "enabled", "allow_disable", "seeds"}
-            if "cypher" in record or "zone" in record:
-                require("seeds" not in record and record.get("zone") == "Tier Zero",
-                        "Only Tier Zero legacy rules can be bundled; mixed formats are invalid")
-                require_text(record, "cypher")
-                record["seeds"] = [{"type": 2, "value": record.pop("cypher")}]
-                record.pop("zone")
-            seeds = record.get("seeds")
-            require(isinstance(seeds, list) and len(seeds) == 1, "Rules need exactly one seed")
-            seed = seeds[0]
-            require(isinstance(seed, dict) and set(seed) == {"type", "value"}
-                    and type(seed["type"]) is int and seed["type"] == 2, "Invalid Cypher seed")
-            require_text(seed, "value")
-            for field in ["enabled", "allow_disable"]:
-                require(type(record.get(field, True)) is bool, f"Invalid {field}")
-        require(not set(record) - allowed, f"Unknown component fields: {set(record) - allowed}")
+            normalize_rule(record)
         require_text(record, key)
         require_text(record, "name")
         for field in ["description", "category"]:
