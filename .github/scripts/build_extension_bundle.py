@@ -196,8 +196,11 @@ def build(root: Path, output: Path) -> Path:
     target = output / f"{metadata['name']}-v{version}.zip"
     with ZipFile(target, "w", compression=ZIP_STORED) as archive:
         for name, value in sorted(parts.items()):
+            # ZIP timestamps cannot predate 1980. Fix the earliest supported date
+            # so wall-clock time does not change the output between builds.
             info = ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
-            info.create_system = 3
+            info.create_system = 3  # ZIP host-system code for Unix.
+            # Store the Unix regular-file type and 0644 permissions in the high word.
             info.external_attr = 0o100644 << 16
             archive.writestr(info, value)
     with ZipFile(target) as archive:
