@@ -31,7 +31,7 @@ def read_json(path, root):
                       parse_constant=lambda value: require(False, f"Invalid JSON number: {value}"))
 
 
-def text(record, field):
+def require_text(record, field):
     require(isinstance(record.get(field), str) and record[field].strip(),
             f"Missing or invalid {field}")
 
@@ -63,13 +63,13 @@ def component(root, filename, directory, wrapper, key):
         record = dict(record)
         if wrapper == "queries":
             allowed = {"query_key", "name", "description", "query", "category"}
-            text(record, "query")
+            require_text(record, "query")
         else:
             allowed = {"key", "name", "description", "enabled", "allow_disable", "seeds"}
             if "cypher" in record or "zone" in record:
                 require("seeds" not in record and record.get("zone") == "Tier Zero",
                         "Only Tier Zero legacy rules can be bundled; mixed formats are invalid")
-                text(record, "cypher")
+                require_text(record, "cypher")
                 record["seeds"] = [{"type": 2, "value": record.pop("cypher")}]
                 record.pop("zone")
             seeds = record.get("seeds")
@@ -77,12 +77,12 @@ def component(root, filename, directory, wrapper, key):
             seed = seeds[0]
             require(isinstance(seed, dict) and set(seed) == {"type", "value"}
                     and type(seed["type"]) is int and seed["type"] == 2, "Invalid Cypher seed")
-            text(seed, "value")
+            require_text(seed, "value")
             for field in ["enabled", "allow_disable"]:
                 require(type(record.get(field, True)) is bool, f"Invalid {field}")
         require(not set(record) - allowed, f"Unknown component fields: {set(record) - allowed}")
-        text(record, key)
-        text(record, "name")
+        require_text(record, key)
+        require_text(record, "name")
         for field in ["description", "category"]:
             require(field not in record or isinstance(record[field], str), f"Invalid {field}")
         require(record[key] not in keys and record["name"] not in names, "Duplicate component key or name")
@@ -103,7 +103,7 @@ def build(root, output):
     require(isinstance(schema, dict) and isinstance(schema.get("schema"), dict), "Missing schema metadata")
     metadata = schema["schema"]
     for field in ["name", "version", "namespace"]:
-        text(metadata, field)
+        require_text(metadata, field)
     require(re.fullmatch(r"[A-Za-z0-9_-]+", metadata["name"]), "Unsafe schema name")
     version = metadata["version"].removeprefix("v")
     require(re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?", version),
