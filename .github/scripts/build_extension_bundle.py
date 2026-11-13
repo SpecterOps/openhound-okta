@@ -4,17 +4,20 @@ import argparse
 import json
 import re
 from pathlib import Path
+from typing import Any
 from zipfile import ZIP_STORED, ZipFile, ZipInfo
 
 MAX_BYTES = 10 * 1024 * 1024
 
 
-def require(condition, message):
+def require(condition: object, message: str) -> None:
+    """Raise ValueError with message when condition is false."""
     if not condition:
         raise ValueError(message)
 
 
-def unique_object(pairs):
+def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Return a JSON object from pairs, raising ValueError for duplicate fields."""
     result = {}
     for key, value in pairs:
         require(key not in result, f"Duplicate JSON field: {key}")
@@ -22,7 +25,13 @@ def unique_object(pairs):
     return result
 
 
-def read_json(path, root):
+def read_json(path: Path, root: Path) -> Any:
+    """Read JSON from path below root, rejecting unsafe paths and malformed data.
+
+    Raises:
+        ValueError: Unsafe paths, excessive size, duplicate fields or invalid JSON.
+        OSError: The input cannot be read.
+    """
     require(not any(p.is_symlink() for p in [path, *path.parents]),
             f"Symlink input: {path}")
     require(path.resolve().is_relative_to(root.resolve()), f"Input escapes extension: {path}")
@@ -31,12 +40,19 @@ def read_json(path, root):
                       parse_constant=lambda value: require(False, f"Invalid JSON number: {value}"))
 
 
-def require_text(record, field):
+def require_text(record: dict[str, Any], field: str) -> None:
+    """Raise ValueError unless record[field] is a nonblank string."""
     require(isinstance(record.get(field), str) and record[field].strip(),
             f"Missing or invalid {field}")
 
 
-def load_component_records(root, filename, directory, wrapper):
+def load_component_records(root: Path, filename: str, directory: str, wrapper: str) -> list[Any]:
+    """Load one component layout beneath root; return [] when neither is present.
+
+    filename is a consolidated wrapper file; directory contains individual JSON
+    records. Raises ValueError for competing layouts or unsafe/oversized inputs,
+    and OSError when reading fails. Record validation is performed by the caller.
+    """
     consolidated = root / filename
     individual = root / directory
     require(not individual.is_symlink(), f"Symlink directory: {individual}")
@@ -60,13 +76,19 @@ def load_component_records(root, filename, directory, wrapper):
     return records
 
 
-def validate_query(record):
+def validate_query(record: dict[str, Any]) -> None:
+    """Validate query-specific fields in record, raising ValueError on failure."""
     require_text(record, "query")
     allowed = {"query_key", "name", "description", "query", "category"}
     require(not set(record) - allowed, f"Unknown component fields: {set(record) - allowed}")
 
 
-def normalize_rule(record):
+def normalize_rule(record: dict[str, Any]) -> None:
+    """Convert legacy Tier Zero fields in place and validate the rule's seed/flags.
+
+    Raises ValueError for custom zones, mixed formats or invalid rule fields.
+    Existing stable keys and explicit false flag values are preserved.
+    """
     if "cypher" in record or "zone" in record:
         require("seeds" not in record and record.get("zone") == "Tier Zero",
                 "Only Tier Zero legacy rules can be bundled; mixed formats are invalid")
@@ -85,7 +107,14 @@ def normalize_rule(record):
     require(not set(record) - allowed, f"Unknown component fields: {set(record) - allowed}")
 
 
-def component(root, filename, directory, wrapper, key):
+def component(root: Path, filename: str, directory: str, wrapper: str,
+              key: str) -> dict[str, list[dict[str, Any]]] | None:
+    """Return validated records sorted by stable key, or None for an absent set.
+
+    root, filename, directory and wrapper select the input layout; key names the
+    stable identifier field. Invalid records or duplicate keys/names raise
+    ValueError; input-read failures raise OSError.
+    """
     records = load_component_records(root, filename, directory, wrapper)
     keys, names, converted = set(), set(), []
     for record in records:
@@ -106,13 +135,20 @@ def component(root, filename, directory, wrapper, key):
     return {wrapper: sorted(converted, key=lambda record: record[key])} if converted else None
 
 
-def encoded(data):
+def encoded(data: Any) -> bytes:
+    """Serialize data as deterministic UTF-8 JSON; reject values above 10 MiB."""
     value = (json.dumps(data, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
     require(len(value) <= MAX_BYTES, "Component exceeds 10 MiB")
     return value
 
 
-def build(root, output):
+def build(root: Path, output: Path) -> Path:
+    """Build and verify a Community ZIP from root into output; return its path.
+
+    Raises:
+        ValueError: Input or generated bundle validation fails.
+        OSError: Inputs cannot be read or the output cannot be written.
+    """
     schema = read_json(root / "schema.json", root)
     require(isinstance(schema, dict) and isinstance(schema.get("schema"), dict), "Missing schema metadata")
     metadata = schema["schema"]
