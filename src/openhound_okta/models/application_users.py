@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from functools import partial
 from typing import Any, Final
 
 from openhound.core.asset import BaseAsset, EdgeDef
@@ -563,6 +564,7 @@ class ApplicationUser(BaseAsset):
                 callable(getattr(lookup, method, None))
                 for method in ("user_status", "user_profile")
             )
+        group_membership_lookup = getattr(lookup, "user_group_membership", None)
         lookup_available = callable(getattr(lookup, "saml_claim_mappings", None)) and (
             combined_context_available or legacy_context_available
         )
@@ -588,6 +590,11 @@ class ApplicationUser(BaseAsset):
                 self,
                 claim_mappings=claim_mappings,
                 source_profile=source_profile,
+                group_membership=(
+                    partial(group_membership_lookup, self.id)
+                    if callable(group_membership_lookup)
+                    else None
+                ),
             )
             if lookup_available
             else saml_application_assertion_evidence(self)
