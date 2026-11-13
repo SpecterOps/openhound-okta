@@ -2,6 +2,12 @@ name: Build Community extension bundle
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'extension/**'
+      - '.github/scripts/build_extension_bundle.py'
+      - '.github/workflows/extension-bundle.yml'
   push:
     branches: [main]
     paths:
