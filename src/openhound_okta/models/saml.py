@@ -15,6 +15,10 @@ from openhound_okta.kinds import edges as ek
 from openhound_okta.kinds import nodes as nk
 from openhound_okta.main import app
 from openhound_okta.oin_routes import SamlRouteEvidence, resolve_oin_routes
+from openhound_okta.saml_eligibility import (
+    SAML_GROUP_ELIGIBILITY_MODE_SHADOW,
+    SAML_V0_4_CONTRACT_VERSION,
+)
 from openhound_okta.utils.entra_tenant import EntraTenantIdResolver
 
 
@@ -393,6 +397,39 @@ def _application_user_value(template: str | None, application_user: Any) -> str 
 _DIRECT_PROFILE_EXPRESSION = re.compile(
     r"^(source|user|appuser)\.([A-Za-z_][A-Za-z0-9_]*)$"
 )
+_V0_4_PROJECTION_PROPERTIES = {
+    "source.login": "login",
+    "user.login": "login",
+    "source.email": "email",
+    "user.email": "email",
+    "source.firstName": "first_name",
+    "user.firstName": "first_name",
+    "source.lastName": "last_name",
+    "user.lastName": "last_name",
+    "source.department": "department",
+    "user.department": "department",
+    "source.city": "city",
+    "user.city": "city",
+    "source.state": "state",
+    "user.state": "state",
+    "source.countryCode": "country_code",
+    "user.countryCode": "country_code",
+    "source.organization": "organization",
+    "user.organization": "organization",
+    "source.title": "title",
+    "user.title": "title",
+    "source.userType": "user_type",
+    "user.userType": "user_type",
+    "source.employeeNumber": "employee_number",
+    "user.employeeNumber": "employee_number",
+    "source.division": "division",
+    "user.division": "division",
+    "source.managerId": "manager_id",
+    "user.managerId": "manager_id",
+}
+_V0_4_EMAIL_NAME_ID_SOURCES = frozenset(
+    {"source.login", "user.login", "source.email", "user.email"}
+)
 _EMAIL_CLAIM_NAMES = {
     "email",
     "mail",
@@ -432,6 +469,55 @@ def _direct_profile_field(expression: Any) -> tuple[str, str] | None:
     if not match:
         return None
     return match.group(1), match.group(2)
+
+
+def saml_claim_projection(
+    *,
+    source_property: str | None,
+    expression: str | None,
+    claim_type: str,
+    name_id_format: str | None,
+) -> dict[str, str | bool] | None:
+    """Return an exact v0.4 native-property projection, if one is approved.
+
+    The producer intentionally accepts only direct source/user expressions that
+    match the source property already emitted on the normalized claim mapping.
+    Transforms, appuser values, and ambiguous source declarations retain v0.3
+    behavior and produce no v0.4 projection declaration.
+    """
+
+    direct_field = _direct_profile_field(expression)
+    if direct_field is None:
+        return None
+    source = f"{direct_field[0]}.{direct_field[1]}"
+    property_name = _V0_4_PROJECTION_PROPERTIES.get(source)
+    if source != source_property or property_name is None:
+        return None
+
+    if (
+        claim_type == "name_id"
+        and name_id_format == EMAIL_NAME_ID_FORMAT
+        and source in _V0_4_EMAIL_NAME_ID_SOURCES
+    ):
+        predicate = "email_address_nameid"
+        output = "email_match_values"
+        normalizer = "email_v1"
+    else:
+        predicate = "direct_untransformed"
+        output = "match_values"
+        normalizer = "source_exact_v1"
+
+    return {
+        "principal_value_projection_profile": "openhound_okta_principal_property_v1",
+        "principal_value_source_type": "native_principal_property",
+        "projection_source": source,
+        "principal_node_property": property_name,
+        "projection_predicate": predicate,
+        "projected_match_value_field": output,
+        "projection_normalization_profile": normalizer,
+        "projection_scope": "provider_mapping",
+        "projection_complete": True,
+    }
 
 
 def _profile_dict(profile: Any) -> dict[str, Any] | None:
@@ -1568,6 +1654,15 @@ class SamlClaimMappingProperties(OktaNodeProperties):
         format_was_omitted: Whether the native NameID format was omitted.
         name_format: Effective attribute NameFormat for an attribute mapping.
         name_format_was_omitted: Whether the native attribute NameFormat was omitted.
+        principal_value_projection_profile: Registered v0.4 native-property projection profile.
+        principal_value_source_type: Contract source family for an approved projection.
+        projection_source: Exact native Okta expression source being projected.
+        principal_node_property: Emitted Okta_User property containing the value.
+        projection_predicate: Registered mapping predicate for the projection.
+        projected_match_value_field: SAML value family populated by the projection.
+        projection_normalization_profile: Registered normalizer for the value family.
+        projection_scope: Contract scope that binds the projection to this mapping.
+        projection_complete: Whether this mapping has an exact approved projection.
         schema_contract_version: Fact-local normalized SAML contract version.
     """
 
@@ -1585,6 +1680,15 @@ class SamlClaimMappingProperties(OktaNodeProperties):
     format_was_omitted: bool | None = None
     name_format: str | None = None
     name_format_was_omitted: bool | None = None
+    principal_value_projection_profile: str | None = None
+    principal_value_source_type: str | None = None
+    projection_source: str | None = None
+    principal_node_property: str | None = None
+    projection_predicate: str | None = None
+    projected_match_value_field: str | None = None
+    projection_normalization_profile: str | None = None
+    projection_scope: str | None = None
+    projection_complete: bool | None = None
     schema_contract_version: str = SAML_CONTRACT_VERSION
 
 
@@ -1621,6 +1725,83 @@ class SamlMatchValuesEdgeProperties(EdgeProperties):
     incomplete_match_value_fields: list[str] = dc_field(default_factory=list)
     assignment_source: str | None = None
     schema_contract_version: str = SAML_CONTRACT_VERSION
+
+
+@dataclass
+class SamlPrincipalSetEligibilityEdgeProperties(EdgeProperties):
+    """Non-traversable v0.4 evidence for a native Okta group assignment.
+
+    Attributes:
+        schema_contract_version: Fact-local SAML contract version.
+        eligibility_subject_type: Declares that this fact starts at a principal set.
+        eligibility_expansion_profile: Immutable profile governing native membership.
+        eligibility_identity_mode: Contract identity algorithm used for all keys.
+        eligibility_source_id: Stable source-scoped Okta collection identifier.
+        eligibility_authority_id: Stable Okta authority scope.
+        canonical_policy_identity: Canonical selector and positive operand identity.
+        canonical_branch_identity: Canonical branch identity for the positive selector.
+        eligibility_policy_key: Contract-derived policy UUIDv5 key.
+        eligibility_branch_key: Contract-derived branch UUIDv5 key.
+        eligibility_partition_key: Contract-derived partition UUIDv5 key.
+        eligibility_evidence_key: Contract-derived operand UUIDv5 key.
+        eligibility_basis: Native source of the eligibility decision.
+        selector_operator: Registered positive selector operator.
+        operand_role: Registered policy operand role.
+        policy_evaluability: Current static evaluation capability.
+        policy_branch_count: Number of branches represented by this policy.
+        branch_positive_operand_count: Number of positive operands in this branch.
+        membership_coverage: Completeness of the membership evidence.
+        principal_reachability_coverage: Completeness of lifecycle state evidence.
+        principal_exclusion_coverage: Completeness of principal-specific exceptions.
+        policy_evaluation_coverage: Completeness of policy evaluation evidence.
+        claim_evidence_coverage: Completeness of claim evidence.
+
+    The relationship-context fields (`relationship_context_version` through
+    `native_evidence_refs`) come from `saml_group_eligibility_relationship_context`.
+    """
+
+    schema_contract_version: str
+    eligibility_subject_type: str
+    eligibility_expansion_profile: str
+    eligibility_identity_mode: str
+    eligibility_source_id: str
+    eligibility_authority_id: str
+    canonical_policy_identity: str
+    canonical_branch_identity: str
+    eligibility_policy_key: str
+    eligibility_branch_key: str
+    eligibility_partition_key: str
+    eligibility_evidence_key: str
+    eligibility_basis: str
+    selector_operator: str
+    operand_role: str
+    policy_evaluability: str
+    policy_branch_count: int
+    branch_positive_operand_count: int
+    membership_coverage: str
+    principal_reachability_coverage: str
+    principal_exclusion_coverage: str
+    policy_evaluation_coverage: str
+    claim_evidence_coverage: str
+    relationship_context_version: str
+    name: str
+    displayname: str
+    description: str
+    summary: str
+    relationship_kind: str
+    relationship_category: str
+    source_role: str
+    target_role: str
+    source_technology: str
+    target_technology: str
+    derived: bool
+    producer_extension: str
+    producer_source_kind: str
+    native_relationship_kind: str
+    native_object_id: str
+    source_environmentid: str
+    target_environmentid: str
+    native_evidence_refs: list[str]
 
 
 @dataclass
@@ -1802,6 +1983,20 @@ class SamlClaimMapping(BaseAsset):
 
     @property
     def as_node(self):
+        shadow_mode = (
+            getattr(self, "_extras", {}).get("saml_group_eligibility_mode")
+            == SAML_GROUP_ELIGIBILITY_MODE_SHADOW
+        )
+        projection = (
+            saml_claim_projection(
+                source_property=self.source_property,
+                expression=self.expression,
+                claim_type=self.claim_type,
+                name_id_format=self.format,
+            )
+            if shadow_mode
+            else None
+        )
         return OktaNode(
             kinds=[nk.SAML_CLAIM_MAPPING],
             properties=SamlClaimMappingProperties(
@@ -1825,7 +2020,10 @@ class SamlClaimMapping(BaseAsset):
                 format_was_omitted=self.format_was_omitted,
                 name_format=self.name_format,
                 name_format_was_omitted=self.name_format_was_omitted,
-                schema_contract_version=SAML_CONTRACT_VERSION,
+                **(projection or {}),
+                schema_contract_version=(
+                    SAML_V0_4_CONTRACT_VERSION if projection else SAML_CONTRACT_VERSION
+                ),
             ),
         )
 

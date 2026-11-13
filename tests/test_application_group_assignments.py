@@ -2,11 +2,13 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import dlt
+import duckdb
 import pytest
 from dlt.extract.exceptions import ResourceExtractionError
 from dlt.pipeline.exceptions import PipelineStepFailed
 
 from openhound_okta.main import preprocessing_resources
+from openhound_okta.lookup import OktaLookup
 from openhound_okta.models.group_assigned_apps import GroupAssignedApp
 from openhound_okta.source import (
     APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE,
@@ -15,6 +17,7 @@ from openhound_okta.source import (
     group_assigned_apps,
     source,
 )
+from openhound_okta.saml_eligibility import derive_saml_group_eligibility_identity
 from openhound_okta.utils.auth import OktaTokenCredentials
 
 
@@ -385,6 +388,143 @@ def test_group_assignment_edge_contains_only_safe_assignment_provenance():
     assert edge.properties.assignment_profile_fields == ["role", "securityAnswer"]
     assert "administrator" not in repr(edge.properties)
     assert "must-not-reach-the-graph" not in repr(edge.properties)
+
+
+def test_shadow_mode_emits_non_traversable_group_eligibility_operand():
+    class ShadowLookup(GroupLookup):
+        def saml_group_assignment_group_ids(self, app_id):
+            assert app_id == "0oa-app"
+            return ("00g-second", "00g-group")
+
+        def org_id(self):
+            return "00o-org"
+
+    model = GroupAssignedApp(
+        id="0oa-app",
+        group_id="00g-group",
+        name="example_saml",
+        label="Example SAML",
+        status="ACTIVE",
+        app_sign_on_mode="SAML_2_0",
+    )
+    model._lookup = ShadowLookup(group_ids=("00g-group", "00g-second"))
+    model._extras = {
+        "tenant": "Preview1.Example.Invalid",
+        "saml_group_eligibility_mode": "shadow",
+    }
+
+    native_assignment, eligibility = list(model.edges)
+
+    assert native_assignment.kind == "Okta_AppAssignment"
+    assert eligibility.kind == "SAML_EligibleFor"
+    assert eligibility.start.value == "00G-GROUP"
+    assert eligibility.end.value == "OKTA:SAML:PROVIDER:0OA-APP"
+    assert eligibility.properties.traversable is False
+    assert eligibility.properties.schema_contract_version == "opengraph-saml-v0.4.0"
+    assert eligibility.properties.eligibility_subject_type == "principal_set"
+    assert (
+        eligibility.properties.eligibility_expansion_profile
+        == "openhound_okta_group_membership_v1"
+    )
+    assert (
+        eligibility.properties.eligibility_source_id
+        == "source://openhound-okta/00O-ORG"
+    )
+    assert (
+        eligibility.properties.eligibility_authority_id
+        == "https://preview1.example.invalid"
+    )
+    assert (
+        eligibility.properties.canonical_policy_identity
+        == "any_of:positive_set:00G-GROUP,positive_set:00G-SECOND"
+    )
+    assert eligibility.properties.policy_evaluability == "static_incomplete"
+    assert eligibility.properties.branch_positive_operand_count == 2
+    assert {
+        eligibility.properties.membership_coverage,
+        eligibility.properties.principal_reachability_coverage,
+        eligibility.properties.principal_exclusion_coverage,
+        eligibility.properties.policy_evaluation_coverage,
+        eligibility.properties.claim_evidence_coverage,
+    } == {"unproven"}
+    properties = vars(eligibility.properties)
+    expected_context = {
+        "relationship_context_version": "saml-relationship-context-v0.4.0",
+        "name": "00G-GROUP",
+        "displayname": "00G-GROUP",
+        "description": "00G-GROUP is eligible for the SAML provider",
+        "summary": "00G-GROUP is eligible for the SAML provider",
+        "relationship_kind": "SAML_EligibleFor",
+        "relationship_category": "saml_eligibility",
+        "source_role": "eligibility_subject",
+        "target_role": "federation_provider",
+        "source_technology": "okta",
+        "target_technology": "okta",
+        "derived": False,
+        "producer_extension": "openhound-okta",
+        "producer_source_kind": "none",
+        "native_relationship_kind": "Okta_Application",
+        "native_object_id": "00G-GROUP",
+        "source_environmentid": "00O-ORG",
+        "target_environmentid": "00O-ORG",
+        "native_evidence_refs": [],
+    }
+    assert {key: properties[key] for key in expected_context} == expected_context
+    assert "native_object_name" not in properties
+
+
+def test_group_eligibility_identity_matches_the_published_contract_vector():
+    identity = derive_saml_group_eligibility_identity(
+        source_id="source://openhound-okta/preview1",
+        authority_id="https://preview1.example.invalid",
+        federation_provider_id="PROVIDER-OKTA-PREVIEW1-APP-123",
+        assigned_group_ids=("GROUP-002", "GROUP-001"),
+        group_id="GROUP-001",
+    )
+
+    assert identity.canonical_policy_identity == (
+        "any_of:positive_set:GROUP-001,positive_set:GROUP-002"
+    )
+    assert identity.policy_key == "fab2b26d-2904-5a1a-b443-755ea3118dcf"
+    assert identity.partition_key == "e538d561-5452-5006-93a6-1538b0b662f2"
+    assert identity.branch_key == "20c7e6a1-7250-5701-98c8-28f880d48ef1"
+    assert identity.evidence_key == "23b300b4-db10-5f80-92a1-6a86741a2098"
+
+
+def test_group_eligibility_uses_single_selector_for_one_group_assignment():
+    identity = derive_saml_group_eligibility_identity(
+        source_id="source://openhound-okta/org-1",
+        authority_id="https://example.okta.test",
+        federation_provider_id="OKTA:SAML:PROVIDER:0OA-APP",
+        assigned_group_ids=("00G-GROUP",),
+        group_id="00G-GROUP",
+    )
+
+    assert identity.canonical_policy_identity == "single:positive_set:00G-GROUP"
+    assert identity.selector_operator == "single"
+    assert identity.branch_positive_operand_count == 1
+
+
+def test_group_assignment_lookup_is_sorted_distinct_and_cached():
+    con = duckdb.connect()
+    con.execute("CREATE SCHEMA okta")
+    con.execute("CREATE TABLE okta.group_assigned_apps (id VARCHAR, group_id VARCHAR)")
+    con.execute(
+        "INSERT INTO okta.group_assigned_apps VALUES "
+        "('0oa-app', '00g-second'), ('0oa-app', '00g-group'), "
+        "('0oa-app', '00g-group'), ('0oa-other', '00g-other')"
+    )
+    lookup = OktaLookup(con)
+
+    assert lookup.saml_group_assignment_group_ids("0oa-app") == (
+        "00g-group",
+        "00g-second",
+    )
+    assert lookup.saml_group_assignment_group_ids("0oa-app") == (
+        "00g-group",
+        "00g-second",
+    )
+    assert lookup.saml_group_assignment_group_ids.cache_info().hits == 1
 
 
 def test_group_assignment_edge_fails_conversion_for_uncollected_group():
