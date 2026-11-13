@@ -1,4 +1,21 @@
-"""Packages a Community extension bundle ZIP from JSON data documented in https://bloodhound.specterops.io/opengraph/developer/extension-bundles"""
+"""Build a Community extension bundle from JSON data without collector dependencies.
+
+Inputs below --extension (default: extension/):
+    schema.json: required Community schema.
+    saved_queries.json (queries wrapper) OR saved_searches/**/*.json: queries.
+    pz_rules.json (pz_rules wrapper) OR privilege_zone_rules/**/*.json: rules.
+Each individual file contains one record. Competing layouts for either component
+are rejected. Records must include stable query_key/key values. Individual rules
+may use legacy zone/cypher fields; only Tier Zero rules can be converted to seeds.
+
+Output under the required --output directory:
+    <schema.name>-v<schema.version without a leading v>.zip
+The ZIP contains schema.json and any supplied nonempty component sets at its root.
+JSON ordering and ZIP metadata are fixed so the same inputs produce identical bytes. The script prints the resulting filename.
+Invalid inputs exit with status 1.
+
+Format: https://bloodhound.specterops.io/opengraph/developer/extension-bundles
+"""
 
 import argparse
 import json
