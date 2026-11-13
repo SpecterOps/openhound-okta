@@ -23,7 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Check out extension sources
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
           sparse-checkout-cone-mode: false
@@ -32,7 +33,8 @@ jobs:
             /.github/scripts/build_extension_bundle.py
       - name: Build and validate bundle
         run: python3 -I .github/scripts/build_extension_bundle.py --output "$RUNNER_TEMP/extension-bundle"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - name: Upload extension bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: community-extension-${{ github.sha }}
           path: ${{ runner.temp }}/extension-bundle/*.zip
