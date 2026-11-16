@@ -16,15 +16,11 @@ Issue: SpecterOps/saml-og-research#88, part A.
 from __future__ import annotations
 
 import re
-import time
+import string
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
-
-import regex
-
-from openhound_okta.saml_group_expression import MembershipCheck
 
 ROLE_ATTRIBUTE = "https://aws.amazon.com/SAML/Attributes/Role"
 ROLE_SESSION_NAME_ATTRIBUTE = "https://aws.amazon.com/SAML/Attributes/RoleSessionName"
@@ -47,7 +43,6 @@ class IncompleteReason(StrEnum):
     APP_FILTER_EMPTY_UNPROVEN = "app_filter_empty_unproven"  # item 5
     APP_FILTER_UNMAPPED = "app_filter_unmapped"  # rule 3, step 1
     GROUP_FILTER_UNSUPPORTED = "group_filter_unsupported"  # rule 3, step 2
-    GROUP_FILTER_TIMEOUT = "group_filter_timeout"  # rule 3, step 2 (cost bound)
     GROUP_FILTER_MATCH_UNPROVEN = "group_filter_match_unproven"  # item 3
     ROLE_VALUE_PATTERN_UNSUPPORTED = "role_value_pattern_unsupported"  # rule 3, step 4
     # After the settings reasons above (what Okta may test) and before data
@@ -116,6 +111,25 @@ class GroupRef:
     source_app_name: str | None
 
 
+# The role and account ID that a Group Filter takes from one group name.
+Capture = tuple[str, str]
+
+
+@dataclass(frozen=True)
+class GroupNameMatch:
+    """What the Group Filter did with one group name, from the DuckDB match.
+
+    `captures` has one entry for each way Okta may match (record, item 3): part
+    of the name and the full name, each with and without letter case. An entry
+    is None when that way does not match. `unprovable` is set when DuckDB (RE2)
+    and Okta (Java) can differ for this name, so no result can be trusted.
+    """
+
+    group: GroupRef
+    captures: tuple[Capture | None, ...]
+    unprovable: bool
+
+
 @dataclass(frozen=True)
 class GroupAssignment:
     """An assignment of a group to the application, with its role fields."""
@@ -131,11 +145,13 @@ class MappedGroup:
     """A group that can give a Role value through group mapping.
 
     `value` is set when the match is proven. `reason` is set when it is not.
+    `assigned` is set when the group has an assignment to the application.
     """
 
     group_id: str
     value: str | None
     reason: IncompleteReason | None
+    assigned: bool = False
 
 
 @dataclass(frozen=True)
@@ -147,12 +163,32 @@ class GroupMappingPlan:
 
 
 @dataclass(frozen=True)
+class AwsUserGroups:
+    """The group data of one user of the application, from the `preproc` table.
+
+    `assigned` and `mapped` hold only groups in which the user is a member with
+    proof. A group whose members were not all collected is not proven for any
+    user, so it makes the whole application `*_unproven`. A user whose row
+    cannot be read has `UNREADABLE_GROUPS`.
+    """
+
+    assigned: tuple[GroupAssignment, ...] = ()
+    mapped: tuple[MappedGroup, ...] = ()
+    assigned_unproven: bool = False
+    mapped_unproven: bool = False
+    # Set when the settings give no group that can be tested (the plan reason).
+    mapping_reason: IncompleteReason | None = None
+
+
+UNREADABLE_GROUPS = AwsUserGroups(assigned_unproven=True, mapped_unproven=True)
+
+
+@dataclass(frozen=True)
 class AwsRoleSources:
     """Everything outside the assignment's own profile that decides the Role value."""
 
     settings: AwsFederationSettings
-    group_assignments: tuple[GroupAssignment, ...] | None = None
-    group_mapping: GroupMappingPlan | None = None
+    groups: AwsUserGroups = AwsUserGroups()
 
 
 # --- Roles on an assignment (Design rule 2; record "Join all roles") ---------
@@ -190,8 +226,7 @@ def _role_names(roles: object, role: object) -> tuple[list[str], bool]:
 def _assignment_values(
     settings: AwsFederationSettings,
     profile: Mapping[str, Any],
-    assignments: tuple[GroupAssignment, ...] | None,
-    is_member: MembershipCheck | None,
+    groups: AwsUserGroups,
 ) -> tuple[list[str], set[IncompleteReason]]:
     """Pairs for the roles on the user's assignment, and on groups when joined.
 
@@ -204,21 +239,17 @@ def _assignment_values(
     if not_text:
         reasons.add(IncompleteReason.ROLE_NAME_NOT_PLAIN)
     if settings.join_all_roles:
-        if assignments is None:
+        if groups.assigned_unproven:
             reasons.add(IncompleteReason.GROUP_MEMBERSHIP_INCOMPLETE)
-        for assignment in assignments or ():
-            member = is_member("id", assignment.group_id) if is_member else None
-            if member is None:
-                reasons.add(IncompleteReason.GROUP_MEMBERSHIP_INCOMPLETE)
-            elif member:
-                group_names, not_text = _clean_names(assignment.saml_roles)
-                names.extend(group_names)
-                if not_text:
-                    reasons.add(IncompleteReason.ROLE_NAME_NOT_PLAIN)
-                if not group_names and _clean_names(assignment.role)[0]:
-                    # The role of a group without SAML User Roles is not
-                    # documented for "Join all roles".
-                    reasons.add(IncompleteReason.GROUP_ROLE_DEFAULT_UNPROVEN)
+        for assignment in groups.assigned:
+            group_names, not_text = _clean_names(assignment.saml_roles)
+            names.extend(group_names)
+            if not_text:
+                reasons.add(IncompleteReason.ROLE_NAME_NOT_PLAIN)
+            if not group_names and _clean_names(assignment.role)[0]:
+                # The role of a group without SAML User Roles is not
+                # documented for "Join all roles".
+                reasons.add(IncompleteReason.GROUP_ROLE_DEFAULT_UNPROVEN)
 
     provider = _PROVIDER_ARN.fullmatch(settings.identity_provider_arn or "")
     plain = [name for name in dict.fromkeys(names) if _PLAIN_ROLE_NAME.fullmatch(name)]
@@ -241,29 +272,34 @@ def _assignment_values(
 
 # --- Group mapping (Design rule 3) -------------------------------------------
 
-_NAMED_GROUPS = {"(?{{role}}": "(?P<role>", "(?{{accountid}}": "(?P<accountid>"}
+_NAMED_GROUPS = {"(?{{role}}": "role", "(?{{accountid}}": "accountid"}
 _PLACEHOLDER = re.compile(r"\(\?\{\{(?:role|accountid)\}\}")
-# Tokens that mean the same in Java and in Python: an escaped punctuation
-# literal, \w \d \s \S, a quantifier, a group start, an alternative, or an anchor.
+# Tokens that mean the same in Java and in RE2, the engine of DuckDB: an escaped
+# punctuation literal, \w \d \s \S, a quantifier, a group start, an alternative,
+# or an anchor. The filter must be ASCII (see `_supported_group_filter`).
 _SET_ESCAPES = frozenset({r"\w", r"\d", r"\s", r"\S"})
-_ESCAPE = re.compile(r"\\(?:[wdsS]|[^\w\s])")
+_PUNCTUATION = re.escape(string.punctuation.replace("_", ""))
+_ESCAPE = re.compile(rf"\\(?:[wdsS]|[{_PUNCTUATION}])")
 # Repeat counts have at most 3 digits: Okta group names have at most 255 characters.
 _QUANTIFIER = re.compile(r"[?*+]|\{\d{1,3}(?:,\d{0,3})?\}")
-_CLASS = re.compile(r"\[\^?(?:\\(?:[wdsS]|[^\w\s])|[^\\\[\]&])+\]")
+_CLASS = re.compile(rf"\[\^?(?:\\(?:[wdsS]|[{_PUNCTUATION}])|[^\\\[\]&])+\]")
 _LITERAL = re.compile(r"[^\\.()\[\]{}*+?|^$]")
 _ATOMS = (_ESCAPE, _CLASS, _LITERAL)
 _SYNTAX = re.compile(r"\((?!\?)|\(\?:|\)|\||\^|\$")
 _CLASS_ITEM = re.compile(r"\\.|.")
+# Java `\s` has the vertical tab and RE2 `\s` has not. The POSIX class of RE2
+# has it, so it is written for `\s` and `\S`.
+_RE2_SPACE = {r"\s": "[:space:]", r"\S": "[:^space:]"}
 _MAX_FILTER_LENGTH = 512
 _MAX_GROUP_DEPTH = 8
 
 
 def _class_is_shared(text: str) -> bool:
-    r"""Whether a character class means the same in Java and in Python.
+    r"""Whether a character class means the same in Java and in RE2.
 
-    Python warns that a doubled `--`, `||` or `~~` will change. A range with
-    `\w`, `\d`, `\s` or `\S` as an end, such as `[a-\w]`, is a literal `-` in
-    Python and probably an error in Java. A leading or trailing `-` is fine.
+    A doubled `--`, `||` or `~~` is a set operation in some regex engines. A
+    range with `\w`, `\d`, `\s` or `\S` as an end, such as `[a-\w]`, is an error
+    in RE2 and probably in Java. A leading or trailing `-` is fine.
     """
 
     if any(operator in text for operator in ("--", "||", "~~")):
@@ -277,31 +313,45 @@ def _class_is_shared(text: str) -> bool:
     )
 
 
-# Longest time for one Group Filter match. A documented filter on a 255
-# character name takes microseconds, so this is far above a normal match. A
-# filter that can backtrack for long (for example side by side repeats such as
-# \w*\w*\w*) is cut off here, and the whole plan becomes incomplete.
-_GROUP_FILTER_TIMEOUT_SECONDS = 0.25
-# Longest total time for all matches of one plan, so that the cost of a slow
-# filter does not grow with the number of groups. The documented filters take
-# about 0.12 s for 20,000 groups, so 5 s leaves a margin of about 40 times.
-# The plan is built once for each application.
-_GROUP_FILTER_PLAN_BUDGET_SECONDS = 5.0
-# The `re`-compatible behavior (V0). ASCII gives the Java default meaning of
-# \w, \d, \s and of case folding.
-_FILTER_FLAGS = regex.V0 | regex.ASCII
+def _re2_atom(text: str) -> str:
+    """Write an accepted escape or character class in RE2 form."""
+
+    if text.startswith("["):
+        negation = "^" if text.startswith("[^") else ""
+        items = _CLASS_ITEM.findall(text[1:-1].removeprefix("^"))
+        return f"[{negation}{''.join(_RE2_SPACE.get(item, item) for item in items)}]"
+    return f"[{_RE2_SPACE[text]}]" if text in _RE2_SPACE else text
 
 
-def _supported_group_filter(expression: str) -> str | None:
-    """Return the Python form of a Group Filter, or None for unsupported syntax.
+@dataclass(frozen=True)
+class GroupFilter:
+    """A Group Filter in RE2 form, ready for DuckDB.
 
-    Only the syntax of the Design is accepted, so a name tested here gives the
-    same result in Okta's Java engine. Both named groups must exist, and no other.
+    The only capture groups of `pattern` are the two named ones. DuckDB names
+    the captures by position, so `capture_names` lists them in the order they
+    appear in the pattern.
     """
 
-    if len(expression) > _MAX_FILTER_LENGTH:
+    pattern: str
+    capture_names: tuple[str, ...]
+    end_anchored: bool
+
+
+def _supported_group_filter(expression: str) -> GroupFilter | None:
+    """Return the RE2 form of a Group Filter, or None for unsupported syntax.
+
+    Only the syntax of the Design is accepted, so a name tested in DuckDB gives
+    the same result in Okta's Java engine. Both named groups must exist, once
+    each, and no other group is named. The filter is ASCII: RE2 folds letter
+    case for all of Unicode and Java for ASCII only, so a non-ASCII letter in a
+    filter would match differently with letter case off. A name that DuckDB
+    cannot compile (for example a size limit) is found when it runs.
+    """
+
+    if len(expression) > _MAX_FILTER_LENGTH or not expression.isascii():
         return None
     rewritten: list[str] = []
+    named: list[str] = []
     position = 0
     after_atom = False  # a quantifier needs an atom before it
     # One flag for each open group: it holds a quantifier or an alternative.
@@ -311,14 +361,17 @@ def _supported_group_filter(expression: str) -> str | None:
         was_closed_risky, closed_risky = closed_risky, False
         token = _PLACEHOLDER.match(expression, position)
         if token:
-            if _NAMED_GROUPS[token.group()] in rewritten:
-                return None  # `regex` accepts a repeated group name; `re` does not
-            rewritten.append(_NAMED_GROUPS[token.group()])
+            name = _NAMED_GROUPS[token.group()]
+            if name in named:
+                return None
+            named.append(name)
+            rewritten.append(f"(?P<{name}>")
             open_groups.append(False)
             after_atom = False
         elif token := _SYNTAX.match(expression, position):
             text = token.group()
-            rewritten.append(text)
+            # Only the two named groups capture, so DuckDB gives them by position.
+            rewritten.append("(?:" if text == "(" else text)
             if text == ")":
                 if not open_groups:
                     return None
@@ -347,18 +400,14 @@ def _supported_group_filter(expression: str) -> str | None:
                 token.group().startswith("[") and not _class_is_shared(token.group())
             ):
                 return None
-            rewritten.append(token.group())
+            rewritten.append(_re2_atom(token.group()))
             after_atom = True
         if len(open_groups) > _MAX_GROUP_DEPTH:
             return None
         position = token.end()
-    python_form = "".join(rewritten)
-    try:
-        compiled = regex.compile(python_form, _FILTER_FLAGS)
-    except (regex.error, RecursionError, OverflowError):
+    if open_groups or set(named) != set(_NAMED_GROUPS.values()):
         return None
-    # Exactly the two named groups: a literal "(?P<role>" is not one.
-    return python_form if set(compiled.groupindex) == {"role", "accountid"} else None
+    return GroupFilter("".join(rewritten), tuple(named), "$" in expression)
 
 
 def _role_value(pattern: str | None, account: str, role: str) -> str | None:
@@ -376,50 +425,32 @@ def _role_value(pattern: str | None, account: str, role: str) -> str | None:
     return None
 
 
-def _mapped_group(
-    group: GroupRef,
-    filters: tuple[regex.Pattern[str], regex.Pattern[str]],
-    pattern: str | None,
-    deadline: float,
-) -> MappedGroup | None:
-    """Test one group name in the four ways Okta leaves open (record, item 3).
+def _mapped_group(match: GroupNameMatch, pattern: str | None) -> MappedGroup | None:
+    """Judge one group name from its four matches (record, item 3).
 
-    The ways are full or part of the name, and case-sensitive or not. Return None
-    for a name that no way matches. Raise TimeoutError when a match takes too
-    long, or when the plan is past its `deadline`.
+    The ways are full or part of the name, and case-sensitive or not. Return
+    None for a name that no way matches.
     """
 
-    sensitive, insensitive = filters
-
-    def match(test: Callable[..., regex.Match[str] | None]) -> regex.Match[str] | None:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise TimeoutError
-        return test(group.name, timeout=min(_GROUP_FILTER_TIMEOUT_SECONDS, remaining))
-
-    # The case-insensitive part match accepts every name that the other three
-    # ways accept. Without a match here, the group does not match.
-    first = match(insensitive.search)
-    if first is None:
-        return None
-    matches = [
-        first,
-        match(insensitive.fullmatch),
-        match(sensitive.fullmatch),
-        match(sensitive.search),
-    ]
-    captures = {(m["role"], m["accountid"]) if m else None for m in matches}
+    group_id = match.group.id
+    if match.unprovable:
+        return MappedGroup(group_id, None, IncompleteReason.GROUP_FILTER_MATCH_UNPROVEN)
+    captures = set(match.captures)
     capture = captures.pop()
-    # The ways disagree, or a branch left a named group unset.
-    if captures or capture is None or None in capture:
-        return MappedGroup(group.id, None, IncompleteReason.GROUP_FILTER_MATCH_UNPROVEN)
+    if not captures and capture is None:
+        return None
+    # The ways disagree, or a group is empty. DuckDB gives an empty text for
+    # a named group that did not take part in the match, so it cannot tell
+    # that from an empty capture.
+    if captures or capture is None or "" in capture:
+        return MappedGroup(group_id, None, IncompleteReason.GROUP_FILTER_MATCH_UNPROVEN)
     role, account = capture
     value = _role_value(pattern, account, role)
     if value is None:
         return MappedGroup(
-            group.id, None, IncompleteReason.ROLE_VALUE_PATTERN_UNSUPPORTED
+            group_id, None, IncompleteReason.ROLE_VALUE_PATTERN_UNSUPPORTED
         )
-    return MappedGroup(group.id, value, None)
+    return MappedGroup(group_id, value, None)
 
 
 def _permitted_by_app_filter(group: GroupRef, app_filter: str) -> bool | None:
@@ -434,10 +465,15 @@ def _permitted_by_app_filter(group: GroupRef, app_filter: str) -> bool | None:
     return group.source_app_name == app_filter
 
 
+# Finds the group names that a Group Filter can match. None means DuckDB
+# rejected the pattern.
+GroupFilterMatcher = Callable[[GroupFilter], list[GroupNameMatch] | None]
+
+
 def plan_group_mapping(
     settings: AwsFederationSettings,
-    groups: Iterable[GroupRef],
     application_names: frozenset[str],
+    find_matches: GroupFilterMatcher,
 ) -> GroupMappingPlan:
     """Find the groups whose names can give a Role value (rule 3, steps 1 to 4)."""
 
@@ -445,39 +481,27 @@ def plan_group_mapping(
         return GroupMappingPlan(reason=IncompleteReason.APP_FILTER_EMPTY_UNPROVEN)
     if settings.app_filter != "okta" and settings.app_filter not in application_names:
         return GroupMappingPlan(reason=IncompleteReason.APP_FILTER_UNMAPPED)
-    python_form = _supported_group_filter(settings.group_filter or "")
-    if python_form is None:
+    group_filter = _supported_group_filter(settings.group_filter or "")
+    matches = find_matches(group_filter) if group_filter else None
+    if matches is None:
         return GroupMappingPlan(reason=IncompleteReason.GROUP_FILTER_UNSUPPORTED)
-    filters = (
-        regex.compile(python_form, _FILTER_FLAGS),
-        regex.compile(python_form, _FILTER_FLAGS | regex.IGNORECASE),
-    )
-    deadline = time.monotonic() + _GROUP_FILTER_PLAN_BUDGET_SECONDS
     mapped: list[MappedGroup] = []
-    for group in groups:
-        permitted = _permitted_by_app_filter(group, settings.app_filter)
+    for match in matches:
+        permitted = _permitted_by_app_filter(match.group, settings.app_filter)
         if permitted is False:
             continue
-        try:
-            found = _mapped_group(group, filters, settings.role_value_pattern, deadline)
-        except TimeoutError:
-            # Stop at the first timeout or at the budget: the plan does not
-            # depend on which group ran out, and each application costs a
-            # bounded amount.
-            return GroupMappingPlan(reason=IncompleteReason.GROUP_FILTER_TIMEOUT)
+        found = _mapped_group(match, settings.role_value_pattern)
         if found is None:
             continue
         if permitted is None:  # a group of unknown source that could match
-            found = MappedGroup(group.id, None, IncompleteReason.APP_FILTER_UNMAPPED)
+            found = MappedGroup(
+                found.group_id, None, IncompleteReason.APP_FILTER_UNMAPPED
+            )
         mapped.append(found)
     return GroupMappingPlan(tuple(mapped))
 
 
-def _mapped_values(
-    plan: GroupMappingPlan | None,
-    assignments: tuple[GroupAssignment, ...] | None,
-    is_member: MembershipCheck | None,
-) -> tuple[list[str], set[IncompleteReason]]:
+def _mapped_values(groups: AwsUserGroups) -> tuple[list[str], set[IncompleteReason]]:
     """Values of the user's matching groups.
 
     Item 4 of the record: Okta does not say if it tests all groups of the user
@@ -485,42 +509,29 @@ def _mapped_values(
     assignment is therefore incomplete.
     """
 
-    if plan is None:
-        return [], {IncompleteReason.GROUP_MEMBERSHIP_INCOMPLETE}
-    if plan.reason:
-        return [], {plan.reason}
+    if groups.mapping_reason:
+        return [], {groups.mapping_reason}
     values: list[str] = []
     reasons: set[IncompleteReason] = set()
-    for group in plan.groups:
-        member = is_member("id", group.group_id) if is_member else None
-        if member is None:
-            reasons.add(IncompleteReason.GROUP_MEMBERSHIP_INCOMPLETE)
-        elif member and group.value:
+    if groups.mapped_unproven:
+        reasons.add(IncompleteReason.GROUP_MEMBERSHIP_INCOMPLETE)
+    for group in groups.mapped:
+        if group.value:
             values.append(group.value)
-            if assignments is None or group.group_id not in {
-                assignment.group_id for assignment in assignments
-            }:
+            if not group.assigned:
                 reasons.add(IncompleteReason.GROUP_MAPPING_SCOPE_UNPROVEN)
-        elif member and group.reason:
+        elif group.reason:
             reasons.add(group.reason)
     return values, reasons
 
 
-def role_value(
-    profile: Mapping[str, Any] | None,
-    sources: AwsRoleSources,
-    is_member: MembershipCheck | None,
-) -> RoleValue:
+def role_value(profile: Mapping[str, Any] | None, sources: AwsRoleSources) -> RoleValue:
     """Combine the sources of the `Role` attribute for one user (rules 2 and 3)."""
 
-    pairs, reasons = _assignment_values(
-        sources.settings, profile or {}, sources.group_assignments, is_member
-    )
+    pairs, reasons = _assignment_values(sources.settings, profile or {}, sources.groups)
     mapped: list[str] = []
     if sources.settings.use_group_mapping:
-        mapped, mapping_reasons = _mapped_values(
-            sources.group_mapping, sources.group_assignments, is_member
-        )
+        mapped, mapping_reasons = _mapped_values(sources.groups)
         reasons |= mapping_reasons
         if pairs and mapped:
             # Rule 3, step 5: Okta does not document which source wins.
@@ -529,19 +540,15 @@ def role_value(
 
 
 def aws_role_sources(
-    lookup: Any, app_id: str, app_settings: Mapping[str, Any] | None
+    lookup: Any, app_id: str, user_id: str, app_settings: Mapping[str, Any] | None
 ) -> AwsRoleSources:
-    """Read the group data for an application's Role values from a lookup.
+    """Read the group data of one user for the Role value from a lookup.
 
-    A lookup without the group methods gives None, which makes the value
-    incomplete.
+    A lookup without the group method gives `UNREADABLE_GROUPS`, which makes the
+    value incomplete.
     """
 
     settings = AwsFederationSettings.from_app_settings(app_settings)
-    assignments = getattr(lookup, "aws_group_assignments", None)
-    plan = getattr(lookup, "aws_group_mapping_plan", None)
-    return AwsRoleSources(
-        settings,
-        assignments(app_id) if callable(assignments) else None,
-        plan(settings) if settings.use_group_mapping and callable(plan) else None,
-    )
+    read = getattr(lookup, "aws_user_groups", None)
+    groups = read(app_id, user_id) if callable(read) else None
+    return AwsRoleSources(settings, groups or UNREADABLE_GROUPS)

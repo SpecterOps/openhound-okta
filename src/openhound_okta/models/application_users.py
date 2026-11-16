@@ -597,7 +597,7 @@ class ApplicationUser(BaseAsset):
                     else None
                 ),
                 aws_sources=(
-                    aws_role_sources(lookup, self.app_id, self.app_settings)
+                    aws_role_sources(lookup, self.app_id, self.id, self.app_settings)
                     if self.app_name == AppName.AWS_ACCOUNT_FEDERATION
                     else None
                 ),

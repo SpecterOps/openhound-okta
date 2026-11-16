@@ -1,4 +1,6 @@
+from collections.abc import Callable
 from dataclasses import dataclass, field as dc_field, replace
+from functools import cache, partial
 import hashlib
 import json
 import re
@@ -24,6 +26,7 @@ from openhound_okta.saml_aws_account_federation import (
     AwsFederationSettings,
     AwsRoleSources,
     IncompleteReason,
+    UNREADABLE_GROUPS,
     RoleValue,
     role_value,
 )
@@ -744,18 +747,16 @@ def saml_application_assertion_evidence(
 
     incomplete_fields: set[str] = set()
     aws_custom_ids: dict[str, str] = {}  # mapping ID to claim name
+    # The native Role value is the same for every mapping, so it is made once.
+    native_role = cache(
+        partial(_aws_role_value, application_user, aws_sources),
+    )
     for mapping in mappings:
         origin = _mapping_get(mapping, "mapping_origin")
         if origin in {ROLE_ORIGIN, ROLE_SESSION_NAME_ORIGIN}:
             if mapping_id := _clean(_mapping_get(mapping, "id")):
                 evidence["claim_values"].append(
-                    _aws_claim_value(
-                        mapping_id,
-                        origin,
-                        _aws_role_value(
-                            application_user, aws_sources, group_membership
-                        ),
-                    )
+                    _aws_claim_value(mapping_id, origin, native_role)
                 )
             continue
         if (
@@ -868,10 +869,7 @@ def saml_application_assertion_evidence(
     for claim_value in evidence["claim_values"]:
         claim_name = aws_custom_ids.get(claim_value["mapping_id"])
         if claim_name == ROLE_ATTRIBUTE:
-            _mark_role_source_conflict(
-                claim_value,
-                _aws_role_value(application_user, aws_sources, group_membership),
-            )
+            _mark_role_source_conflict(claim_value, native_role())
         elif claim_name == ROLE_SESSION_NAME_ATTRIBUTE:
             # Item 6: Okta does not document the source for this application.
             claim_value["incomplete"] = True
@@ -892,25 +890,24 @@ def saml_application_assertion_evidence(
 
 
 def _aws_role_value(
-    application_user: Any,
-    aws_sources: AwsRoleSources | None,
-    group_membership: MembershipCheck | None,
+    application_user: Any, aws_sources: AwsRoleSources | None
 ) -> RoleValue:
     """Native `Role` values of an AWS Account Federation assignment."""
 
     sources = aws_sources or AwsRoleSources(
         AwsFederationSettings.from_app_settings(
             getattr(application_user, "app_settings", None)
-        )
+        ),
+        UNREADABLE_GROUPS,
     )
     return role_value(
-        _profile_dict(getattr(application_user, "profile", None)),
-        sources,
-        group_membership,
+        _profile_dict(getattr(application_user, "profile", None)), sources
     )
 
 
-def _aws_claim_value(mapping_id: str, origin: str, native: RoleValue) -> dict[str, Any]:
+def _aws_claim_value(
+    mapping_id: str, origin: str, native_role: Callable[[], RoleValue]
+) -> dict[str, Any]:
     """Claim value for a mapping that the producer adds for the AWS application."""
 
     if origin == ROLE_SESSION_NAME_ORIGIN:
@@ -920,6 +917,7 @@ def _aws_claim_value(mapping_id: str, origin: str, native: RoleValue) -> dict[st
             IncompleteReason.ROLE_SESSION_NAME_SOURCE_UNPROVEN
         )
     else:
+        native = native_role()
         values, reason = native.match_values, native.reason
     return {
         "mapping_id": mapping_id,

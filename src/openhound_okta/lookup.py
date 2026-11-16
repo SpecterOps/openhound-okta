@@ -10,11 +10,10 @@ from duckdb import Error as DuckDBError
 from openhound.core.lookup import LookupManager
 
 from openhound_okta.saml_aws_account_federation import (
-    AwsFederationSettings,
+    AwsUserGroups,
     GroupAssignment,
-    GroupMappingPlan,
-    GroupRef,
-    plan_group_mapping,
+    IncompleteReason,
+    MappedGroup,
 )
 from openhound_okta.saml_group_expression import GroupSelector
 
@@ -374,59 +373,52 @@ class OktaLookup(LookupManager):
             return None
         return user_id in members
 
-    @lru_cache
-    def aws_group_assignments(self, app_id: str) -> tuple[GroupAssignment, ...] | None:
-        """Return the role fields of an app's group assignments, None if unreadable."""
+    def aws_user_groups(self, app_id: str, user_id: str) -> AwsUserGroups | None:
+        """Return the group data for one user's AWS Role value, None if unreadable.
+
+        Reads one row of `aws_role_sources`, made by the `preproc` transform.
+        """
 
         try:
             rows = self.client.execute(
-                f"""SELECT group_id, assignment_profile
-                    FROM {self.schema}.group_assigned_apps WHERE id = ?
-                    ORDER BY group_id""",
-                [app_id],
+                f"""SELECT app_id, assigned, mapped, assigned_unproven,
+                        mapped_unproven, mapping_reason
+                    FROM {self.schema}.aws_role_sources
+                    WHERE user_id = ?""",
+                [user_id],
             ).fetchall()
         except DuckDBError:
             return None
+        # The table is indexed by user only, so the application is chosen here.
+        row = next((row[1:] for row in rows if row[0] == app_id), None)
+        if row is None:
+            return None
+        assigned, mapped, assigned_unproven, mapped_unproven, mapping_reason = row
         assignments = []
-        for group_id, raw_profile in rows:
-            profile = _normalize_user_profile(raw_profile) or {}
+        for item in assigned or ():
+            profile = _normalize_user_profile(item["profile"]) or {}
             assignments.append(
                 GroupAssignment(
-                    group_id=group_id,
+                    group_id=item["group_id"],
                     role=profile.get("role"),
                     saml_roles=profile.get("samlRoles"),
                 )
             )
-        return tuple(assignments)
-
-    @lru_cache
-    def aws_group_mapping_plan(
-        self, settings: AwsFederationSettings
-    ) -> GroupMappingPlan | None:
-        """Return the groups that AWS group mapping can use, None if unreadable."""
-
-        try:
-            group_rows = self.client.execute(
-                f"""SELECT g.id, json_extract_string(g.profile, '$.name'), g.type,
-                        a.name
-                    FROM {self.schema}.groups g
-                    LEFT JOIN {self.schema}.applications a
-                        ON a.id = json_extract_string(g.source, '$.id')""",
-            ).fetchall()
-            application_names = frozenset(
-                name
-                for (name,) in self.client.execute(
-                    f"SELECT name FROM {self.schema}.applications"
-                ).fetchall()
-            )
-        except DuckDBError:
-            return None
-        groups = (
-            GroupRef(group_id, name, group_type, source_app)
-            for group_id, name, group_type, source_app in group_rows
-            if name
+        return AwsUserGroups(
+            assigned=tuple(assignments),
+            mapped=tuple(
+                MappedGroup(
+                    item["group_id"],
+                    item["value"],
+                    IncompleteReason(item["reason"]) if item["reason"] else None,
+                    item["assigned"],
+                )
+                for item in mapped or ()
+            ),
+            assigned_unproven=assigned_unproven,
+            mapped_unproven=mapped_unproven,
+            mapping_reason=IncompleteReason(mapping_reason) if mapping_reason else None,
         )
-        return plan_group_mapping(settings, groups, application_names)
 
     @lru_cache
     def non_admin_users(self):

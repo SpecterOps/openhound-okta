@@ -117,13 +117,16 @@ The work item is `SpecterOps/saml-og-research#88`.
   `identityProviderArn` and the role name.
 - **Group mapping** (`useGroupMapping`). The App Filter selects the groups
   that Okta can test: `okta` selects Okta groups, and an application name
-  selects the groups of that application. The Group Filter must use only
-  syntax with the same meaning in Java and Python: literals, character
-  classes, `\w`, `\d`, `\s`, `\S`, the quantifiers `?`, `*`, `+` and `{n,m}`,
-  groups, alternatives, and the anchors `^` and `$`. It must have the groups
-  `(?{{role}}` and `(?{{accountid}}` one time each. Each group name is tested
-  four ways: the full name or a part of it, with and without letter case. The
-  Role Value Pattern must give one provider ARN and one role ARN.
+  selects the groups of that application. The `preproc` step runs the Group
+  Filter in DuckDB (RE2), one time for each application, and writes the groups
+  that give a value and the groups of each user to the table
+  `aws_role_sources`. The Group Filter must use only ASCII syntax with the same
+  meaning in Java and RE2: literals, character classes, `\w`, `\d`, `\s`,
+  `\S`, the quantifiers `?`, `*`, `+` and `{n,m}`, groups, alternatives, and the
+  anchors `^` and `$`. It must have the groups `(?{{role}}` and
+  `(?{{accountid}}` one time each. Each group name is tested four ways: the
+  full name or a part of it, with and without letter case. The Role Value
+  Pattern must give one provider ARN and one role ARN.
 - **`RoleSessionName`.** The value is always empty and incomplete. A custom
   `RoleSessionName` statement on this application is kept and is also
   incomplete.
@@ -144,9 +147,8 @@ first in this table is written.
 | `role_source_precedence_unproven` | The user has values from assignment roles and from group mapping. Okta does not document which wins (item 2). |
 | `app_filter_empty_unproven` | The App Filter is empty. Okta does not document what this means (item 5). |
 | `app_filter_unmapped` | The App Filter names no collected application, or a group that can match has no known source: a built-in group, or an application group whose source application is not collected (Issue rule 3, step 1). |
-| `group_filter_unsupported` | The Group Filter is missing, has syntax outside the shared set, does not have exactly the two named groups, or repeats a group that holds a quantifier or an alternative (such as `(\w+)+`). It also breaks a size limit: at most 512 characters, group nesting at most 8, repeat counts at most 3 digits, and no `-` that makes a range with `\w`, `\d`, `\s` or `\S` in a class (Issue rule 3, step 2). |
-| `group_filter_timeout` | One match of the Group Filter took longer than 0.25 seconds, or all matches for the application took longer than 5 seconds. The filter is not evaluated for this application and every group mapping value is incomplete (Issue rule 3, step 2). |
-| `group_filter_match_unproven` | A group name matches in some of the four ways and not in others, or a match leaves `role` or `accountid` unset. Okta does not document the match rule (item 3). |
+| `group_filter_unsupported` | The Group Filter is missing, has syntax outside the shared set (a character that is not ASCII is outside it), does not have exactly the two named groups, repeats a group that holds a quantifier or an alternative (such as `(\w+)+`), or DuckDB does not accept it. It also breaks a size limit: at most 512 characters, group nesting at most 8, repeat counts at most 3 digits, and no `-` that makes a range with `\w`, `\d`, `\s` or `\S` in a class (Issue rule 3, step 2). |
+| `group_filter_match_unproven` | A group name matches in some of the four ways and not in others, or a match leaves `role` or `accountid` empty or unset. Okta does not document the match rule (item 3). It also applies when DuckDB and Java can differ for the name: the name has U+212A or U+017F (RE2 folds them with `k` and `s`), or it ends in a line end and the filter has `$`. |
 | `role_value_pattern_unsupported` | The Role Value Pattern lacks `${accountid}` or `${role}`, or its result is not one provider ARN and one role ARN (Issue rule 3, step 4). |
 | `group_mapping_scope_unproven` | A group that gives a value has no assignment to this application. Okta does not say if it tests all groups of the user or only assigned groups (item 4). The value is complete only for assigned groups. |
 | `group_membership_incomplete` | The collected members of a group that decides the value are not complete, or the group data is not available (Issue rule 2, step 5). |
