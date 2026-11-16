@@ -9,6 +9,13 @@ from duckdb import DuckDBPyConnection
 from duckdb import Error as DuckDBError
 from openhound.core.lookup import LookupManager
 
+from openhound_okta.saml_aws_account_federation import (
+    AwsFederationSettings,
+    GroupAssignment,
+    GroupMappingPlan,
+    GroupRef,
+    plan_group_mapping,
+)
 from openhound_okta.saml_group_expression import GroupSelector
 
 USER_SAML_CONTEXT_CACHE_MAXSIZE = 128
@@ -366,6 +373,65 @@ class OktaLookup(LookupManager):
         if members is None or len(members) != reported_count:
             return None
         return user_id in members
+
+    @lru_cache
+    def aws_group_assignments(self, app_id: str) -> tuple[GroupAssignment, ...] | None:
+        """Return the role fields of an app's group assignments, None if unreadable."""
+
+        try:
+            rows = self.client.execute(
+                f"""SELECT group_id, assignment_profile
+                    FROM {self.schema}.group_assigned_apps WHERE id = ?
+                    ORDER BY group_id""",
+                [app_id],
+            ).fetchall()
+        except DuckDBError:
+            return None
+        assignments = []
+        for group_id, raw_profile in rows:
+            profile = _normalize_user_profile(raw_profile) or {}
+            saml_roles = profile.get("samlRoles")
+            assignments.append(
+                GroupAssignment(
+                    group_id=group_id,
+                    role=profile.get("role") or None,
+                    saml_roles=tuple(
+                        role for role in saml_roles if isinstance(role, str)
+                    )
+                    if isinstance(saml_roles, list)
+                    else (),
+                )
+            )
+        return tuple(assignments)
+
+    @lru_cache
+    def aws_group_mapping_plan(
+        self, settings: AwsFederationSettings
+    ) -> GroupMappingPlan | None:
+        """Return the groups that AWS group mapping can use, None if unreadable."""
+
+        try:
+            group_rows = self.client.execute(
+                f"""SELECT g.id, json_extract_string(g.profile, '$.name'), g.type,
+                        a.name
+                    FROM {self.schema}.groups g
+                    LEFT JOIN {self.schema}.applications a
+                        ON a.id = json_extract_string(g.source, '$.id')""",
+            ).fetchall()
+            application_names = frozenset(
+                name
+                for (name,) in self.client.execute(
+                    f"SELECT name FROM {self.schema}.applications"
+                ).fetchall()
+            )
+        except DuckDBError:
+            return None
+        groups = (
+            GroupRef(group_id, name, group_type, source_app)
+            for group_id, name, group_type, source_app in group_rows
+            if name
+        )
+        return plan_group_mapping(settings, groups, application_names)
 
     @lru_cache
     def non_admin_users(self):

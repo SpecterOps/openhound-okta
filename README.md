@@ -98,6 +98,60 @@ group. When the counts differ or either is missing, the test is unknown.
 The `namespace` of the Okta attribute statement is kept as the NameFormat of the
 claim mapping.
 
+## SAML Role values of the AWS Account Federation application
+
+The Okta application "AWS Account Federation" (`name` = `amazon_aws`, sign-on
+mode SAML 2.0) gives the `Role` attribute from its own settings, not from an
+attribute statement. The producer adds a claim mapping for `Role` and one for
+`RoleSessionName` to this application. It then writes one `SAML_HasClaimValue`
+edge for each user and mapping. The sources of each rule are in the SAML
+contract guide, section 11, "Okta: the settings of the AWS Account Federation
+application" (`docs/openhound-saml-contract-guide.md` in `saml-og-research`).
+The work item is `SpecterOps/saml-og-research#88`.
+
+- **Roles on an assignment.** The roles are `samlRoles` in the profile of the
+  application user, or `role` if the list is empty. With `joinAllRoles`, the
+  `samlRoles` of each group assignment of the user are added. A value is one
+  provider ARN and one role ARN, joined by a comma. The provider is
+  `identityProviderArn`. The role ARN has the partition and account of
+  `identityProviderArn` and the role name.
+- **Group mapping** (`useGroupMapping`). The App Filter selects the groups
+  that Okta can test: `okta` selects Okta groups, and an application name
+  selects the groups of that application. The Group Filter must use only
+  syntax with the same meaning in Java and Python: literals, character
+  classes, `\w`, `\d`, `\s`, `\S`, the quantifiers `?`, `*`, `+` and `{n,m}`,
+  groups, alternatives, and the anchors `^` and `$`. It must have the groups
+  `(?{{role}}` and `(?{{accountid}}` one time each. Each group name is tested
+  four ways: the full name or a part of it, with and without letter case. The
+  Role Value Pattern must give one provider ARN and one role ARN.
+- **`RoleSessionName`.** The value is always empty and incomplete.
+
+A custom attribute statement for `Role` on this application is also read, as
+for other applications. Its value gets the roles from the settings added and is
+incomplete.
+
+Okta does not document seven items (the record, "Not documented"). Each value
+that depends on one of them has `incomplete` set to `true` and one
+`incomplete_reason`. At this time every role from an assignment depends on item
+1, so each such value is incomplete. When more than one reason applies, the
+first in this table is written.
+
+| `incomplete_reason` | The value is incomplete because |
+| --- | --- |
+| `role_source_conflict` | The application also has a custom `Role` attribute statement. |
+| `role_source_precedence_unproven` | The user has values from assignment roles and from group mapping. |
+| `app_filter_empty_unproven` | The App Filter is empty. Okta does not document what this means. |
+| `app_filter_unmapped` | The App Filter names no collected application, or a group that can match has no known source. |
+| `group_filter_unsupported` | The Group Filter is missing, has syntax outside the shared set, or lacks one of the two named groups. |
+| `group_filter_match_unproven` | A group name matches in some of the four ways and not in others. |
+| `role_value_pattern_unsupported` | The Role Value Pattern lacks `${accountid}` or `${role}`, or its result is not one provider ARN and one role ARN. |
+| `group_membership_incomplete` | The collected members of a group that decides the value are not complete, or the group data is not available. |
+| `group_role_default_unproven` | Under Join all roles, a group of the user has a `role` and no `samlRoles`. Okta does not document its default role. |
+| `identity_provider_arn_unusable` | `identityProviderArn` is missing or is not a SAML provider ARN. |
+| `role_name_not_plain` | A role name is not a plain IAM role name, for example a name from the old setting Connected Accounts IDs. |
+| `role_pair_rule_unproven` | The value has a pair made from a role name on an assignment (item 1). |
+| `role_session_name_source_unproven` | The source of the `RoleSessionName` value is not documented (item 6). |
+
 [![Python Version](https://img.shields.io/badge/Python-3.13-brightgreen.svg)](#about)
 
 ## Getting Started

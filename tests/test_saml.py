@@ -2,6 +2,7 @@ from dataclasses import asdict
 from itertools import islice
 import json
 from pathlib import Path
+from typing import Any
 
 import duckdb
 import pytest
@@ -42,6 +43,15 @@ from openhound_okta.models.saml import (
     saml_sp_acs_rows,
     saml_trusted_issuer_id,
     saml_trusted_issuer_row,
+)
+from openhound_okta.saml_aws_account_federation import (
+    AwsFederationSettings,
+    AwsRoleSources,
+    GroupAssignment,
+    GroupRef,
+    IncompleteReason,
+    plan_group_mapping,
+    role_value,
 )
 from openhound_okta.saml_eligibility import SAML_V0_4_CONTRACT_VERSION
 from openhound_okta.saml_group_expression import parse_fixed_value, parse_group_tests
@@ -2924,3 +2934,343 @@ def test_native_namespace_is_kept_as_the_attribute_name_format() -> None:
 def test_group_expression_matcher_refuses_other_forms(expression: str) -> None:
     assert parse_group_tests(expression) is None
     assert parse_fixed_value(expression) is None
+
+
+AWS_PROVIDER = "arn:aws:iam::123456789012:saml-provider/Okta"
+AWS_ROLE_ATTRIBUTE = "https://aws.amazon.com/SAML/Attributes/Role"
+DEFAULT_GROUP_FILTER = r"^aws\#\S+\#(?{{role}}[\w\-]+)\#(?{{accountid}}\d+)$"
+DOCUMENTED_GROUP_FILTER = r"aws_(?{{accountid}}\d+)_(?{{role}}[a-zA-Z0-9+=,.@\-_]+)"
+DEFAULT_ROLE_VALUE_PATTERN = (
+    "arn:aws:iam::${accountid}:saml-provider/Okta,"
+    "arn:aws:iam::${accountid}:role/${role}"
+)
+
+
+def _aws_pair(role: str) -> str:
+    return f"{AWS_PROVIDER},arn:aws:iam::123456789012:role/{role}"
+
+
+def _aws_swapped_pair(role: str) -> str:
+    return f"arn:aws:iam::123456789012:role/{role},{AWS_PROVIDER}"
+
+
+def _aws_settings(**native) -> AwsFederationSettings:
+    return AwsFederationSettings.from_app_settings(
+        {"identityProviderArn": AWS_PROVIDER, **native}
+    )
+
+
+def _member(_selector, _group_id) -> bool:
+    return True
+
+
+@pytest.mark.parametrize(
+    ("join_all_roles", "expected"),
+    [(False, ["Role1", "Role2"]), (True, ["Role1", "Role2", "RoleA", "RoleB"])],
+)
+def test_aws_join_all_roles_follows_the_okta_example(join_all_roles, expected) -> None:
+    sources = AwsRoleSources(
+        _aws_settings(joinAllRoles=join_all_roles),
+        (GroupAssignment("00g_a", None, ("RoleA", "RoleB")),),
+    )
+
+    value = role_value({"samlRoles": ["Role1", "Role2"]}, sources, _member)
+
+    assert value.match_values == tuple(_aws_pair(role) for role in expected)
+    assert value.reason is IncompleteReason.ROLE_PAIR_RULE_UNPROVEN
+
+
+@pytest.mark.parametrize(
+    ("profile", "native", "member", "values", "reason"),
+    [
+        pytest.param({"samlRoles": [], "role": "Role1"}, {}, True, ["Role1"], "role_pair_rule_unproven", id="role is the fallback"),
+        pytest.param({"role": "Role1"}, {"identityProviderArn": None}, True, [], "identity_provider_arn_unusable", id="no provider ARN"),
+        pytest.param({"samlRoles": ["123456789012:Role1"]}, {}, True, [], "role_name_not_plain", id="connected accounts form"),
+        pytest.param({}, {"joinAllRoles": True}, None, [], "group_membership_incomplete", id="membership unproven"),
+        pytest.param({"role": "Role1"}, {"joinAllRoles": True}, True, ["Role1"], "group_role_default_unproven", id="group role without SAML roles"),
+        pytest.param({}, {}, True, [], None, id="no roles is known"),
+    ],
+)  # fmt: skip
+def test_aws_assignment_roles_are_incomplete_where_okta_is_silent(
+    profile, native, member, values, reason
+) -> None:
+    sources = AwsRoleSources(
+        _aws_settings(**native), (GroupAssignment("00g_a", "RoleG", ()),)
+    )
+
+    value = role_value(profile, sources, lambda *_: member)
+
+    assert value.match_values == tuple(_aws_pair(role) for role in values)
+    assert value.reason == reason
+
+
+def _mapped_role_value(
+    group_filter: str,
+    group_names: list[str],
+    pattern: str = DEFAULT_ROLE_VALUE_PATTERN,
+    profile: dict | None = None,
+    **native,
+):
+    settings = _aws_settings(
+        useGroupMapping=True,
+        appFilter="okta",
+        groupFilter=group_filter,
+        roleValuePattern=pattern,
+        **native,
+    )
+    groups = [
+        GroupRef(f"00g_{index}", name, "OKTA_GROUP", None)
+        for index, name in enumerate(group_names)
+    ]
+    plan = plan_group_mapping(settings, groups, frozenset())
+    return plan, role_value(profile, AwsRoleSources(settings, (), plan), _member)
+
+
+SWAPPED_PATTERN = (
+    "arn:aws:iam::${accountid}:role/${role},"
+    "arn:aws:iam::${accountid}:saml-provider/Okta"
+)
+
+
+@pytest.mark.parametrize(
+    ("group_filter", "group_name", "pattern", "expected", "reason"),
+    [
+        pytest.param(DEFAULT_GROUP_FILTER, "aws#prod#Admin#123456789012", DEFAULT_ROLE_VALUE_PATTERN, [_aws_pair("Admin")], None, id="default expression"),
+        pytest.param(DOCUMENTED_GROUP_FILTER, "aws_123456789012_Dev", DEFAULT_ROLE_VALUE_PATTERN, [_aws_pair("Dev")], None, id="documented second expression"),
+        pytest.param(DOCUMENTED_GROUP_FILTER, "aws_123456789012_Dev", SWAPPED_PATTERN, [_aws_swapped_pair("Dev")], None, id="role ARN first"),
+        pytest.param(DEFAULT_GROUP_FILTER, "other", DEFAULT_ROLE_VALUE_PATTERN, [], None, id="no match is known"),
+        pytest.param(DEFAULT_GROUP_FILTER, "aws#prod#Admin#١٢٣٤٥٦٧٨٩٠١٢", DEFAULT_ROLE_VALUE_PATTERN, [], None, id="Java \\d is ASCII only"),
+        pytest.param(DOCUMENTED_GROUP_FILTER, "x-aws_123456789012_Dev", DEFAULT_ROLE_VALUE_PATTERN, [], "group_filter_match_unproven", id="full and part disagree"),
+        pytest.param(DEFAULT_GROUP_FILTER, "AWS#prod#Admin#123456789012", DEFAULT_ROLE_VALUE_PATTERN, [], "group_filter_match_unproven", id="case disagrees"),
+        pytest.param(DOCUMENTED_GROUP_FILTER, "aws_123456789012_Dev,Ops", DEFAULT_ROLE_VALUE_PATTERN, [], "role_value_pattern_unsupported", id="comma breaks the two ARNs"),
+        pytest.param(DEFAULT_GROUP_FILTER, "aws#prod#Admin#123456789012", "arn:aws:iam::${accountid}:role/Fixed", [], "role_value_pattern_unsupported", id="pattern without role or provider"),
+    ],
+)  # fmt: skip
+def test_aws_group_mapping_follows_the_group_filter_and_pattern(
+    group_filter, group_name, pattern, expected, reason
+) -> None:
+    _, value = _mapped_role_value(group_filter, [group_name], pattern)
+
+    assert (value.match_values, value.reason) == (tuple(expected), reason)
+
+
+@pytest.mark.parametrize(
+    "group_filter",
+    [
+        r".*(?{{role}}\w+)(?{{accountid}}\d+)",  # any character
+        r"(?=a)(?{{role}}\w+)(?{{accountid}}\d+)",  # lookahead
+        r"\b(?{{role}}\w+)(?{{accountid}}\d+)",  # word boundary
+        r"(?{{role}}[[:alpha:]]+)(?{{accountid}}\d+)",  # POSIX class
+        r"(?{{role}}\w+?)(?{{accountid}}\d+)",  # lazy quantifier
+        r"(?i)(?{{role}}\w+)(?{{accountid}}\d+)",  # inline flag
+        r"(?{{role}}\w+)",  # no account ID group
+        r"(?{{role}}\w+)(?{{role}}\w+)(?{{accountid}}\d+)",  # role group twice
+    ],
+)
+def test_aws_group_filter_syntax_outside_the_shared_subset_is_unsupported(
+    group_filter,
+) -> None:
+    plan, value = _mapped_role_value(group_filter, ["aws#prod#Admin#123456789012"])
+
+    assert plan.reason is IncompleteReason.GROUP_FILTER_UNSUPPORTED
+    assert (value.match_values, value.reason) == (
+        (),
+        IncompleteReason.GROUP_FILTER_UNSUPPORTED,
+    )
+
+
+def test_aws_roles_on_assignment_and_group_mapping_together_are_incomplete() -> None:
+    _, value = _mapped_role_value(
+        DEFAULT_GROUP_FILTER,
+        ["aws#prod#Admin#123456789012"],
+        profile={"samlRoles": ["Role1"]},
+    )
+
+    assert value.match_values == (_aws_pair("Role1"), _aws_pair("Admin"))
+    assert value.reason is IncompleteReason.ROLE_SOURCE_PRECEDENCE_UNPROVEN
+
+
+@pytest.mark.parametrize(
+    ("app_filter", "group_type", "source_app", "expected"),
+    [
+        ("okta", "OKTA_GROUP", None, ("ok", None)),
+        ("okta", "APP_GROUP", "active_directory", ("skip", None)),
+        ("okta", "BUILT_IN", None, ("skip", "app_filter_unmapped")),
+        ("active_directory", "APP_GROUP", "active_directory", ("ok", None)),
+        ("active_directory", "OKTA_GROUP", None, ("skip", None)),
+        (None, "OKTA_GROUP", None, ("skip", "app_filter_empty_unproven")),
+        ("no_such_app", "OKTA_GROUP", None, ("skip", "app_filter_unmapped")),
+    ],
+)
+def test_aws_app_filter_decides_which_groups_are_tested(
+    app_filter, group_type, source_app, expected
+) -> None:
+    settings = _aws_settings(
+        useGroupMapping=True,
+        appFilter=app_filter,
+        groupFilter=r"(?{{role}}\w+)#(?{{accountid}}\d+)",
+        roleValuePattern=DEFAULT_ROLE_VALUE_PATTERN,
+    )
+    group = GroupRef("00g_1", "Admin#123456789012", group_type, source_app)
+    plan = plan_group_mapping(settings, [group], frozenset({"active_directory"}))
+
+    value = role_value({}, AwsRoleSources(settings, (), plan), _member)
+
+    expect_value, reason = expected
+    assert bool(value.match_values) is (expect_value == "ok")
+    assert value.reason == reason
+
+
+def _aws_user(
+    native: dict,
+    statements: list[dict] | None = None,
+    profile: dict | None = None,
+    groups: tuple[tuple[str, str], ...] = (),
+    memberships: tuple[str, ...] = (),
+    assignment_profiles: tuple[tuple[str, dict], ...] = (),
+) -> ApplicationUser:
+    """Build a user of an amazon_aws app whose lookup is a real DuckDB schema."""
+
+    app_settings = {"identityProviderArn": AWS_PROVIDER, **native}
+    rows = saml_claim_mapping_rows(
+        _application(
+            name="amazon_aws",
+            settings={
+                "app": app_settings,
+                "signOn": {"attributeStatements": statements or []},
+            },
+        )
+    )
+    connection = duckdb.connect(":memory:")
+    connection.execute("CREATE SCHEMA okta")
+    for ddl in (
+        "users (id VARCHAR, status VARCHAR, profile JSON)",
+        "groups (id VARCHAR, profile JSON, _embedded JSON, type VARCHAR, source JSON)",
+        "group_memberships (id VARCHAR, group_id VARCHAR)",
+        "applications (id VARCHAR, name VARCHAR)",
+        "group_assigned_apps (id VARCHAR, group_id VARCHAR, assignment_profile JSON)",
+        "saml_claim_mappings (id VARCHAR, app_id VARCHAR, claim_name VARCHAR, mapping_type VARCHAR, claim_type VARCHAR, mapping_origin VARCHAR, expression VARCHAR)",
+    ):
+        connection.execute(f"CREATE TABLE okta.{ddl}")
+    connection.execute(
+        "INSERT INTO okta.users VALUES ('00u_saml_user', 'ACTIVE', '{}')"
+    )
+    connection.execute(
+        "INSERT INTO okta.applications VALUES ('0oa_saml', 'amazon_aws')"
+    )
+    for group_id, name in groups:
+        connection.execute(
+            "INSERT INTO okta.groups VALUES (?, ?, ?, 'OKTA_GROUP', NULL)",
+            [
+                group_id,
+                json.dumps({"name": name}),
+                json.dumps({"stats": {"usersCount": 1}}),
+            ],
+        )
+    for group_id in memberships:
+        connection.execute(
+            "INSERT INTO okta.group_memberships VALUES ('00u_saml_user', ?)", [group_id]
+        )
+    for group_id, assignment_profile in assignment_profiles:
+        connection.execute(
+            "INSERT INTO okta.group_assigned_apps VALUES ('0oa_saml', ?, ?)",
+            [group_id, json.dumps(assignment_profile)],
+        )
+    for row in rows:
+        connection.execute(
+            "INSERT INTO okta.saml_claim_mappings VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                row[key]
+                for key in (
+                    "id",
+                    "app_id",
+                    "claim_name",
+                    "mapping_type",
+                    "claim_type",
+                    "mapping_origin",
+                    "expression",
+                )
+            ],
+        )
+    user = _application_user(
+        app_name="amazon_aws",
+        app_status="ACTIVE",
+        app_settings=app_settings,
+        profile=profile or {},
+    )
+    user._lookup = OktaLookup(connection)
+    return user
+
+
+def _claims_by_name(user: ApplicationUser) -> dict[str, Any]:
+    mapping_names = {
+        row["id"].upper(): row["claim_name"]
+        for row in user._lookup.saml_claim_mappings("0oa_saml")
+    }
+    return {
+        mapping_names[edge.end.value.upper()]: edge.properties
+        for edge in user.edges
+        if edge.kind == ek.SAML_HAS_CLAIM_VALUE
+    }
+
+
+def test_aws_application_emits_role_and_incomplete_role_session_name() -> None:
+    user = _aws_user(
+        {
+            "useGroupMapping": True,
+            "appFilter": "okta",
+            "groupFilter": DEFAULT_GROUP_FILTER,
+            "roleValuePattern": DEFAULT_ROLE_VALUE_PATTERN,
+        },
+        groups=(("00g_aws", "aws#prod#Admin#123456789012"),),
+        memberships=("00g_aws",),
+    )
+
+    claims = _claims_by_name(user)
+
+    role = claims[AWS_ROLE_ATTRIBUTE]
+    assert role.match_values == [
+        "arn:aws:iam::123456789012:saml-provider/Okta,"
+        "arn:aws:iam::123456789012:role/Admin"
+    ]
+    assert (role.incomplete, role.incomplete_reason) == (False, None)
+    session_name = claims[AWS_ROLE_ATTRIBUTE + "SessionName"]
+    assert (session_name.match_values, session_name.incomplete) == ([], True)
+    assert session_name.incomplete_reason == "role_session_name_source_unproven"
+
+
+def test_aws_custom_role_statement_conflicts_with_the_application_settings() -> None:
+    statement = {
+        "type": "EXPRESSION",
+        "name": AWS_ROLE_ATTRIBUTE,
+        "values": [f'"{_aws_pair("Custom")}"'],
+    }
+    user = _aws_user({}, statements=[statement], profile={"role": "Role1"})
+
+    role = _claims_by_name(user)[AWS_ROLE_ATTRIBUTE]
+
+    assert role.match_values == [_aws_pair("Custom"), _aws_pair("Role1")]
+    assert (role.incomplete, role.incomplete_reason) == (True, "role_source_conflict")
+    role_mappings = [
+        row
+        for row in user._lookup.saml_claim_mappings("0oa_saml")
+        if row["claim_name"] == AWS_ROLE_ATTRIBUTE
+    ]
+    assert len(role_mappings) == 1
+
+
+def test_aws_join_all_roles_reads_group_assignment_profiles_from_the_lookup() -> None:
+    user = _aws_user(
+        {"joinAllRoles": True},
+        profile={"samlRoles": ["Role1"]},
+        groups=(("00g_a", "A"), ("00g_b", "B")),
+        memberships=("00g_a",),
+        assignment_profiles=(
+            ("00g_a", {"samlRoles": ["RoleA"]}),
+            ("00g_b", {"samlRoles": ["RoleB"]}),
+        ),
+    )
+
+    role = _claims_by_name(user)[AWS_ROLE_ATTRIBUTE]
+
+    assert role.match_values == [_aws_pair("Role1"), _aws_pair("RoleA")]

@@ -15,6 +15,18 @@ from openhound_okta.kinds import edges as ek
 from openhound_okta.kinds import nodes as nk
 from openhound_okta.main import app
 from openhound_okta.oin_routes import SamlRouteEvidence, resolve_oin_routes
+from openhound_okta.app_names import AppName
+from openhound_okta.saml_aws_account_federation import (
+    ROLE_ATTRIBUTE,
+    ROLE_ORIGIN,
+    ROLE_SESSION_NAME_ATTRIBUTE,
+    ROLE_SESSION_NAME_ORIGIN,
+    AwsFederationSettings,
+    AwsRoleSources,
+    IncompleteReason,
+    RoleValue,
+    role_value,
+)
 from openhound_okta.saml_eligibility import (
     SAML_GROUP_ELIGIBILITY_MODE_SHADOW,
     SAML_V0_4_CONTRACT_VERSION,
@@ -698,11 +710,13 @@ def saml_application_assertion_evidence(
     claim_mappings: list[Any] | tuple[Any, ...] | None = None,
     source_profile: Any = _MISSING,
     group_membership: MembershipCheck | None = None,
+    aws_sources: AwsRoleSources | None = None,
 ) -> dict[str, Any]:
     """Resolve every source-proven outbound assertion value for one assignment.
 
     ``group_membership`` answers whether this user is in a group, for attribute
-    expressions that test group membership.
+    expressions that test group membership. ``aws_sources`` carries the group
+    data for the roles of an AWS Account Federation application.
     """
 
     mappings = (
@@ -729,7 +743,28 @@ def saml_application_assertion_evidence(
         return evidence
 
     incomplete_fields: set[str] = set()
+    role_conflict_ids: list[str] = []
     for mapping in mappings:
+        origin = _mapping_get(mapping, "mapping_origin")
+        if origin in {ROLE_ORIGIN, ROLE_SESSION_NAME_ORIGIN}:
+            if mapping_id := _clean(_mapping_get(mapping, "id")):
+                evidence["claim_values"].append(
+                    _aws_claim_value(
+                        mapping_id,
+                        origin,
+                        _aws_role_value(
+                            application_user, aws_sources, group_membership
+                        ),
+                    )
+                )
+            continue
+        if (
+            application_user.app_name == AppName.AWS_ACCOUNT_FEDERATION
+            and origin == "attribute_statement"
+            and _mapping_get(mapping, "claim_name") == ROLE_ATTRIBUTE
+        ):
+            if conflict_id := _clean(_mapping_get(mapping, "id")):
+                role_conflict_ids.append(conflict_id)
         expression = _mapping_get(mapping, "expression")
         direct_field = _direct_profile_field(expression)
         declared_source = _mapping_get(mapping, "source_property")
@@ -829,6 +864,13 @@ def saml_application_assertion_evidence(
         }
         evidence["claim_values"].append(exceptional)
 
+    for claim_value in evidence["claim_values"]:
+        if claim_value["mapping_id"] in role_conflict_ids:
+            _mark_role_source_conflict(
+                claim_value,
+                _aws_role_value(application_user, aws_sources, group_membership),
+            )
+
     evidence["match_values"] = _dedupe_exact(evidence["match_values"])
     for field_name in _COMMON_ASSERTION_FIELDS:
         evidence[field_name] = _dedupe_exact(evidence[field_name])
@@ -839,6 +881,61 @@ def saml_application_assertion_evidence(
         if field_name in incomplete_fields
     ]
     return evidence
+
+
+def _aws_role_value(
+    application_user: Any,
+    aws_sources: AwsRoleSources | None,
+    group_membership: MembershipCheck | None,
+) -> RoleValue:
+    """Native `Role` values of an AWS Account Federation assignment."""
+
+    sources = aws_sources or AwsRoleSources(
+        AwsFederationSettings.from_app_settings(
+            getattr(application_user, "app_settings", None)
+        )
+    )
+    return role_value(
+        _profile_dict(getattr(application_user, "profile", None)),
+        sources,
+        group_membership,
+    )
+
+
+def _aws_claim_value(mapping_id: str, origin: str, native: RoleValue) -> dict[str, Any]:
+    """Claim value for a mapping that the producer adds for the AWS application."""
+
+    if origin == ROLE_SESSION_NAME_ORIGIN:
+        # The source of this value is not documented (record, item 6).
+        values: tuple[str, ...] = ()
+        reason: IncompleteReason | None = (
+            IncompleteReason.ROLE_SESSION_NAME_SOURCE_UNPROVEN
+        )
+    else:
+        values, reason = native.match_values, native.reason
+    return {
+        "mapping_id": mapping_id,
+        "match_values": list(values),
+        "canonical_match_values": list(values),
+        "unsafe_match_values": [],
+        "incomplete": reason is not None,
+        "incomplete_reason": reason.value if reason else None,
+        "source_property": None,
+    }
+
+
+def _mark_role_source_conflict(claim_value: dict[str, Any], native: RoleValue) -> None:
+    """Add the native roles to a custom `Role` statement and mark the value incomplete.
+
+    Design rule 1: the custom statement and the application settings can
+    disagree, and Okta does not document which one wins.
+    """
+
+    values = list(dict.fromkeys([*claim_value["match_values"], *native.match_values]))
+    claim_value["match_values"] = values
+    claim_value["canonical_match_values"] = list(values)
+    claim_value["incomplete"] = True
+    claim_value["incomplete_reason"] = IncompleteReason.ROLE_SOURCE_CONFLICT.value
 
 
 def _idp_user_value(template: str | None, idp_user: Any) -> str | None:
@@ -1268,7 +1365,50 @@ def saml_claim_mapping_rows(application) -> list[dict[str, Any]]:
             }
         )
 
+    rows.extend(_aws_account_federation_mapping_rows(application, rows))
     return rows
+
+
+def _aws_account_federation_mapping_rows(
+    application, rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Claim mappings that Okta's AWS Account Federation application sends natively.
+
+    The application sends `Role` and `RoleSessionName` without an attribute
+    statement. A custom statement for the same attribute already has a row and
+    is not repeated (a custom `Role` statement is a source conflict). Okta does
+    not document the NameFormat, so it is the default, marked as omitted.
+    """
+
+    if application.name != AppName.AWS_ACCOUNT_FEDERATION:
+        return []
+    existing = {row["claim_name"] for row in rows}
+    native = (
+        (ROLE_ATTRIBUTE, ROLE_ORIGIN),
+        (ROLE_SESSION_NAME_ATTRIBUTE, ROLE_SESSION_NAME_ORIGIN),
+    )
+    return [
+        {
+            "id": saml_claim_mapping_id(application.id, len(rows) + index),
+            "app_id": application.id,
+            "app_name": application.name,
+            "app_label": application.label,
+            "claim_name": claim_name,
+            "mapping_type": "attribute",
+            "mapping_origin": origin,
+            "claim_type": "attribute",
+            "source_property": None,
+            "expression": None,
+            "name_id_format": None,
+            "format": None,
+            "format_was_omitted": None,
+            "name_format": UNSPECIFIED_ATTRIBUTE_NAME_FORMAT,
+            "name_format_was_omitted": True,
+        }
+        for index, (claim_name, origin) in enumerate(
+            item for item in native if item[0] not in existing
+        )
+    ]
 
 
 def saml_issuer_row(application) -> dict[str, Any] | None:
@@ -1876,6 +2016,7 @@ class SamlResolutionValueEdgeProperties(EdgeProperties):
     unsafe_match_values: list[str] = dc_field(default_factory=list)
     source_property: str | None = None
     incomplete: bool = False
+    incomplete_reason: str | None = None
     schema_contract_version: str = SAML_CONTRACT_VERSION
 
 
