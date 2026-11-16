@@ -143,6 +143,7 @@ first in this table is written.
 | `app_filter_empty_unproven` | The App Filter is empty. Okta does not document what this means. |
 | `app_filter_unmapped` | The App Filter names no collected application, or a group that can match has no known source (a built-in group, or an application group whose source application is not collected). |
 | `group_filter_unsupported` | The Group Filter is missing, has syntax outside the shared set, does not have exactly the two named groups, or repeats a group that holds a quantifier or an alternative (such as `(\w+)+`, which can run without limit). |
+| `group_filter_timeout` | One match of the Group Filter took longer than 0.25 seconds, so the filter is not evaluated for this application. Every group mapping value is incomplete. |
 | `group_filter_match_unproven` | A group name matches in some of the four ways and not in others, or a match leaves `role` or `accountid` unset. |
 | `role_value_pattern_unsupported` | The Role Value Pattern lacks `${accountid}` or `${role}`, or its result is not one provider ARN and one role ARN. |
 | `group_mapping_scope_unproven` | A group that gives a value has no assignment to this application. Okta does not say if it tests all groups of the user or only assigned groups (item 4). The value is complete only for assigned groups. |

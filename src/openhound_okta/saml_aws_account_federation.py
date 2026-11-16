@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+import regex
+
 from openhound_okta.saml_group_expression import MembershipCheck
 
 ROLE_ATTRIBUTE = "https://aws.amazon.com/SAML/Attributes/Role"
@@ -42,6 +44,7 @@ class IncompleteReason(StrEnum):
     APP_FILTER_EMPTY_UNPROVEN = "app_filter_empty_unproven"
     APP_FILTER_UNMAPPED = "app_filter_unmapped"
     GROUP_FILTER_UNSUPPORTED = "group_filter_unsupported"
+    GROUP_FILTER_TIMEOUT = "group_filter_timeout"
     GROUP_FILTER_MATCH_UNPROVEN = "group_filter_match_unproven"
     ROLE_VALUE_PATTERN_UNSUPPORTED = "role_value_pattern_unsupported"
     # After the settings reasons above (what Okta may test) and before data
@@ -235,6 +238,16 @@ _ATOMS = (_ESCAPE, _CLASS, _LITERAL)
 _SYNTAX = re.compile(r"\((?!\?)|\(\?:|\)|\||\^|\$")
 
 
+# Longest time for one Group Filter match. A documented filter on a 255
+# character name takes microseconds, so this is far above a normal match. A
+# filter that can backtrack for long (for example side by side repeats such as
+# \w*\w*\w*) is cut off here, and the whole plan becomes incomplete.
+_GROUP_FILTER_TIMEOUT_SECONDS = 0.25
+# The `re`-compatible behavior (V0). ASCII gives the Java default meaning of
+# \w, \d, \s and of case folding.
+_FILTER_FLAGS = regex.V0 | regex.ASCII
+
+
 def _supported_group_filter(expression: str) -> str | None:
     """Return the Python form of a Group Filter, or None for unsupported syntax.
 
@@ -252,6 +265,8 @@ def _supported_group_filter(expression: str) -> str | None:
         was_closed_risky, closed_risky = closed_risky, False
         token = _PLACEHOLDER.match(expression, position)
         if token:
+            if _NAMED_GROUPS[token.group()] in rewritten:
+                return None  # `regex` accepts a repeated group name; `re` does not
             rewritten.append(_NAMED_GROUPS[token.group()])
             open_groups.append(False)
             after_atom = False
@@ -293,8 +308,8 @@ def _supported_group_filter(expression: str) -> str | None:
         position = token.end()
     python_form = "".join(rewritten)
     try:
-        compiled = re.compile(python_form)
-    except re.error:
+        compiled = regex.compile(python_form, _FILTER_FLAGS)
+    except regex.error:
         return None
     # Exactly the two named groups: a literal "(?P<role>" is not one.
     return python_form if set(compiled.groupindex) == {"role", "accountid"} else None
@@ -317,17 +332,17 @@ def _role_value(pattern: str | None, account: str, role: str) -> str | None:
 
 def _mapped_group(
     group: GroupRef,
-    filters: tuple[re.Pattern[str], re.Pattern[str]],
+    filters: tuple[regex.Pattern[str], regex.Pattern[str]],
     pattern: str | None,
 ) -> MappedGroup | None:
     """Test one group name in the four ways Okta leaves open (record, item 3).
 
     The ways are full or part of the name, and case-sensitive or not. Return None
-    for a name that no way matches.
+    for a name that no way matches. Raise TimeoutError when a match takes too long.
     """
 
     matches = [
-        test(group.name)
+        test(group.name, timeout=_GROUP_FILTER_TIMEOUT_SECONDS)
         for compiled in filters
         for test in (compiled.fullmatch, compiled.search)
     ]
@@ -373,17 +388,21 @@ def plan_group_mapping(
     python_form = _supported_group_filter(settings.group_filter or "")
     if python_form is None:
         return GroupMappingPlan(reason=IncompleteReason.GROUP_FILTER_UNSUPPORTED)
-    # ASCII flags give the Java default meaning of \w, \d, \s and of case folding.
     filters = (
-        re.compile(python_form, re.ASCII),
-        re.compile(python_form, re.ASCII | re.IGNORECASE),
+        regex.compile(python_form, _FILTER_FLAGS),
+        regex.compile(python_form, _FILTER_FLAGS | regex.IGNORECASE),
     )
     mapped: list[MappedGroup] = []
     for group in groups:
         permitted = _permitted_by_app_filter(group, settings.app_filter)
         if permitted is False:
             continue
-        found = _mapped_group(group, filters, settings.role_value_pattern)
+        try:
+            found = _mapped_group(group, filters, settings.role_value_pattern)
+        except TimeoutError:
+            # Stop at the first timeout: the plan does not depend on which
+            # group timed out, and it costs one timeout for each application.
+            return GroupMappingPlan(reason=IncompleteReason.GROUP_FILTER_TIMEOUT)
         if found is None:
             continue
         if permitted is None:  # a group of unknown source that could match

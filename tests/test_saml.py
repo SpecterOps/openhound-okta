@@ -44,6 +44,7 @@ from openhound_okta.models.saml import (
     saml_trusted_issuer_id,
     saml_trusted_issuer_row,
 )
+from openhound_okta import saml_aws_account_federation as aws_federation
 from openhound_okta.saml_aws_account_federation import (
     AwsFederationSettings,
     AwsRoleSources,
@@ -3094,6 +3095,19 @@ def test_aws_group_filter_syntax_outside_the_shared_subset_is_unsupported(
         (),
         IncompleteReason.GROUP_FILTER_UNSUPPORTED,
     )
+
+
+def test_aws_group_filter_that_runs_too_long_makes_the_plan_incomplete(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(aws_federation, "_GROUP_FILTER_TIMEOUT_SECONDS", 0.05)
+
+    plan, value = _mapped_role_value(
+        r"(?{{role}}\w+)" + r"\w*" * 7 + r"(?{{accountid}}\d+)\s", ["1" * 250]
+    )
+
+    assert plan.reason is IncompleteReason.GROUP_FILTER_TIMEOUT
+    assert value.reason is IncompleteReason.GROUP_FILTER_TIMEOUT
 
 
 def test_aws_roles_on_assignment_and_group_mapping_together_are_incomplete() -> None:
