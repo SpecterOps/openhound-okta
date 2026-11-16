@@ -11,7 +11,7 @@ from openhound_okta.graph import OktaOwnedEdgePath
 from openhound_okta.kinds import edges as ek
 from openhound_okta.kinds import nodes as nk
 from openhound_okta.main import app
-from openhound_okta.saml_aws_account_federation import aws_role_sources
+from openhound_okta.saml_aws_account_federation import read_aws_role_sources
 from openhound_okta.models.hybrid_auth import (
     HybridAuthEdgeProperties,
     hybrid_target_edge_path,
@@ -597,7 +597,9 @@ class ApplicationUser(BaseAsset):
                     else None
                 ),
                 aws_sources=(
-                    aws_role_sources(lookup, self.app_id, self.id, self.app_settings)
+                    read_aws_role_sources(
+                        lookup, self.app_id, self.id, self.app_settings
+                    )
                     if self.app_name == AppName.AWS_ACCOUNT_FEDERATION
                     else None
                 ),

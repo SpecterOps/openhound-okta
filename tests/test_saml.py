@@ -3200,12 +3200,15 @@ def _aws_user(
     memberships: tuple[str, ...] = (),
     assignment_profiles: tuple[tuple[str, dict], ...] = (),
     other_members: tuple[str, ...] = (),
-    reported: dict[str, int] | None = None,
+    reported: dict[str, int | None] | None = None,
+    omit: tuple[str, ...] = (),
 ) -> ApplicationUser:
     """Build a user of an amazon_aws app whose lookup is a real DuckDB schema.
 
     The `preproc` transform runs over the tables. Each group reports one member
-    unless `reported` says otherwise. `other_members` are groups of another user.
+    unless `reported` says otherwise (None is no count). `other_members` are
+    groups of another user. `omit` names tables, or `groups.source`, that DLT
+    did not write.
     """
 
     app_settings = {"identityProviderArn": AWS_PROVIDER, **native}
@@ -3222,14 +3225,17 @@ def _aws_user(
     connection.execute("CREATE SCHEMA okta")
     for ddl in (
         "users (id VARCHAR, status VARCHAR, profile JSON)",
-        "groups (id VARCHAR, profile JSON, _embedded JSON, type VARCHAR, source JSON)",
+        "groups (id VARCHAR, profile JSON, _embedded JSON, type VARCHAR"
+        + ("" if "groups.source" in omit else ", source JSON")
+        + ")",
         "group_memberships (id VARCHAR, group_id VARCHAR)",
         "applications (id VARCHAR, name VARCHAR, settings JSON)",
         "application_users (id VARCHAR, app_id VARCHAR)",
         "group_assigned_apps (id VARCHAR, group_id VARCHAR, assignment_profile JSON)",
         "saml_claim_mappings (id VARCHAR, app_id VARCHAR, claim_name VARCHAR, mapping_type VARCHAR, claim_type VARCHAR, mapping_origin VARCHAR, expression VARCHAR)",
     ):
-        connection.execute(f"CREATE TABLE okta.{ddl}")
+        if ddl.split()[0] not in omit:
+            connection.execute(f"CREATE TABLE okta.{ddl}")
     connection.execute(
         "INSERT INTO okta.users VALUES ('00u_saml_user', 'ACTIVE', '{}')"
     )
@@ -3241,29 +3247,33 @@ def _aws_user(
         "INSERT INTO okta.application_users VALUES ('00u_saml_user', '0oa_saml')"
     )
     for group_id, name in groups:
+        count = (reported or {}).get(group_id, 1)
         connection.execute(
-            "INSERT INTO okta.groups VALUES (?, ?, ?, 'OKTA_GROUP', NULL)",
+            "INSERT INTO okta.groups VALUES (?, ?, ?, 'OKTA_GROUP'"
+            + ("" if "groups.source" in omit else ", NULL")
+            + ")",
             [
                 group_id,
                 json.dumps({"name": name}),
-                json.dumps(
-                    {"stats": {"usersCount": (reported or {}).get(group_id, 1)}}
-                ),
+                json.dumps({"stats": {} if count is None else {"usersCount": count}}),
             ],
         )
-    for group_id in memberships:
-        connection.execute(
-            "INSERT INTO okta.group_memberships VALUES ('00u_saml_user', ?)", [group_id]
-        )
-    for group_id in other_members:
-        connection.execute(
-            "INSERT INTO okta.group_memberships VALUES ('00u_other', ?)", [group_id]
-        )
-    for group_id, assignment_profile in assignment_profiles:
-        connection.execute(
-            "INSERT INTO okta.group_assigned_apps VALUES ('0oa_saml', ?, ?)",
-            [group_id, json.dumps(assignment_profile)],
-        )
+    if "group_memberships" not in omit:
+        for group_id in memberships:
+            connection.execute(
+                "INSERT INTO okta.group_memberships VALUES ('00u_saml_user', ?)",
+                [group_id],
+            )
+        for group_id in other_members:
+            connection.execute(
+                "INSERT INTO okta.group_memberships VALUES ('00u_other', ?)", [group_id]
+            )
+    if "group_assigned_apps" not in omit:
+        for group_id, assignment_profile in assignment_profiles:
+            connection.execute(
+                "INSERT INTO okta.group_assigned_apps VALUES ('0oa_saml', ?, ?)",
+                [group_id, json.dumps(assignment_profile)],
+            )
     for row in rows:
         connection.execute(
             "INSERT INTO okta.saml_claim_mappings VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -3392,29 +3402,43 @@ def test_aws_join_all_roles_reads_group_assignment_profiles_from_the_lookup() ->
     assert role.incomplete_reason == "role_name_not_plain"  # the group role 5
 
 
+_MAPPING = {
+    "useGroupMapping": True,
+    "appFilter": "okta",
+    "groupFilter": DEFAULT_GROUP_FILTER,
+    "roleValuePattern": DEFAULT_ROLE_VALUE_PATTERN,
+}
+_ADMIN_GROUP = ("00g_a", "aws#prod#Admin#123456789012")
+
+
 @pytest.mark.parametrize(
-    ("native", "memberships", "others", "reported", "values", "reason"),
+    ("native", "setup", "values", "reason"),
     [
-        pytest.param({"joinAllRoles": True}, ("00g_a",), (), {}, ["RoleA"], "role_pair_rule_unproven", id="member of a proven group"),
-        pytest.param({"joinAllRoles": True}, (), ("00g_a",), {}, [], None, id="not a member of a proven group"),
-        pytest.param({"joinAllRoles": True}, ("00g_a",), (), {"00g_a": 2}, [], "group_membership_incomplete", id="assigned group not proven"),
-        pytest.param({"joinAllRoles": True}, ("00g_a",), (), {"00g_a": 0}, [], None, id="group reports no members"),
-        pytest.param({"useGroupMapping": True, "appFilter": "okta", "groupFilter": DEFAULT_GROUP_FILTER, "roleValuePattern": DEFAULT_ROLE_VALUE_PATTERN}, ("00g_a",), (), {"00g_a": 2}, [], "group_membership_incomplete", id="matching group not proven"),
+        pytest.param({"joinAllRoles": True}, {}, ["RoleA"], "role_pair_rule_unproven", id="member of a proven group"),
+        pytest.param({"joinAllRoles": True}, {"memberships": (), "other_members": ("00g_a",)}, [], None, id="not a member of a proven group"),
+        pytest.param({"joinAllRoles": True}, {"reported": {"00g_a": 2}}, [], "group_membership_incomplete", id="assigned group not proven"),
+        pytest.param({"joinAllRoles": True}, {"reported": {"00g_a": 0}}, [], None, id="group reports no members"),
+        pytest.param(_MAPPING, {"reported": {"00g_a": 2}}, [], "group_membership_incomplete", id="matching group not proven"),
+        pytest.param({"joinAllRoles": True}, {"groups": (_ADMIN_GROUP, _ADMIN_GROUP)}, [], "group_membership_incomplete", id="duplicate group row"),
+        pytest.param({"joinAllRoles": True}, {"reported": {"00g_a": None}}, [], "group_membership_incomplete", id="group without a member count"),
+        pytest.param({"joinAllRoles": True}, {"other_members": ("00g_a",)}, [], "group_membership_incomplete", id="more members than reported"),
+        pytest.param({"joinAllRoles": True}, {"memberships": ("00g_a", "00g_a")}, ["RoleA"], "role_pair_rule_unproven", id="repeated member row counts once"),
+        pytest.param(_MAPPING, {"assignment_profiles": ()}, ["Admin"], "group_mapping_scope_unproven", id="proven matching group without an assignment"),
+        pytest.param(_MAPPING, {"omit": ("groups.source",)}, ["Admin"], None, id="no groups.source column"),
+        pytest.param(_MAPPING, {"assignment_profiles": (), "omit": ("group_assigned_apps",)}, ["Admin"], "group_mapping_scope_unproven", id="no group_assigned_apps table"),
+        pytest.param(_MAPPING, {"memberships": (), "omit": ("group_memberships",)}, [], "group_membership_incomplete", id="no group_memberships table"),
     ],
 )  # fmt: skip
 def test_aws_role_sources_read_only_groups_with_proven_membership(
-    native, memberships, others, reported, values, reason
+    native, setup, values, reason
 ) -> None:
-    user = _aws_user(
-        native,
-        groups=(("00g_a", "aws#prod#Admin#123456789012"),),
-        memberships=memberships,
-        other_members=others,
-        reported=reported,
-        assignment_profiles=(("00g_a", {"samlRoles": ["RoleA"]}),),
-    )
+    setup = {
+        "groups": (_ADMIN_GROUP,),
+        "memberships": ("00g_a",),
+        "assignment_profiles": (("00g_a", {"samlRoles": ["RoleA"]}),),
+    } | setup
 
-    role = _claims_by_name(user)[AWS_ROLE_ATTRIBUTE]
+    role = _claims_by_name(_aws_user(native, **setup))[AWS_ROLE_ATTRIBUTE]
 
     assert role.match_values == [_aws_pair(value) for value in values]
     assert role.incomplete_reason == reason

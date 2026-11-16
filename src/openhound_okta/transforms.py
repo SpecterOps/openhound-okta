@@ -122,10 +122,59 @@ def non_admin_apps(con, schema: str = "okta") -> None:
     """)
 
 
+# The columns of each table that the AWS transform reads, with their types.
+_AWS_INPUT_COLUMNS: dict[str, dict[str, str]] = {
+    "applications": {"id": "VARCHAR", "name": "VARCHAR", "settings": "JSON"},
+    "application_users": {"id": "VARCHAR", "app_id": "VARCHAR"},
+    "groups": {
+        "id": "VARCHAR",
+        "profile": "JSON",
+        "type": "VARCHAR",
+        "source": "JSON",
+        "_embedded": "JSON",
+    },
+    "group_memberships": {"id": "VARCHAR", "group_id": "VARCHAR"},
+    "group_assigned_apps": {
+        "id": "VARCHAR",
+        "group_id": "VARCHAR",
+        "assignment_profile": "JSON",
+    },
+}
+
+
+def _aws_input(con: duckdb.DuckDBPyConnection, schema: str, table: str) -> str:
+    """Return SQL for a table that the AWS transform reads, as collected.
+
+    DLT writes a table or a column only when the data has it. For example,
+    `groups.source` exists only when an application group was collected. A
+    missing column reads as NULL and a missing table reads as no rows. Each
+    case gives the weaker answer, never a failure: an absent
+    `group_assigned_apps` assigns no group, and an absent `group_memberships`
+    leaves every group that reports members without proof.
+    """
+
+    columns = _AWS_INPUT_COLUMNS[table]
+    present = {
+        name
+        for (name,) in con.execute(
+            "SELECT column_name FROM duckdb_columns() "
+            "WHERE schema_name = ? AND table_name = ?",
+            [schema, table],
+        ).fetchall()
+    }
+    select = ", ".join(
+        name if name in present else f"NULL::{kind} AS {name}"
+        for name, kind in columns.items()
+    )
+    source = f"{schema}.{table}" if present else "(SELECT 1) WHERE false"
+    return f"(SELECT {select} FROM {source})"
+
+
 # A group name that RE2 (DuckDB) and Java (Okta) can match differently, even
 # with a filter in the accepted syntax. RE2 folds U+212A (Kelvin sign) with `k`
 # and U+017F (long s) with `s` for letter case, Java does not. `$` matches before
-# a final line terminator in Java, but only at the end of the text in RE2.
+# a final line terminator in Java, but only at the end of the text in RE2. The
+# two letter checks are insurance: no input is known where they decide alone.
 _UNPROVABLE_NAME_SQL = """
     contains(name, chr(8490)) OR contains(name, chr(383))
     OR ($end_anchored AND right(name, 1) IN (
@@ -158,14 +207,16 @@ def group_filter_matches(
             AS {way}"""
         for way, (param, options) in ways.items()
     )
+    groups = _aws_input(con, schema, "groups")
+    applications = _aws_input(con, schema, "applications")
     try:
         rows = con.execute(
             f"""
             WITH named AS (
                 SELECT g.id, json_extract_string(g.profile, '$.name') AS name,
                     g.type, a.name AS source_app
-                FROM {schema}.groups g
-                LEFT JOIN {schema}.applications a
+                FROM {groups} g
+                LEFT JOIN {applications} a
                     ON a.id = json_extract_string(g.source, '$.id')
             ), tested AS (
                 SELECT *, {_UNPROVABLE_NAME_SQL} AS unprovable, {columns}
@@ -205,14 +256,15 @@ def aws_group_mapping(con: duckdb.DuckDBPyConnection, schema: str = "okta") -> N
     tested, for each application).
     """
 
+    all_applications = _aws_input(con, schema, "applications")
     applications: list[tuple[str, str | None]] = con.execute(
         f"""SELECT id, json_extract(settings, '$.app')::VARCHAR
-            FROM {schema}.applications WHERE name = ?""",
+            FROM {all_applications} WHERE name = ?""",
         [AppName.AWS_ACCOUNT_FEDERATION],
     ).fetchall()
     application_names = frozenset(
         name
-        for (name,) in con.execute(f"SELECT name FROM {schema}.applications").fetchall()
+        for (name,) in con.execute(f"SELECT name FROM {all_applications}").fetchall()
     )
     matcher = partial(group_filter_matches, con, schema)
     groups: list[tuple[str, str, str | None, str | None]] = []
@@ -261,15 +313,16 @@ def aws_role_sources(con: duckdb.DuckDBPyConnection, schema: str = "okta") -> No
     """
 
     aws_group_mapping(con, schema)
+    inputs = {table: _aws_input(con, schema, table) for table in _AWS_INPUT_COLUMNS}
     con.execute(
         f"""
         CREATE OR REPLACE TABLE {schema}.aws_role_sources AS
         WITH apps AS (
-            SELECT id AS app_id FROM {schema}.applications WHERE name = ?
+            SELECT id AS app_id FROM {inputs["applications"]} WHERE name = ?
         ), assigned AS (
             SELECT DISTINCT ga.id AS app_id, ga.group_id,
                 ga.assignment_profile::VARCHAR AS profile
-            FROM {schema}.group_assigned_apps ga JOIN apps ON apps.app_id = ga.id
+            FROM {inputs["group_assigned_apps"]} ga JOIN apps ON apps.app_id = ga.id
         ), mapped AS (
             SELECT m.*, EXISTS (
                 SELECT 1 FROM assigned a
@@ -277,14 +330,14 @@ def aws_role_sources(con: duckdb.DuckDBPyConnection, schema: str = "okta") -> No
             ) AS assigned
             FROM {schema}.aws_group_mapping m
         ), collected AS (
-            SELECT DISTINCT id AS user_id, group_id FROM {schema}.group_memberships
+            SELECT DISTINCT id AS user_id, group_id FROM {inputs["group_memberships"]}
         ), reported AS (
             SELECT id AS group_id, count(*) AS copies,
                 max(COALESCE(
                     TRY_CAST(json_extract_string(_embedded, '$.stats.usersCount') AS BIGINT),
                     TRY_CAST(json_extract_string(_embedded, '$.stats.users_count') AS BIGINT)
                 )) AS reported
-            FROM {schema}.groups GROUP BY id
+            FROM {inputs["groups"]} GROUP BY id
         ), proof AS (
             SELECT r.group_id, r.reported > 0 AS has_members,
                 r.copies = 1 AND r.reported IS NOT NULL
@@ -322,7 +375,7 @@ def aws_role_sources(con: duckdb.DuckDBPyConnection, schema: str = "okta") -> No
             plans.reason AS mapping_reason
         FROM (
             SELECT DISTINCT au.app_id, au.id AS user_id
-            FROM {schema}.application_users au JOIN apps ON apps.app_id = au.app_id
+            FROM {inputs["application_users"]} au JOIN apps ON apps.app_id = au.app_id
         ) u
         LEFT JOIN user_assigned ua USING (app_id, user_id)
         LEFT JOIN user_mapped um USING (app_id, user_id)
@@ -344,9 +397,4 @@ def transforms(con: duckdb.DuckDBPyConnection, schema: str = "okta") -> None:
     non_admin_users(con, schema)
     non_admin_groups(con, schema)
     non_admin_apps(con, schema)
-    try:
-        aws_role_sources(con, schema)
-    except duckdb.CatalogException:
-        # A table is missing, so conversion cannot read the group data and the
-        # Role value is incomplete.
-        pass
+    aws_role_sources(con, schema)

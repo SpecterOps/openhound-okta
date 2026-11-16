@@ -539,7 +539,7 @@ def role_value(profile: Mapping[str, Any] | None, sources: AwsRoleSources) -> Ro
     return RoleValue(tuple(dict.fromkeys(pairs + mapped)), first_reason(reasons))
 
 
-def aws_role_sources(
+def read_aws_role_sources(
     lookup: Any, app_id: str, user_id: str, app_settings: Mapping[str, Any] | None
 ) -> AwsRoleSources:
     """Read the group data of one user for the Role value from a lookup.
