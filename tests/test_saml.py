@@ -3009,6 +3009,7 @@ def _mapped_role_value(
     group_names: list[str],
     pattern: str = DEFAULT_ROLE_VALUE_PATTERN,
     profile: dict | None = None,
+    assigned: bool | None = True,
     **native,
 ):
     settings = _aws_settings(
@@ -3023,7 +3024,16 @@ def _mapped_role_value(
         for index, name in enumerate(group_names)
     ]
     plan = plan_group_mapping(settings, groups, frozenset())
-    return plan, role_value(profile, AwsRoleSources(settings, (), plan), _member)
+    assignments = (
+        None
+        if assigned is None
+        else tuple(GroupAssignment(group.id, None, ()) for group in groups)
+        if assigned
+        else ()
+    )
+    return plan, role_value(
+        profile, AwsRoleSources(settings, assignments, plan), _member
+    )
 
 
 SWAPPED_PATTERN = (
@@ -3039,6 +3049,7 @@ SWAPPED_PATTERN = (
         pytest.param(DOCUMENTED_GROUP_FILTER, "aws_123456789012_Dev", DEFAULT_ROLE_VALUE_PATTERN, [_aws_pair("Dev")], None, id="documented second expression"),
         pytest.param(DOCUMENTED_GROUP_FILTER, "aws_123456789012_Dev", SWAPPED_PATTERN, [_aws_swapped_pair("Dev")], None, id="role ARN first"),
         pytest.param(DEFAULT_GROUP_FILTER, "other", DEFAULT_ROLE_VALUE_PATTERN, [], None, id="no match is known"),
+        pytest.param(r"(?{{role}}\w+)|(?{{accountid}}\d+)", "Admin", DEFAULT_ROLE_VALUE_PATTERN, [], "group_filter_match_unproven", id="a branch leaves a named group unset"),
         pytest.param(DEFAULT_GROUP_FILTER, "aws#prod#Admin#١٢٣٤٥٦٧٨٩٠١٢", DEFAULT_ROLE_VALUE_PATTERN, [], None, id="Java \\d is ASCII only"),
         pytest.param(DOCUMENTED_GROUP_FILTER, "x-aws_123456789012_Dev", DEFAULT_ROLE_VALUE_PATTERN, [], "group_filter_match_unproven", id="full and part disagree"),
         pytest.param(DEFAULT_GROUP_FILTER, "AWS#prod#Admin#123456789012", DEFAULT_ROLE_VALUE_PATTERN, [], "group_filter_match_unproven", id="case disagrees"),
@@ -3065,12 +3076,18 @@ def test_aws_group_mapping_follows_the_group_filter_and_pattern(
         r"(?i)(?{{role}}\w+)(?{{accountid}}\d+)",  # inline flag
         r"(?{{role}}\w+)",  # no account ID group
         r"(?{{role}}\w+)(?{{role}}\w+)(?{{accountid}}\d+)",  # role group twice
+        r"\(?P<role>\w+\)(?{{accountid}}\d+)",  # literal text, no named group
+        r"^(?{{role}}(\w+)+)#(?{{accountid}}\d+)$",  # nested quantifier
+        r"^(?{{role}}(\w|\d)+)#(?{{accountid}}\d+)$",  # alternative in a quantified group
+        r"(?{{role}}[\w--a]+)(?{{accountid}}\d+)",  # doubled class operator
+        r"(?{{role}}[\w||a]+)(?{{accountid}}\d+)",
     ],
 )
 def test_aws_group_filter_syntax_outside_the_shared_subset_is_unsupported(
     group_filter,
 ) -> None:
-    plan, value = _mapped_role_value(group_filter, ["aws#prod#Admin#123456789012"])
+    # The long name makes an unrejected nested quantifier hang the test.
+    plan, value = _mapped_role_value(group_filter, ["a" * 40 + "!"])
 
     assert plan.reason is IncompleteReason.GROUP_FILTER_UNSUPPORTED
     assert (value.match_values, value.reason) == (
@@ -3090,6 +3107,16 @@ def test_aws_roles_on_assignment_and_group_mapping_together_are_incomplete() -> 
     assert value.reason is IncompleteReason.ROLE_SOURCE_PRECEDENCE_UNPROVEN
 
 
+@pytest.mark.parametrize("assigned", [False, None])
+def test_aws_group_without_an_assignment_gives_an_incomplete_value(assigned) -> None:
+    _, value = _mapped_role_value(
+        DEFAULT_GROUP_FILTER, ["aws#prod#Admin#123456789012"], assigned=assigned
+    )
+
+    assert value.match_values == (_aws_pair("Admin"),)
+    assert value.reason is IncompleteReason.GROUP_MAPPING_SCOPE_UNPROVEN
+
+
 @pytest.mark.parametrize(
     ("app_filter", "group_type", "source_app", "expected"),
     [
@@ -3098,6 +3125,7 @@ def test_aws_roles_on_assignment_and_group_mapping_together_are_incomplete() -> 
         ("okta", "BUILT_IN", None, ("skip", "app_filter_unmapped")),
         ("active_directory", "APP_GROUP", "active_directory", ("ok", None)),
         ("active_directory", "OKTA_GROUP", None, ("skip", None)),
+        ("active_directory", "APP_GROUP", None, ("skip", "app_filter_unmapped")),
         (None, "OKTA_GROUP", None, ("skip", "app_filter_empty_unproven")),
         ("no_such_app", "OKTA_GROUP", None, ("skip", "app_filter_unmapped")),
     ],
@@ -3114,7 +3142,8 @@ def test_aws_app_filter_decides_which_groups_are_tested(
     group = GroupRef("00g_1", "Admin#123456789012", group_type, source_app)
     plan = plan_group_mapping(settings, [group], frozenset({"active_directory"}))
 
-    value = role_value({}, AwsRoleSources(settings, (), plan), _member)
+    assignments = (GroupAssignment("00g_1", None, ()),)
+    value = role_value({}, AwsRoleSources(settings, assignments, plan), _member)
 
     expect_value, reason = expected
     assert bool(value.match_values) is (expect_value == "ok")
@@ -3224,6 +3253,7 @@ def test_aws_application_emits_role_and_incomplete_role_session_name() -> None:
         },
         groups=(("00g_aws", "aws#prod#Admin#123456789012"),),
         memberships=("00g_aws",),
+        assignment_profiles=(("00g_aws", {}),),
     )
 
     claims = _claims_by_name(user)
@@ -3257,6 +3287,27 @@ def test_aws_custom_role_statement_conflicts_with_the_application_settings() -> 
         if row["claim_name"] == AWS_ROLE_ATTRIBUTE
     ]
     assert len(role_mappings) == 1
+
+
+def test_aws_custom_role_session_name_statement_is_incomplete() -> None:
+    statement = {
+        "type": "EXPRESSION",
+        "name": AWS_ROLE_ATTRIBUTE + "SessionName",
+        "values": ['"alice"'],
+    }
+    user = _aws_user({}, statements=[statement])
+
+    claims = _claims_by_name(user)
+
+    session_name = claims[AWS_ROLE_ATTRIBUTE + "SessionName"]
+    assert (session_name.incomplete, session_name.incomplete_reason) == (
+        True,
+        "role_session_name_source_unproven",
+    )
+    rows = user._lookup.saml_claim_mappings("0oa_saml")
+    assert [row["claim_name"] for row in rows].count(
+        AWS_ROLE_ATTRIBUTE + "SessionName"
+    ) == 1
 
 
 def test_aws_join_all_roles_reads_group_assignment_profiles_from_the_lookup() -> None:

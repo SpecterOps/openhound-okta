@@ -743,7 +743,7 @@ def saml_application_assertion_evidence(
         return evidence
 
     incomplete_fields: set[str] = set()
-    role_conflict_ids: list[str] = []
+    aws_custom_ids: dict[str, str] = {}  # mapping ID to claim name
     for mapping in mappings:
         origin = _mapping_get(mapping, "mapping_origin")
         if origin in {ROLE_ORIGIN, ROLE_SESSION_NAME_ORIGIN}:
@@ -761,10 +761,11 @@ def saml_application_assertion_evidence(
         if (
             application_user.app_name == AppName.AWS_ACCOUNT_FEDERATION
             and origin == "attribute_statement"
-            and _mapping_get(mapping, "claim_name") == ROLE_ATTRIBUTE
+            and _mapping_get(mapping, "claim_name")
+            in {ROLE_ATTRIBUTE, ROLE_SESSION_NAME_ATTRIBUTE}
         ):
-            if conflict_id := _clean(_mapping_get(mapping, "id")):
-                role_conflict_ids.append(conflict_id)
+            if custom_id := _clean(_mapping_get(mapping, "id")):
+                aws_custom_ids[custom_id] = _mapping_get(mapping, "claim_name")
         expression = _mapping_get(mapping, "expression")
         direct_field = _direct_profile_field(expression)
         declared_source = _mapping_get(mapping, "source_property")
@@ -865,10 +866,17 @@ def saml_application_assertion_evidence(
         evidence["claim_values"].append(exceptional)
 
     for claim_value in evidence["claim_values"]:
-        if claim_value["mapping_id"] in role_conflict_ids:
+        claim_name = aws_custom_ids.get(claim_value["mapping_id"])
+        if claim_name == ROLE_ATTRIBUTE:
             _mark_role_source_conflict(
                 claim_value,
                 _aws_role_value(application_user, aws_sources, group_membership),
+            )
+        elif claim_name == ROLE_SESSION_NAME_ATTRIBUTE:
+            # Item 6: Okta does not document the source for this application.
+            claim_value["incomplete"] = True
+            claim_value["incomplete_reason"] = (
+                IncompleteReason.ROLE_SESSION_NAME_SOURCE_UNPROVEN.value
             )
 
     evidence["match_values"] = _dedupe_exact(evidence["match_values"])

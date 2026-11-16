@@ -44,6 +44,9 @@ class IncompleteReason(StrEnum):
     GROUP_FILTER_UNSUPPORTED = "group_filter_unsupported"
     GROUP_FILTER_MATCH_UNPROVEN = "group_filter_match_unproven"
     ROLE_VALUE_PATTERN_UNSUPPORTED = "role_value_pattern_unsupported"
+    # After the settings reasons above (what Okta may test) and before data
+    # reasons (what was collected): item 4 of the record is a rule, not a gap.
+    GROUP_MAPPING_SCOPE_UNPROVEN = "group_mapping_scope_unproven"
     GROUP_MEMBERSHIP_INCOMPLETE = "group_membership_incomplete"
     GROUP_ROLE_DEFAULT_UNPROVEN = "group_role_default_unproven"
     IDENTITY_PROVIDER_ARN_UNUSABLE = "identity_provider_arn_unusable"
@@ -236,42 +239,65 @@ def _supported_group_filter(expression: str) -> str | None:
     """Return the Python form of a Group Filter, or None for unsupported syntax.
 
     Only the syntax of the Design is accepted, so a name tested here gives the
-    same result in Okta's Java engine. Both named groups must occur once.
+    same result in Okta's Java engine. Both named groups must exist, and no other.
     """
 
     rewritten: list[str] = []
     position = 0
     after_atom = False  # a quantifier needs an atom before it
+    # One flag for each open group: it holds a quantifier or an alternative.
+    open_groups: list[bool] = []
+    closed_risky = False  # the group that just closed holds a quantifier or "|"
     while position < len(expression):
+        was_closed_risky, closed_risky = closed_risky, False
         token = _PLACEHOLDER.match(expression, position)
         if token:
             rewritten.append(_NAMED_GROUPS[token.group()])
+            open_groups.append(False)
             after_atom = False
         elif token := _SYNTAX.match(expression, position):
-            rewritten.append(token.group())
-            after_atom = token.group() == ")"
+            text = token.group()
+            rewritten.append(text)
+            if text == ")":
+                if not open_groups:
+                    return None
+                closed_risky = open_groups.pop()
+                if open_groups and closed_risky:
+                    open_groups[-1] = True
+            elif text.startswith("("):
+                open_groups.append(False)
+            elif text == "|" and open_groups:
+                open_groups[-1] = True
+            after_atom = text == ")"
         elif token := _QUANTIFIER.match(expression, position):
-            if not after_atom:
+            # A quantified group that holds a quantifier or "|" can backtrack
+            # without limit, for example (\w+)+.
+            if not after_atom or was_closed_risky:
                 return None
             rewritten.append(token.group())
+            if open_groups:
+                open_groups[-1] = True
             after_atom = False
         else:
             token = next(
                 (m for atom in _ATOMS if (m := atom.match(expression, position))), None
             )
-            if token is None:
+            # Python warns that these doubled characters in a class will change.
+            if token is None or (
+                token.group().startswith("[")
+                and any(op in token.group() for op in ("--", "||", "~~"))
+            ):
                 return None
             rewritten.append(token.group())
             after_atom = True
         position = token.end()
     python_form = "".join(rewritten)
-    if python_form.count("(?P<role>") != 1 or python_form.count("(?P<accountid>") != 1:
-        return None
     try:
-        re.compile(python_form)
+        compiled = re.compile(python_form)
     except re.error:
         return None
-    return python_form
+    # Exactly the two named groups: a literal "(?P<role>" is not one.
+    return python_form if set(compiled.groupindex) == {"role", "accountid"} else None
 
 
 def _role_value(pattern: str | None, account: str, role: str) -> str | None:
@@ -309,7 +335,8 @@ def _mapped_group(
         return None
     captures = {(m["role"], m["accountid"]) if m else None for m in matches}
     capture = captures.pop()
-    if captures or capture is None:  # the ways disagree
+    # The ways disagree, or a branch left a named group unset.
+    if captures or capture is None or None in capture:
         return MappedGroup(group.id, None, IncompleteReason.GROUP_FILTER_MATCH_UNPROVEN)
     role, account = capture
     value = _role_value(pattern, account, role)
@@ -327,6 +354,8 @@ def _permitted_by_app_filter(group: GroupRef, app_filter: str) -> bool | None:
         return None if app_filter == "okta" else False
     if app_filter == "okta":
         return group.type == "OKTA_GROUP"
+    if group.type == "APP_GROUP" and group.source_app_name is None:
+        return None  # the source application is not collected
     return group.source_app_name == app_filter
 
 
@@ -364,8 +393,17 @@ def plan_group_mapping(
 
 
 def _mapped_values(
-    plan: GroupMappingPlan | None, is_member: MembershipCheck | None
+    plan: GroupMappingPlan | None,
+    assignments: tuple[GroupAssignment, ...] | None,
+    is_member: MembershipCheck | None,
 ) -> tuple[list[str], set[IncompleteReason]]:
+    """Values of the user's matching groups.
+
+    Item 4 of the record: Okta does not say if it tests all groups of the user
+    or only groups assigned to the application. A value from a group with no
+    assignment is therefore incomplete.
+    """
+
     if plan is None:
         return [], {IncompleteReason.GROUP_MEMBERSHIP_INCOMPLETE}
     if plan.reason:
@@ -378,6 +416,10 @@ def _mapped_values(
             reasons.add(IncompleteReason.GROUP_MEMBERSHIP_INCOMPLETE)
         elif member and group.value:
             values.append(group.value)
+            if assignments is None or group.group_id not in {
+                assignment.group_id for assignment in assignments
+            }:
+                reasons.add(IncompleteReason.GROUP_MAPPING_SCOPE_UNPROVEN)
         elif member and group.reason:
             reasons.add(group.reason)
     return values, reasons
@@ -395,7 +437,9 @@ def role_value(
     )
     mapped: list[str] = []
     if sources.settings.use_group_mapping:
-        mapped, mapping_reasons = _mapped_values(sources.group_mapping, is_member)
+        mapped, mapping_reasons = _mapped_values(
+            sources.group_mapping, sources.group_assignments, is_member
+        )
         reasons |= mapping_reasons
         if pairs and mapped:
             # Rule 3, step 5: Okta does not document which source wins.
