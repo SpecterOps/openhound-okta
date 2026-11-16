@@ -129,6 +129,7 @@ def test_transforms_creates_users_index_before_derived_work(monkeypatch) -> None
         "non_admin_users",
         "non_admin_groups",
         "non_admin_apps",
+        "aws_role_sources",
         "ensure_users_id_index",
     ):
         monkeypatch.setattr(
@@ -146,4 +147,5 @@ def test_transforms_creates_users_index_before_derived_work(monkeypatch) -> None
         "non_admin_users",
         "non_admin_groups",
         "non_admin_apps",
+        "aws_role_sources",
     ]

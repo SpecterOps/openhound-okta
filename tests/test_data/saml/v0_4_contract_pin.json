@@ -1,7 +1,7 @@
 {
   "consumer": {
     "repository": "SpecterOps/openhound_saml",
-    "revision": "14c257b2136fddb5b52febf3d93941cb322b8ed0"
+    "revision": "218b5bddb6e215f6208741bdd4b555019bde75bb"
   },
   "contract": {
     "id": "opengraph-saml-v0.4.0",
@@ -9,7 +9,7 @@
       "contract.json": "21368e53d9546553585194a072cf6576635b284c3e154ee14d4b1de00aff8669",
       "registry.json": "63f176d1317c7eacb7f967d49fec75c5d651d6a1a1965b72bedc301a8ecfa02d",
       "identity-vectors.json": "ec5d136b6dd81a9e61806864a1e3226cd88a074bf678131f5fc26671d964041d",
-      "normalized-fact.schema.json": "1fe5cff4a761093b2bbc6dc606f84402ccd1368eea3eb760bcc0d5a4fd64565e",
+      "normalized-fact.schema.json": "bc29d9da02b14910b153dfbad7e0f51da33705e09e69a9572a85423c1ec2c064",
       "openhound_okta_group_membership_v1.json": "9de309dd8e0c9789a40a780bba5a26500cb62ab760a172d72f9a8bfb0accb9ee",
       "claim-projection-tuples.json": "1887667cd1e108f4f62e37e971a7ae15393759ce27a18cbd8ec60d29016f5dbd",
       "contract-vectors.json": "c80a7fea9ff429e4d33d58a37b7efaa9a641110b09ad5f24c2c109be2e090ba8",

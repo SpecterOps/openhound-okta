@@ -9,6 +9,12 @@ from duckdb import DuckDBPyConnection
 from duckdb import Error as DuckDBError
 from openhound.core.lookup import LookupManager
 
+from openhound_okta.saml_aws_account_federation import (
+    AwsUserGroups,
+    GroupAssignment,
+    IncompleteReason,
+    MappedGroup,
+)
 from openhound_okta.saml_group_expression import GroupSelector
 
 USER_SAML_CONTEXT_CACHE_MAXSIZE = 128
@@ -366,6 +372,53 @@ class OktaLookup(LookupManager):
         if members is None or len(members) != reported_count:
             return None
         return user_id in members
+
+    def aws_user_groups(self, app_id: str, user_id: str) -> AwsUserGroups | None:
+        """Return the group data for one user's AWS Role value, None if unreadable.
+
+        Reads one row of `aws_role_sources`, made by the `preproc` transform.
+        """
+
+        try:
+            rows = self.client.execute(
+                f"""SELECT app_id, assigned, mapped, assigned_unproven,
+                        mapped_unproven, mapping_reason
+                    FROM {self.schema}.aws_role_sources
+                    WHERE user_id = ?""",
+                [user_id],
+            ).fetchall()
+        except DuckDBError:
+            return None
+        # The table is indexed by user only, so the application is chosen here.
+        row = next((row[1:] for row in rows if row[0] == app_id), None)
+        if row is None:
+            return None
+        assigned, mapped, assigned_unproven, mapped_unproven, mapping_reason = row
+        assignments = []
+        for item in assigned or ():
+            profile = _normalize_user_profile(item["profile"]) or {}
+            assignments.append(
+                GroupAssignment(
+                    group_id=item["group_id"],
+                    role=profile.get("role"),
+                    saml_roles=profile.get("samlRoles"),
+                )
+            )
+        return AwsUserGroups(
+            assigned=tuple(assignments),
+            mapped=tuple(
+                MappedGroup(
+                    item["group_id"],
+                    item["value"],
+                    IncompleteReason(item["reason"]) if item["reason"] else None,
+                    item["assigned"],
+                )
+                for item in mapped or ()
+            ),
+            assigned_unproven=assigned_unproven,
+            mapped_unproven=mapped_unproven,
+            mapping_reason=IncompleteReason(mapping_reason) if mapping_reason else None,
+        )
 
     @lru_cache
     def non_admin_users(self):

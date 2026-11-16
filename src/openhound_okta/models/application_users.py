@@ -11,6 +11,7 @@ from openhound_okta.graph import OktaOwnedEdgePath
 from openhound_okta.kinds import edges as ek
 from openhound_okta.kinds import nodes as nk
 from openhound_okta.main import app
+from openhound_okta.saml_aws_account_federation import read_aws_role_sources
 from openhound_okta.models.hybrid_auth import (
     HybridAuthEdgeProperties,
     hybrid_target_edge_path,
@@ -595,6 +596,13 @@ class ApplicationUser(BaseAsset):
                     if callable(group_membership_lookup)
                     else None
                 ),
+                aws_sources=(
+                    read_aws_role_sources(
+                        lookup, self.app_id, self.id, self.app_settings
+                    )
+                    if self.app_name == AppName.AWS_ACCOUNT_FEDERATION
+                    else None
+                ),
             )
             if lookup_available
             else saml_application_assertion_evidence(self)
@@ -637,6 +645,7 @@ class ApplicationUser(BaseAsset):
                     unsafe_match_values=claim_value["unsafe_match_values"],
                     source_property=claim_value["source_property"],
                     incomplete=claim_value["incomplete"],
+                    incomplete_reason=claim_value.get("incomplete_reason"),
                 ),
             )
 
