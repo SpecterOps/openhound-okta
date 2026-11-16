@@ -2985,6 +2985,8 @@ def test_aws_join_all_roles_follows_the_okta_example(join_all_roles, expected) -
     ("profile", "native", "member", "values", "reason"),
     [
         pytest.param({"samlRoles": [], "role": "Role1"}, {}, True, ["Role1"], "role_pair_rule_unproven", id="role is the fallback"),
+        pytest.param({"samlRoles": [" "], "role": "Role1"}, {}, True, ["Role1"], "role_pair_rule_unproven", id="blank SAML roles fall back to role"),
+        pytest.param({"role": "Role1"}, {"identityProviderArn": AWS_PROVIDER + ",b"}, True, [], "identity_provider_arn_unusable", id="comma in provider name"),
         pytest.param({"role": "Role1"}, {"identityProviderArn": None}, True, [], "identity_provider_arn_unusable", id="no provider ARN"),
         pytest.param({"samlRoles": ["123456789012:Role1"]}, {}, True, [], "role_name_not_plain", id="connected accounts form"),
         pytest.param({}, {"joinAllRoles": True}, None, [], "group_membership_incomplete", id="membership unproven"),
@@ -3082,6 +3084,12 @@ def test_aws_group_mapping_follows_the_group_filter_and_pattern(
         r"^(?{{role}}(\w|\d)+)#(?{{accountid}}\d+)$",  # alternative in a quantified group
         r"(?{{role}}[\w--a]+)(?{{accountid}}\d+)",  # doubled class operator
         r"(?{{role}}[\w||a]+)(?{{accountid}}\d+)",
+        r"(?{{role}}[a-\w]+)(?{{accountid}}\d+)",  # range to a set escape
+        r"(?{{role}}[\d-z]+)(?{{accountid}}\d+)",
+        r"(?{{role}}[x-\d]+)(?{{accountid}}\d+)",
+        r"(?{{role}}(x){1000})(?{{accountid}}\d+)",  # repeat count over 3 digits
+        "(" * 9 + r"(?{{role}}\w+)" + ")" * 9 + r"(?{{accountid}}\d+)",  # nesting
+        r"(?{{role}}\w+)" + "a" * 600 + r"(?{{accountid}}\d+)",  # length
     ],
 )
 def test_aws_group_filter_syntax_outside_the_shared_subset_is_unsupported(
@@ -3097,14 +3105,19 @@ def test_aws_group_filter_syntax_outside_the_shared_subset_is_unsupported(
     )
 
 
+@pytest.mark.parametrize(
+    ("limit", "group_filter", "names"),
+    [
+        pytest.param("_GROUP_FILTER_TIMEOUT_SECONDS", r"(?{{role}}\w+)" + r"\w*" * 7 + r"(?{{accountid}}\d+)\s", ["1" * 250], id="one match"),
+        pytest.param("_GROUP_FILTER_PLAN_BUDGET_SECONDS", r"(?{{role}}\w+)\w*\w*(?{{accountid}}\d+)\s", ["1" * 100] * 50, id="many groups under the match limit"),
+    ],
+)  # fmt: skip
 def test_aws_group_filter_that_runs_too_long_makes_the_plan_incomplete(
-    monkeypatch,
+    monkeypatch, limit, group_filter, names
 ) -> None:
-    monkeypatch.setattr(aws_federation, "_GROUP_FILTER_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(aws_federation, limit, 0.05)
 
-    plan, value = _mapped_role_value(
-        r"(?{{role}}\w+)" + r"\w*" * 7 + r"(?{{accountid}}\d+)\s", ["1" * 250]
-    )
+    plan, value = _mapped_role_value(group_filter, names)
 
     assert plan.reason is IncompleteReason.GROUP_FILTER_TIMEOUT
     assert value.reason is IncompleteReason.GROUP_FILTER_TIMEOUT
@@ -3329,13 +3342,18 @@ def test_aws_join_all_roles_reads_group_assignment_profiles_from_the_lookup() ->
         {"joinAllRoles": True},
         profile={"samlRoles": ["Role1"]},
         groups=(("00g_a", "A"), ("00g_b", "B")),
-        memberships=("00g_a",),
+        memberships=("00g_a", "00g_b"),
         assignment_profiles=(
-            ("00g_a", {"samlRoles": ["RoleA"]}),
+            ("00g_a", {"samlRoles": [" RoleA ", 5]}),
             ("00g_b", {"samlRoles": ["RoleB"]}),
         ),
     )
 
     role = _claims_by_name(user)[AWS_ROLE_ATTRIBUTE]
 
-    assert role.match_values == [_aws_pair("Role1"), _aws_pair("RoleA")]
+    assert role.match_values == [
+        _aws_pair("Role1"),
+        _aws_pair("RoleA"),
+        _aws_pair("RoleB"),
+    ]
+    assert role.incomplete_reason == "role_name_not_plain"  # the group role 5

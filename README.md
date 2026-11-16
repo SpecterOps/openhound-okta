@@ -124,7 +124,9 @@ The work item is `SpecterOps/saml-og-research#88`.
   `(?{{role}}` and `(?{{accountid}}` one time each. Each group name is tested
   four ways: the full name or a part of it, with and without letter case. The
   Role Value Pattern must give one provider ARN and one role ARN.
-- **`RoleSessionName`.** The value is always empty and incomplete. A custom `RoleSessionName` statement on this application is kept and is also incomplete.
+- **`RoleSessionName`.** The value is always empty and incomplete. A custom
+  `RoleSessionName` statement on this application is kept and is also
+  incomplete.
 
 A custom attribute statement for `Role` on this application is also read, as
 for other applications. Its value gets the roles from the settings added and is
@@ -138,19 +140,19 @@ first in this table is written.
 
 | `incomplete_reason` | The value is incomplete because |
 | --- | --- |
-| `role_source_conflict` | The application also has a custom `Role` attribute statement. |
-| `role_source_precedence_unproven` | The user has values from assignment roles and from group mapping. |
-| `app_filter_empty_unproven` | The App Filter is empty. Okta does not document what this means. |
-| `app_filter_unmapped` | The App Filter names no collected application, or a group that can match has no known source (a built-in group, or an application group whose source application is not collected). |
-| `group_filter_unsupported` | The Group Filter is missing, has syntax outside the shared set, does not have exactly the two named groups, or repeats a group that holds a quantifier or an alternative (such as `(\w+)+`, which can run without limit). |
-| `group_filter_timeout` | One match of the Group Filter took longer than 0.25 seconds, so the filter is not evaluated for this application. Every group mapping value is incomplete. |
-| `group_filter_match_unproven` | A group name matches in some of the four ways and not in others, or a match leaves `role` or `accountid` unset. |
-| `role_value_pattern_unsupported` | The Role Value Pattern lacks `${accountid}` or `${role}`, or its result is not one provider ARN and one role ARN. |
+| `role_source_conflict` | The application also has a custom `Role` attribute statement (Issue rule 1). |
+| `role_source_precedence_unproven` | The user has values from assignment roles and from group mapping. Okta does not document which wins (item 2). |
+| `app_filter_empty_unproven` | The App Filter is empty. Okta does not document what this means (item 5). |
+| `app_filter_unmapped` | The App Filter names no collected application, or a group that can match has no known source: a built-in group, or an application group whose source application is not collected (Issue rule 3, step 1). |
+| `group_filter_unsupported` | The Group Filter is missing, has syntax outside the shared set, does not have exactly the two named groups, or repeats a group that holds a quantifier or an alternative (such as `(\w+)+`). It also breaks a size limit: at most 512 characters, group nesting at most 8, repeat counts at most 3 digits, and no `-` that makes a range with `\w`, `\d`, `\s` or `\S` in a class (Issue rule 3, step 2). |
+| `group_filter_timeout` | One match of the Group Filter took longer than 0.25 seconds, or all matches for the application took longer than 5 seconds. The filter is not evaluated for this application and every group mapping value is incomplete (Issue rule 3, step 2). |
+| `group_filter_match_unproven` | A group name matches in some of the four ways and not in others, or a match leaves `role` or `accountid` unset. Okta does not document the match rule (item 3). |
+| `role_value_pattern_unsupported` | The Role Value Pattern lacks `${accountid}` or `${role}`, or its result is not one provider ARN and one role ARN (Issue rule 3, step 4). |
 | `group_mapping_scope_unproven` | A group that gives a value has no assignment to this application. Okta does not say if it tests all groups of the user or only assigned groups (item 4). The value is complete only for assigned groups. |
-| `group_membership_incomplete` | The collected members of a group that decides the value are not complete, or the group data is not available. |
-| `group_role_default_unproven` | Under Join all roles, a group of the user has a `role` and no `samlRoles`. Okta does not document its default role. |
-| `identity_provider_arn_unusable` | `identityProviderArn` is missing or is not a SAML provider ARN. |
-| `role_name_not_plain` | A role name is not a plain IAM role name, for example a name from the old setting Connected Accounts IDs. |
+| `group_membership_incomplete` | The collected members of a group that decides the value are not complete, or the group data is not available (Issue rule 2, step 5). |
+| `group_role_default_unproven` | Under Join all roles, a group of the user has a `role` and no `samlRoles`. Okta does not document its default role (Issue rule 2, step 3; not one of the seven items). |
+| `identity_provider_arn_unusable` | `identityProviderArn` is missing or is not a SAML provider ARN without a comma in its name (Issue rule 2, step 5). |
+| `role_name_not_plain` | A role name, on a user or a group, is not text or not a plain IAM role name, for example a name from the old setting Connected Accounts IDs (item 7). |
 | `role_pair_rule_unproven` | The value has a pair made from a role name on an assignment (item 1). |
 | `role_session_name_source_unproven` | The source of the `RoleSessionName` value is not documented (item 6). |
 

@@ -390,16 +390,11 @@ class OktaLookup(LookupManager):
         assignments = []
         for group_id, raw_profile in rows:
             profile = _normalize_user_profile(raw_profile) or {}
-            saml_roles = profile.get("samlRoles")
             assignments.append(
                 GroupAssignment(
                     group_id=group_id,
-                    role=profile.get("role") or None,
-                    saml_roles=tuple(
-                        role for role in saml_roles if isinstance(role, str)
-                    )
-                    if isinstance(saml_roles, list)
-                    else (),
+                    role=profile.get("role"),
+                    saml_roles=profile.get("samlRoles"),
                 )
             )
         return tuple(assignments)

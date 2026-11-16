@@ -16,7 +16,8 @@ Issue: SpecterOps/saml-og-research#88, part A.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+import time
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -39,23 +40,25 @@ class IncompleteReason(StrEnum):
     A value has one `incomplete_reason`; the first member that applies wins.
     """
 
-    ROLE_SOURCE_CONFLICT = "role_source_conflict"
-    ROLE_SOURCE_PRECEDENCE_UNPROVEN = "role_source_precedence_unproven"
-    APP_FILTER_EMPTY_UNPROVEN = "app_filter_empty_unproven"
-    APP_FILTER_UNMAPPED = "app_filter_unmapped"
-    GROUP_FILTER_UNSUPPORTED = "group_filter_unsupported"
-    GROUP_FILTER_TIMEOUT = "group_filter_timeout"
-    GROUP_FILTER_MATCH_UNPROVEN = "group_filter_match_unproven"
-    ROLE_VALUE_PATTERN_UNSUPPORTED = "role_value_pattern_unsupported"
+    # "Item N" is an item of the record's "Not documented" list. "Rule N" is a
+    # rule of Issue #88 that is not one of the seven items.
+    ROLE_SOURCE_CONFLICT = "role_source_conflict"  # rule 1
+    ROLE_SOURCE_PRECEDENCE_UNPROVEN = "role_source_precedence_unproven"  # item 2
+    APP_FILTER_EMPTY_UNPROVEN = "app_filter_empty_unproven"  # item 5
+    APP_FILTER_UNMAPPED = "app_filter_unmapped"  # rule 3, step 1
+    GROUP_FILTER_UNSUPPORTED = "group_filter_unsupported"  # rule 3, step 2
+    GROUP_FILTER_TIMEOUT = "group_filter_timeout"  # rule 3, step 2 (cost bound)
+    GROUP_FILTER_MATCH_UNPROVEN = "group_filter_match_unproven"  # item 3
+    ROLE_VALUE_PATTERN_UNSUPPORTED = "role_value_pattern_unsupported"  # rule 3, step 4
     # After the settings reasons above (what Okta may test) and before data
-    # reasons (what was collected): item 4 of the record is a rule, not a gap.
-    GROUP_MAPPING_SCOPE_UNPROVEN = "group_mapping_scope_unproven"
-    GROUP_MEMBERSHIP_INCOMPLETE = "group_membership_incomplete"
-    GROUP_ROLE_DEFAULT_UNPROVEN = "group_role_default_unproven"
-    IDENTITY_PROVIDER_ARN_UNUSABLE = "identity_provider_arn_unusable"
-    ROLE_NAME_NOT_PLAIN = "role_name_not_plain"
-    ROLE_PAIR_RULE_UNPROVEN = "role_pair_rule_unproven"
-    ROLE_SESSION_NAME_SOURCE_UNPROVEN = "role_session_name_source_unproven"
+    # reasons (what was collected): item 4 is a rule, not a gap.
+    GROUP_MAPPING_SCOPE_UNPROVEN = "group_mapping_scope_unproven"  # item 4
+    GROUP_MEMBERSHIP_INCOMPLETE = "group_membership_incomplete"  # rule 2, step 5
+    GROUP_ROLE_DEFAULT_UNPROVEN = "group_role_default_unproven"  # rule 2, step 3
+    IDENTITY_PROVIDER_ARN_UNUSABLE = "identity_provider_arn_unusable"  # rule 2, step 5
+    ROLE_NAME_NOT_PLAIN = "role_name_not_plain"  # item 7
+    ROLE_PAIR_RULE_UNPROVEN = "role_pair_rule_unproven"  # item 1
+    ROLE_SESSION_NAME_SOURCE_UNPROVEN = "role_session_name_source_unproven"  # item 6
 
 
 @dataclass(frozen=True)
@@ -118,8 +121,9 @@ class GroupAssignment:
     """An assignment of a group to the application, with its role fields."""
 
     group_id: str
-    role: str | None
-    saml_roles: tuple[str, ...]
+    # The native values, cleaned like the roles of a user (`_clean_names`).
+    role: object
+    saml_roles: object
 
 
 @dataclass(frozen=True)
@@ -155,7 +159,7 @@ class AwsRoleSources:
 
 _ARN_PARTITION = r"aws(?:-[a-z]+)*"
 _PROVIDER_ARN = re.compile(
-    rf"arn:({_ARN_PARTITION}):iam::(\d{{12}}):saml-provider/[\w+=,.@-]+", re.ASCII
+    rf"arn:({_ARN_PARTITION}):iam::(\d{{12}}):saml-provider/[\w+=.@-]+", re.ASCII
 )
 _ROLE_ARN = re.compile(
     rf"arn:{_ARN_PARTITION}:iam::\d{{12}}:role/(?:[\w+=.@-]+/)*[\w+=.@-]{{1,64}}",
@@ -165,14 +169,22 @@ _ROLE_ARN = re.compile(
 _PLAIN_ROLE_NAME = re.compile(r"[\w+=.@-]{1,64}", re.ASCII)
 
 
+def _clean_names(values: object) -> tuple[list[str], bool]:
+    """Return the stripped, non-empty text values, and whether one is not text."""
+
+    items = values if isinstance(values, (list, tuple)) else [values] if values else []
+    names = [item.strip() for item in items if isinstance(item, str)]
+    return [name for name in names if name], len(names) != len(items)
+
+
 def _role_names(roles: object, role: object) -> tuple[list[str], bool]:
     """Return the names of `samlRoles`, else of `role`, and whether one is not text."""
 
-    values = roles if isinstance(roles, list) else [roles] if roles else []
-    if not values and role:
-        values = [role]
-    names = [value.strip() for value in values if isinstance(value, str)]
-    return [name for name in names if name], len(names) != len(values)
+    names, not_text = _clean_names(roles)
+    if not names:
+        names, role_not_text = _clean_names(role)
+        not_text = not_text or role_not_text
+    return names, not_text
 
 
 def _assignment_values(
@@ -198,12 +210,15 @@ def _assignment_values(
             member = is_member("id", assignment.group_id) if is_member else None
             if member is None:
                 reasons.add(IncompleteReason.GROUP_MEMBERSHIP_INCOMPLETE)
-            elif member and assignment.saml_roles:
-                names.extend(assignment.saml_roles)
-            elif member and assignment.role:
-                # The role of a group without SAML User Roles is not documented
-                # for "Join all roles".
-                reasons.add(IncompleteReason.GROUP_ROLE_DEFAULT_UNPROVEN)
+            elif member:
+                group_names, not_text = _clean_names(assignment.saml_roles)
+                names.extend(group_names)
+                if not_text:
+                    reasons.add(IncompleteReason.ROLE_NAME_NOT_PLAIN)
+                if not group_names and _clean_names(assignment.role)[0]:
+                    # The role of a group without SAML User Roles is not
+                    # documented for "Join all roles".
+                    reasons.add(IncompleteReason.GROUP_ROLE_DEFAULT_UNPROVEN)
 
     provider = _PROVIDER_ARN.fullmatch(settings.identity_provider_arn or "")
     plain = [name for name in dict.fromkeys(names) if _PLAIN_ROLE_NAME.fullmatch(name)]
@@ -230,12 +245,36 @@ _NAMED_GROUPS = {"(?{{role}}": "(?P<role>", "(?{{accountid}}": "(?P<accountid>"}
 _PLACEHOLDER = re.compile(r"\(\?\{\{(?:role|accountid)\}\}")
 # Tokens that mean the same in Java and in Python: an escaped punctuation
 # literal, \w \d \s \S, a quantifier, a group start, an alternative, or an anchor.
+_SET_ESCAPES = frozenset({r"\w", r"\d", r"\s", r"\S"})
 _ESCAPE = re.compile(r"\\(?:[wdsS]|[^\w\s])")
-_QUANTIFIER = re.compile(r"[?*+]|\{\d+(?:,\d*)?\}")
+# Repeat counts have at most 3 digits: Okta group names have at most 255 characters.
+_QUANTIFIER = re.compile(r"[?*+]|\{\d{1,3}(?:,\d{0,3})?\}")
 _CLASS = re.compile(r"\[\^?(?:\\(?:[wdsS]|[^\w\s])|[^\\\[\]&])+\]")
 _LITERAL = re.compile(r"[^\\.()\[\]{}*+?|^$]")
 _ATOMS = (_ESCAPE, _CLASS, _LITERAL)
 _SYNTAX = re.compile(r"\((?!\?)|\(\?:|\)|\||\^|\$")
+_CLASS_ITEM = re.compile(r"\\.|.")
+_MAX_FILTER_LENGTH = 512
+_MAX_GROUP_DEPTH = 8
+
+
+def _class_is_shared(text: str) -> bool:
+    r"""Whether a character class means the same in Java and in Python.
+
+    Python warns that a doubled `--`, `||` or `~~` will change. A range with
+    `\w`, `\d`, `\s` or `\S` as an end, such as `[a-\w]`, is a literal `-` in
+    Python and probably an error in Java. A leading or trailing `-` is fine.
+    """
+
+    if any(operator in text for operator in ("--", "||", "~~")):
+        return False
+    items = _CLASS_ITEM.findall(text[1:-1].removeprefix("^"))
+    return not any(
+        item == "-"
+        and 0 < index < len(items) - 1
+        and (items[index - 1] in _SET_ESCAPES or items[index + 1] in _SET_ESCAPES)
+        for index, item in enumerate(items)
+    )
 
 
 # Longest time for one Group Filter match. A documented filter on a 255
@@ -243,6 +282,11 @@ _SYNTAX = re.compile(r"\((?!\?)|\(\?:|\)|\||\^|\$")
 # filter that can backtrack for long (for example side by side repeats such as
 # \w*\w*\w*) is cut off here, and the whole plan becomes incomplete.
 _GROUP_FILTER_TIMEOUT_SECONDS = 0.25
+# Longest total time for all matches of one plan, so that the cost of a slow
+# filter does not grow with the number of groups. The documented filters take
+# about 0.12 s for 20,000 groups, so 5 s leaves a margin of about 40 times.
+# The plan is built once for each application.
+_GROUP_FILTER_PLAN_BUDGET_SECONDS = 5.0
 # The `re`-compatible behavior (V0). ASCII gives the Java default meaning of
 # \w, \d, \s and of case folding.
 _FILTER_FLAGS = regex.V0 | regex.ASCII
@@ -255,6 +299,8 @@ def _supported_group_filter(expression: str) -> str | None:
     same result in Okta's Java engine. Both named groups must exist, and no other.
     """
 
+    if len(expression) > _MAX_FILTER_LENGTH:
+        return None
     rewritten: list[str] = []
     position = 0
     after_atom = False  # a quantifier needs an atom before it
@@ -297,19 +343,19 @@ def _supported_group_filter(expression: str) -> str | None:
             token = next(
                 (m for atom in _ATOMS if (m := atom.match(expression, position))), None
             )
-            # Python warns that these doubled characters in a class will change.
             if token is None or (
-                token.group().startswith("[")
-                and any(op in token.group() for op in ("--", "||", "~~"))
+                token.group().startswith("[") and not _class_is_shared(token.group())
             ):
                 return None
             rewritten.append(token.group())
             after_atom = True
+        if len(open_groups) > _MAX_GROUP_DEPTH:
+            return None
         position = token.end()
     python_form = "".join(rewritten)
     try:
         compiled = regex.compile(python_form, _FILTER_FLAGS)
-    except regex.error:
+    except (regex.error, RecursionError, OverflowError):
         return None
     # Exactly the two named groups: a literal "(?P<role>" is not one.
     return python_form if set(compiled.groupindex) == {"role", "accountid"} else None
@@ -334,20 +380,34 @@ def _mapped_group(
     group: GroupRef,
     filters: tuple[regex.Pattern[str], regex.Pattern[str]],
     pattern: str | None,
+    deadline: float,
 ) -> MappedGroup | None:
     """Test one group name in the four ways Okta leaves open (record, item 3).
 
     The ways are full or part of the name, and case-sensitive or not. Return None
-    for a name that no way matches. Raise TimeoutError when a match takes too long.
+    for a name that no way matches. Raise TimeoutError when a match takes too
+    long, or when the plan is past its `deadline`.
     """
 
-    matches = [
-        test(group.name, timeout=_GROUP_FILTER_TIMEOUT_SECONDS)
-        for compiled in filters
-        for test in (compiled.fullmatch, compiled.search)
-    ]
-    if not any(matches):
+    sensitive, insensitive = filters
+
+    def match(test: Callable[..., regex.Match[str] | None]) -> regex.Match[str] | None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError
+        return test(group.name, timeout=min(_GROUP_FILTER_TIMEOUT_SECONDS, remaining))
+
+    # The case-insensitive part match accepts every name that the other three
+    # ways accept. Without a match here, the group does not match.
+    first = match(insensitive.search)
+    if first is None:
         return None
+    matches = [
+        first,
+        match(insensitive.fullmatch),
+        match(sensitive.fullmatch),
+        match(sensitive.search),
+    ]
     captures = {(m["role"], m["accountid"]) if m else None for m in matches}
     capture = captures.pop()
     # The ways disagree, or a branch left a named group unset.
@@ -392,16 +452,18 @@ def plan_group_mapping(
         regex.compile(python_form, _FILTER_FLAGS),
         regex.compile(python_form, _FILTER_FLAGS | regex.IGNORECASE),
     )
+    deadline = time.monotonic() + _GROUP_FILTER_PLAN_BUDGET_SECONDS
     mapped: list[MappedGroup] = []
     for group in groups:
         permitted = _permitted_by_app_filter(group, settings.app_filter)
         if permitted is False:
             continue
         try:
-            found = _mapped_group(group, filters, settings.role_value_pattern)
+            found = _mapped_group(group, filters, settings.role_value_pattern, deadline)
         except TimeoutError:
-            # Stop at the first timeout: the plan does not depend on which
-            # group timed out, and it costs one timeout for each application.
+            # Stop at the first timeout or at the budget: the plan does not
+            # depend on which group ran out, and each application costs a
+            # bounded amount.
             return GroupMappingPlan(reason=IncompleteReason.GROUP_FILTER_TIMEOUT)
         if found is None:
             continue
