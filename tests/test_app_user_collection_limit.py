@@ -1,4 +1,5 @@
 import inspect
+import logging
 from types import SimpleNamespace
 
 import dlt
@@ -136,3 +137,23 @@ def test_source_adds_filter_only_when_collection_is_limited():
     assert isinstance(limited._pipe.steps[0], FilterItem)
     assert limited._pipe.steps[0](_application("0oa_listed", "custom_saml")) is not None
     assert limited._pipe.steps[0](_application("0oa_custom", "custom_saml")) is None
+
+
+def test_source_warns_only_when_collection_is_limited(caplog):
+    with caplog.at_level(logging.WARNING, logger="openhound_okta.source"):
+        _application_users_resource()
+    assert not [r for r in caplog.records if "limit_app_user_collection" in r.message]
+
+    with caplog.at_level(logging.WARNING, logger="openhound_okta.source"):
+        _application_users_resource(
+            limit_app_user_collection=True,
+            app_user_collection_app_ids=["0oa_listed"],
+        )
+    messages = [
+        r.getMessage()
+        for r in caplog.records
+        if "limit_app_user_collection" in r.message
+    ]
+    assert len(messages) == 1
+    assert messages[0].startswith("limit_app_user_collection=true: ")
+    assert "1 listed applications" in messages[0]

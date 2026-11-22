@@ -2427,6 +2427,13 @@ def source(
     group_memberships_resource = groups_resource | group_memberships(ctx)
     application_users_resource = applications_resource | application_users(ctx)
     if limit_app_user_collection:
+        logger.warning(
+            "limit_app_user_collection=true: application users are collected "
+            "only for %d always-collected app types and %d listed applications, "
+            "so app assignment edges for other applications will be missing",
+            len(ALWAYS_COLLECTED_APP_USERS),
+            len(app_user_collection_app_ids or ()),
+        )
         application_users_resource.add_filter(
             app_user_collection_filter(frozenset(app_user_collection_app_ids or ())),
             insert_at=0,
@@ -2434,6 +2441,11 @@ def source(
 
     factor_resources: tuple[DltResource, ...]
     if limit_user_mfa_collection:
+        logger.warning(
+            "limit_user_mfa_collection=true: MFA factors are collected only for "
+            "privileged users, so authentication_factors stays null for all "
+            "other users"
+        )
         factor_resources = (
             privileged_users_resource | user_factors(ctx),
             group_memberships_resource | admin_group_member_factors(ctx),
