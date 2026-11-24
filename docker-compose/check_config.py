@@ -13,17 +13,17 @@ from dlt.common.configuration import resolve_configuration
 from dlt.common.configuration.exceptions import ConfigFieldMissingException
 from joserfc.jwk import RSAKey
 
-from openhound_okta.utils.auth import (
+from openhound_okta.auth import (
     CREDENTIALS_SECTIONS,
     AnyOktaCredentials,
     OktaAppCredentials,
-    OktaAuth,
     OktaClientSecretCredentials,
     OktaCredentials,
     OktaEncodedAppCredentials,
     OktaPrivateKeyCredentials,
     OktaTokenCredentials,
 )
+from openhound_okta.utils.auth import OktaAuth
 
 # Dotted form of the credentials section, as users see it in secrets.toml.
 CREDENTIALS_PREFIX: Final[str] = ".".join(CREDENTIALS_SECTIONS)
