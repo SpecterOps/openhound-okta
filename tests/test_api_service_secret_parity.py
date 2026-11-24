@@ -5,7 +5,7 @@ import duckdb
 from openhound_okta.kinds import edges as ek
 from openhound_okta.lookup import OktaLookup
 from openhound_okta.models import ApiService, ApiServiceSecrets, ApplicationSecrets
-from openhound_okta.source import (
+from openhound_okta.resources.applications import (
     api_service_secret_rows,
     api_service_secrets,
     api_services,

@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 from openhound_okta.models import AuthServer, IdentityProvider, Policy, Realm
-from openhound_okta.source import policy_types
+from openhound_okta.resources.policies import policy_types
 
 
 class StubLookup:

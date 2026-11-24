@@ -12,16 +12,18 @@ from pydantic import ValidationError
 from requests import Request
 from requests.adapters import HTTPAdapter
 
-import openhound_okta.utils.auth as auth_module
-from openhound_okta.utils.auth import (
-    DEFAULT_TOKEN_REQUEST_TIMEOUT_SECONDS,
+import openhound_okta.auth as auth_module
+from openhound_okta.auth import (
     OKTA_DEFAULT_SCOPE,
     OktaAppCredentials,
-    OktaAuth,
-    OktaBearerAuth,
     OktaClientSecretCredentials,
     OktaEncodedAppCredentials,
     OktaTokenCredentials,
+)
+from openhound_okta.utils.auth import (
+    DEFAULT_TOKEN_REQUEST_TIMEOUT_SECONDS,
+    OktaAuth,
+    OktaBearerAuth,
     Token,
 )
 
@@ -769,7 +771,7 @@ def test_source_resolves_client_secret_credentials_from_environment(tmp_path):
     )
     probe = """
 import openhound_okta.source as source_module
-import openhound_okta.utils.auth as auth_module
+import openhound_okta.auth as auth_module
 
 resolved_credentials = []
 # Intercept auth construction on every credential kind to record which one

@@ -8,14 +8,14 @@ from dlt.pipeline.exceptions import PipelineStepFailed
 
 from openhound_okta.main import preprocessing_resources
 from openhound_okta.models.group_assigned_apps import GroupAssignedApp
-from openhound_okta.source import (
-    APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE,
+from openhound_okta.resources.applications import (
     application_group_assignment_rows,
     applications,
     group_assigned_apps,
-    source,
 )
-from openhound_okta.utils.auth import OktaTokenCredentials
+from openhound_okta.source import source
+from openhound_okta.source_context import APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE
+from openhound_okta.auth import OktaTokenCredentials
 
 
 class RecordingPool:
