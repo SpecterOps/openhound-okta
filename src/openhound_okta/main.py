@@ -10,10 +10,10 @@ from openhound.core.collect import CollectContext
 from openhound.core.convert import ConvertContext
 from openhound.core.preproc import PreProcContext
 
+from openhound_okta.auth import CREDENTIALS_SECTIONS, OktaCredentials
 from openhound_okta.lookup import OktaLookup
 from openhound_okta.telemetry import TelemetrySettings, build_telemetry
 from openhound_okta.transforms import transforms
-from openhound_okta.utils.auth import CREDENTIALS_SECTIONS, OktaCredentials
 
 app = OpenHound("okta", help="OpenGraph collector for Okta")
 
