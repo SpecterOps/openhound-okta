@@ -1,0 +1,6 @@
+[
+  {"source_id": "group-admin", "status": "ACTIVE", "assignment_type": "GROUP"},
+  {"source_id": "group-admin", "status": "ACTIVE", "assignment_type": "GROUP"},
+  {"source_id": "normal", "status": "INACTIVE", "assignment_type": "GROUP"},
+  {"source_id": "normal", "status": "ACTIVE", "assignment_type": "OTHER"}
+]

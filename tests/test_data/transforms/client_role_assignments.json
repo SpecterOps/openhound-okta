@@ -1,0 +1,6 @@
+[
+  {"source_id": "client-admin", "status": "ACTIVE", "assignment_type": "CLIENT"},
+  {"source_id": "client-admin", "status": "ACTIVE", "assignment_type": "CLIENT"},
+  {"source_id": "normal", "status": "INACTIVE", "assignment_type": "CLIENT"},
+  {"source_id": "normal", "status": "ACTIVE", "assignment_type": "OTHER"}
+]
