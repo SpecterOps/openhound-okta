@@ -2,7 +2,7 @@ import inspect
 
 from openhound_okta.kinds import edges as ek
 from openhound_okta.models import Agent, AgentPool
-from openhound_okta.source import agents as agents_transformer
+from openhound_okta.resources.organization import agents as agents_transformer
 
 
 class StubLookup:

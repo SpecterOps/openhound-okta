@@ -4,9 +4,9 @@ import pytest
 
 from openhound_okta.models import PrivilegedUser, User
 from openhound_okta.models.user import UserProperties
-from openhound_okta.source import (
-    ClientPool,
-    SourceContext,
+from openhound_okta.client import ClientPool
+from openhound_okta.source_context import SourceContext
+from openhound_okta.resources.identities import (
     admin_group_member_factors,
     admin_group_members,
     user_factor_rows,
@@ -366,7 +366,7 @@ def test_factor_writers_replace_the_shared_table() -> None:
 def test_source_wires_factor_collection_by_mode() -> None:
     """Default covers the users listing; limited mode uses the two admin streams."""
     from openhound_okta.source import source
-    from openhound_okta.utils.auth import OktaTokenCredentials
+    from openhound_okta.auth import OktaTokenCredentials
 
     def credentials() -> OktaTokenCredentials:
         return OktaTokenCredentials(
@@ -454,7 +454,7 @@ def test_chained_factor_extraction_paginates_each_member_list_once() -> None:
     from dlt.common.schema import Schema
     from dlt.extract import DltSource
 
-    from openhound_okta.source import group_memberships, groups
+    from openhound_okta.resources.identities import group_memberships, groups
 
     pool = FactorStubPool(
         groups=[
@@ -577,7 +577,7 @@ def test_factor_pipeline_loads_one_deduplicated_replaced_snapshot(tmp_path) -> N
     import duckdb
 
     from openhound_okta.lookup import OktaLookup
-    from openhound_okta.source import (
+    from openhound_okta.resources.identities import (
         group_memberships,
         groups,
         privileged_users,
@@ -707,7 +707,7 @@ def test_full_factor_collection_covers_every_listed_user(tmp_path) -> None:
     import duckdb
 
     from openhound_okta.lookup import OktaLookup
-    from openhound_okta.source import users
+    from openhound_okta.resources.identities import users
 
     db_path = str(tmp_path / "collected.duckdb")
     pool = PipelineStubPool(

@@ -26,14 +26,14 @@ from openhound.core.lookup import LookupManager
 from openhound.core.progress import Progress
 from requests.adapters import BaseAdapter
 
+from openhound_okta.client import ClientPool
 from openhound_okta.models.application import Application
 from openhound_okta.models.application_users import ApplicationUser
 from openhound_okta.main import _extract_performance_settings_from_source
-from openhound_okta.source import (
+from openhound_okta.resources.applications import application_users
+from openhound_okta.source_context import (
     APPLICATION_USERS_PAGE_SIZE,
-    ClientPool,
     SourceContext,
-    application_users,
 )
 from openhound_okta.telemetry import TelemetrySettings, build_telemetry
 from openhound_okta.utils.http import EndpointThrottle, OktaRESTClient

@@ -7,7 +7,7 @@ from openhound_okta.models import (
     ApplicationSecrets,
 )
 from openhound_okta.models.api_token import token_window_timespan
-from openhound_okta.source import application_jwk_rows
+from openhound_okta.resources.applications import application_jwk_rows
 
 
 class StubLookup:

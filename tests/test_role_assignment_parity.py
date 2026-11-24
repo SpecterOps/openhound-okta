@@ -11,16 +11,12 @@ from openhound_okta.models import (
     ResourceSetRoleAssignment,
     UserRoleAssignment,
 )
-from openhound_okta.source import (
+from openhound_okta.resources.authorization import (
     _is_direct_active_role_assignment,
     _role_assignment_scope,
     _resource_set_binding_assignee_id,
 )
-from openhound_okta.transforms import (
-    insert_principals_with_admin_roles,
-    non_admin_users,
-    principals_with_admin_roles,
-)
+from openhound_okta.transforms import transforms
 
 
 class StubLookup:
@@ -275,6 +271,8 @@ def test_collection_filter_keeps_only_direct_active_assignments(
 def test_admin_principal_transform_uses_privileged_user_inventory():
     con = duckdb.connect()
     con.execute("CREATE SCHEMA okta")
+    for table in ("users", "groups", "applications"):
+        con.execute(f"CREATE TABLE okta.{table} (id VARCHAR)")
     con.execute("CREATE TABLE okta.privileged_users (id VARCHAR)")
     con.execute(
         "CREATE TABLE okta.user_role_assignments "
@@ -308,8 +306,7 @@ def test_admin_principal_transform_uses_privileged_user_inventory():
         "('inactive-client', 'INACTIVE', 'CLIENT')"
     )
 
-    principals_with_admin_roles(con)
-    insert_principals_with_admin_roles(con)
+    transforms(con)
 
     assert con.execute(
         "SELECT id, principal_type FROM okta.principals_with_admin_roles "
@@ -326,6 +323,13 @@ def test_non_admin_users_excludes_inherited_admins_from_privileged_inventory():
     con = duckdb.connect()
     con.execute("CREATE SCHEMA okta")
     con.execute("CREATE TABLE okta.users (id VARCHAR)")
+    for table in ("groups", "applications"):
+        con.execute(f"CREATE TABLE okta.{table} (id VARCHAR)")
+    for table in ("group_role_assignments", "client_role_assignments"):
+        con.execute(
+            f"CREATE TABLE okta.{table} "
+            "(source_id VARCHAR, status VARCHAR, assignment_type VARCHAR)"
+        )
     con.execute("CREATE TABLE okta.privileged_users (id VARCHAR)")
     con.execute(
         "CREATE TABLE okta.user_role_assignments "
@@ -342,9 +346,7 @@ def test_non_admin_users_excludes_inherited_admins_from_privileged_inventory():
         "('direct-user', 'ACTIVE', 'USER')"
     )
 
-    principals_with_admin_roles(con)
-    insert_principals_with_admin_roles(con)
-    non_admin_users(con)
+    transforms(con)
 
     assert con.execute(
         "SELECT id FROM okta.non_admin_users ORDER BY id"

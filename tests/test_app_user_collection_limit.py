@@ -9,13 +9,13 @@ from openhound_okta.app_names import AppName
 from openhound_okta.models.application_users import ALWAYS_COLLECTED_APP_USERS
 from openhound_okta.models.hybrid_auth import SUPPORTED_HYBRID_AUTH_APPS
 from openhound_okta.oin_routes.registry import OIN_ROUTE_REGISTRY
-from openhound_okta.source import (
-    APPLICATION_USERS_PAGE_SIZE,
+from openhound_okta.resources.applications import (
     app_user_collection_filter,
     application_users,
-    source,
 )
-from openhound_okta.utils.auth import OktaTokenCredentials
+from openhound_okta.source import source
+from openhound_okta.source_context import APPLICATION_USERS_PAGE_SIZE
+from openhound_okta.auth import OktaTokenCredentials
 
 
 def _application(app_id: str, name: str) -> SimpleNamespace:

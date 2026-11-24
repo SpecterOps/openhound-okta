@@ -16,14 +16,19 @@ from dlt.sources.helpers.requests.session import Session
 
 import openhound_okta.source as okta_source
 from openhound_okta.models.application import Application
-from openhound_okta.utils.auth import (
+from openhound_okta.auth import (
     OktaCredentials,
     OktaTokenCredentials,
+)
+from openhound_okta.utils.auth import (
     Token,
     classify_unauthorized,
 )
-from openhound_okta.source import (
+from openhound_okta.client import (
     API_RATE_LIMIT_ENDPOINTS,
+    ClientPool,
+)
+from openhound_okta.source_context import (
     APPLICATIONS_PAGE_SIZE,
     APPLICATION_GRANTS_ACCESS_DENIED_LIMIT,
     APPLICATION_GROUP_ASSIGNMENTS_PAGE_SIZE,
@@ -31,10 +36,14 @@ from openhound_okta.source import (
     GROUPS_PAGE_SIZE,
     GROUP_PUSH_MAPPINGS_PAGE_SIZE,
     IDENTITY_PROVIDER_USERS_PAGE_SIZE,
-    ClientPool,
     ConsecutiveAccessDeniedBreaker,
+)
+from openhound_okta.resources.federation import (
     _saml_idp_metadata_fields,
     _saml_metadata_fields,
+    identity_provider_users,
+)
+from openhound_okta.resources.applications import (
     api_services,
     application_grants,
     application_group_assignment_rows,
@@ -44,14 +53,17 @@ from openhound_okta.source import (
     application_jwk_rows,
     application_user_rows,
     applications,
+)
+from openhound_okta.resources.identities import (
     _group_page_sizes,
     groups,
-    identity_provider_users,
-    policies,
+)
+from openhound_okta.resources.policies import policies
+from openhound_okta.resources.authorization import (
     resources,
-    source,
     user_role_assignment_rows,
 )
+from openhound_okta.source import source
 from openhound_okta.utils.auth import OktaBearerAuth, UnauthorizedClassification
 from openhound_okta.utils.entra_tenant import EntraTenantIdResolver
 from openhound_okta.utils.http import (

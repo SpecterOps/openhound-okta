@@ -1,3 +1,6 @@
+from pathlib import Path
+from unittest.mock import Mock
+
 import duckdb
 import pytest
 
@@ -121,29 +124,76 @@ def test_users_id_index_ignores_same_name_in_another_schema() -> None:
     connection.close()
 
 
-def test_transforms_creates_users_index_before_derived_work(monkeypatch) -> None:
+def test_transforms_creates_users_index_before_derived_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Create the index before executing the SQL files in their explicit order."""
     calls = []
-    for name in (
-        "principals_with_admin_roles",
-        "insert_principals_with_admin_roles",
-        "non_admin_users",
-        "non_admin_groups",
-        "non_admin_apps",
+    connection = Mock()
+    connection.execute.side_effect = lambda query: calls.append(query)
+    monkeypatch.setattr(
+        transforms_module,
         "ensure_users_id_index",
-    ):
-        monkeypatch.setattr(
-            transforms_module,
-            name,
-            lambda connection, schema, name=name: calls.append(name),
-        )
+        lambda con, schema: calls.append((con, schema)),
+    )
 
-    transforms_module.transforms(object(), "tenant_schema")
+    transforms_module.transforms(connection, "tenant_schema")
 
-    assert calls == [
-        "ensure_users_id_index",
-        "principals_with_admin_roles",
-        "insert_principals_with_admin_roles",
-        "non_admin_users",
-        "non_admin_groups",
-        "non_admin_apps",
+    filenames = [
+        "10_principals_with_admin_roles.sql",
+        "20_insert_privileged_users.sql",
+        "21_insert_user_role_assignments.sql",
+        "22_insert_group_role_assignments.sql",
+        "23_insert_client_role_assignments.sql",
+        "30_deduplicate_admin_principals.sql",
+        "40_non_admin_users.sql",
+        "50_non_admin_groups.sql",
+        "60_non_admin_apps.sql",
     ]
+    assert calls == [(connection, "tenant_schema")] + [
+        (transforms_module.SQL_TRANSFORMS_PATH / name)
+        .read_text(encoding="utf-8")
+        .replace("__SCHEMA__", "tenant_schema")
+        for name in filenames
+    ]
+
+
+@pytest.mark.parametrize("filename", transforms_module.SQL_TRANSFORMS_FILES)
+def test_transforms_propagates_sql_errors(
+    monkeypatch: pytest.MonkeyPatch, filename: str
+) -> None:
+    """No SQL file, including a role-source insert, silently skips failures."""
+    error = duckdb.CatalogException("missing source table")
+    connection = Mock()
+    connection.execute.side_effect = error
+    monkeypatch.setattr(transforms_module, "ensure_users_id_index", Mock())
+    monkeypatch.setattr(transforms_module, "SQL_TRANSFORMS_FILES", (filename,))
+
+    with pytest.raises(duckdb.CatalogException) as raised:
+        transforms_module.transforms(connection)
+
+    assert raised.value is error
+    connection.execute.assert_called_once()
+
+
+def test_sql_transforms_succeed_with_fixtures() -> None:
+    """Load JSON fixtures and verify preprocessing completes without errors."""
+    with duckdb.connect(":memory:") as connection:
+        connection.execute("CREATE SCHEMA okta")
+        fixture_directory = Path(__file__).parent / "test_data" / "transforms"
+        fixtures = {
+            "users": "users.json",
+            "groups": "groups.json",
+            "applications": "applications.json",
+            "privileged_users": "privileged_users.json",
+            "user_role_assignments": "user_role_assignments.json",
+            "group_role_assignments": "group_role_assignments.json",
+            "client_role_assignments": "client_role_assignments.json",
+        }
+        for table, filename in fixtures.items():
+            connection.execute(
+                f"CREATE TABLE okta.{table} AS SELECT * FROM read_json(?)",
+                [str(fixture_directory / filename)],
+            )
+
+        transforms_module.transforms(connection)

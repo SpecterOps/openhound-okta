@@ -17,7 +17,7 @@ from requests import Request
 from requests.adapters import BaseAdapter
 
 from openhound_okta import main
-from openhound_okta.source import API_RATE_LIMIT_ENDPOINTS
+from openhound_okta.client import API_RATE_LIMIT_ENDPOINTS
 from openhound_okta.telemetry import (
     _LIMITER_GROUPS,
     LatencyDistribution,
@@ -158,7 +158,7 @@ max_parallel_items = 22
     try:
         run_context.reload(str(tmp_path))
         from openhound_okta.source import source
-        from openhound_okta.utils.auth import OktaTokenCredentials
+        from openhound_okta.auth import OktaTokenCredentials
 
         source_object = source(
             credentials=OktaTokenCredentials(
@@ -195,7 +195,7 @@ max_parallel_items = 22
     try:
         run_context.reload(str(tmp_path))
         from openhound_okta.source import source
-        from openhound_okta.utils.auth import OktaTokenCredentials
+        from openhound_okta.auth import OktaTokenCredentials
 
         source_object = source(
             credentials=OktaTokenCredentials(
@@ -238,7 +238,7 @@ org_concurrency = 12
     try:
         run_context.reload(str(tmp_path))
         from openhound_okta.source import source
-        from openhound_okta.utils.auth import OktaTokenCredentials
+        from openhound_okta.auth import OktaTokenCredentials
 
         source(
             credentials=OktaTokenCredentials(
@@ -274,7 +274,7 @@ limit_user_mfa_collection = true
     try:
         run_context.reload(str(tmp_path))
         from openhound_okta.source import source
-        from openhound_okta.utils.auth import OktaTokenCredentials
+        from openhound_okta.auth import OktaTokenCredentials
 
         source(
             credentials=OktaTokenCredentials(
